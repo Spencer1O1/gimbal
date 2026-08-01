@@ -1,0 +1,11 @@
+---
+description: Production kernel code returns errors — no expect/unwrap/panic
+globs: crates/kernel/**/*.rs
+alwaysApply: false
+---
+
+# No panic-as-control-flow in the kernel
+
+In production `crates/kernel` code (not `#[cfg(test)]`): do not use `expect`, `unwrap`, `panic!`, or `unreachable!` for conditions the API can reject. Return structured errors (`SignatureError`, `ObjectError`, `KernelFault`, etc.).
+
+Tests may use `expect`/`unwrap`. `debug_assert!` is fine. Allocator OOM remains outside this rule.
