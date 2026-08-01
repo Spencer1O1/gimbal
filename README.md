@@ -41,7 +41,8 @@ lake build
 
 - [Trusted base](docs/trusted-base.md)
 - [Module boundaries](docs/module-boundaries.md)
+- Decision discipline for agents: [`.cursor/rules/decision-discipline.mdc`](.cursor/rules/decision-discipline.mdc) (also summarized in the Phase 0 Implementation Plan)
 
 ## Next
 
-Immediate coding order after this scaffold: kernel modules starting at `id` (see Phase 0 Implementation Plan in Obsidian).
+Immediate coding order: `term` → `morphism` → `check` → `format` (see Phase 0 Implementation Plan in Obsidian).

@@ -13,6 +13,7 @@ This file lists what the repository currently trusts. Anything that enters a ver
 | Rust standard library for that toolchain | Used by kernel and CLI |
 | Lean 4 kernel `v4.32.2` (pinned in `lean/lean-toolchain`) | Will check metatheory and equality proofs when they exist |
 | Lake / Lean toolchain installer (elan) | Fetches and runs the pinned Lean |
+| [`sha2`](https://crates.io/crates/sha2) `0.10.x` | Computes `SignatureFingerprint` as SHA-256 of the canonical signature encoding |
 
 ## Kernel policy
 
@@ -26,7 +27,7 @@ These are expected to become trusted when Phase 0B/0C verification lands. They a
 - Aeneas (or replacement) translation / refinement tooling
 - Charon (or replacement) Rust front-end for verification
 - Any extracted or translated equality artifacts
-- External crates on verified equality paths (none yet; none allowed without listing here)
+- Other external crates on verified equality paths (none yet; none allowed without listing here)
 
 ## Runtime host
 
@@ -34,7 +35,8 @@ When a runtime model adapter exists, generator implementations are a trusted pro
 
 ## External dependencies
 
-The kernel currently has **no** external Rust crates. When fingerprinting, hashing, or other deps are added:
+| Crate | Version | Touches verified / identity-critical path? |
+| --- | --- | --- |
+| `sha2` | `0.10.x` (see `Cargo.lock`) | Yes — signature content fingerprints |
 
-- List each crate and version here if it touches a verified or equality-critical path.
-- Prefer keeping verified equality isolatable from optional runtime/CLI dependencies.
+Prefer keeping verified equality isolatable from optional runtime/CLI dependencies.

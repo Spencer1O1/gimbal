@@ -1,7 +1,8 @@
 //! Validated names for signature bases and generators.
 //!
-//! Phase 0 accepts a deliberately small ASCII identifier grammar. Source-language
-//! naming rules may widen later; the kernel keeps this subset until then.
+//! Phase 0 builder API grammar (provisional, not a forever Unicode policy):
+//! non-empty ASCII identifiers `[A-Za-z_][A-Za-z0-9_]*`.
+//! Surface-language naming may widen later; resolved kernel identity remains typed IDs.
 
 use std::fmt;
 

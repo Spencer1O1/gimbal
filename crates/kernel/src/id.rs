@@ -2,10 +2,7 @@
 //!
 //! [`BaseId`] and [`GeneratorId`] are dense indices assigned by the signature
 //! builder. [`SignatureContextId`] is an exact process-local context identity;
-//! [`SignatureFingerprint`] is a stable digest of canonical signature contents.
-//!
-//! The fingerprint encoding and hash algorithm remain open (see Obsidian Open
-//! Questions). This module only owns the opaque handle type.
+//! [`SignatureFingerprint`] is `SHA-256` of the canonical signature encoding.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,7 +13,6 @@ pub struct BaseId(u32);
 
 impl BaseId {
     /// Mint a dense base index. Signature construction owns allocation.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const fn new(raw: u32) -> Self {
         Self(raw)
     }
@@ -39,7 +35,6 @@ pub struct GeneratorId(u32);
 
 impl GeneratorId {
     /// Mint a dense generator index. Signature construction owns allocation.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const fn new(raw: u32) -> Self {
         Self(raw)
     }
@@ -65,7 +60,6 @@ pub struct SignatureContextId(u64);
 
 impl SignatureContextId {
     /// Allocate a fresh process-local context identity.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn fresh() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
@@ -83,34 +77,31 @@ impl fmt::Display for SignatureContextId {
     }
 }
 
-/// Canonical fingerprint of a signature's contents.
+/// SHA-256 digest of a signature's canonical encoding.
 ///
-/// Equality of fingerprints means identical canonical contents. It does not
-/// authorize mixing IR across [`SignatureContextId`]s.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct SignatureFingerprint {
-    bytes: Box<[u8]>,
-}
+/// Identical canonical contents imply equal fingerprints. Equal fingerprints
+/// imply identical contents only under the standard cryptographic assumption
+/// that SHA-256 collisions are infeasible. Fingerprint equality never authorizes
+/// mixing IR across [`SignatureContextId`]s.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignatureFingerprint([u8; 32]);
 
 impl SignatureFingerprint {
-    /// Wrap already-computed canonical digest bytes.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn new(bytes: impl Into<Box<[u8]>>) -> Self {
-        Self {
-            bytes: bytes.into(),
-        }
+    /// Wrap a SHA-256 digest.
+    pub(crate) const fn from_sha256(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 
-    /// Raw digest bytes in the chosen (future) canonical encoding.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
+    /// Raw 32-byte SHA-256 digest.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 
 impl fmt::Debug for SignatureFingerprint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SignatureFingerprint(0x")?;
-        for byte in self.bytes.iter() {
+        for byte in self.0 {
             write!(f, "{byte:02x}")?;
         }
         write!(f, ")")
@@ -119,7 +110,7 @@ impl fmt::Debug for SignatureFingerprint {
 
 impl fmt::Display for SignatureFingerprint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.bytes.iter() {
+        for byte in self.0 {
             write!(f, "{byte:02x}")?;
         }
         Ok(())
@@ -147,13 +138,21 @@ mod tests {
     }
 
     #[test]
-    fn fingerprints_compare_by_bytes() {
-        let left = SignatureFingerprint::new([0xabu8, 0xcd]);
-        let right = SignatureFingerprint::new([0xabu8, 0xcd]);
-        let other = SignatureFingerprint::new([0xabu8, 0xce]);
+    fn fingerprints_compare_by_digest_bytes() {
+        let mut left_bytes = [0u8; 32];
+        left_bytes[0] = 0xab;
+        left_bytes[1] = 0xcd;
+        let right_bytes = left_bytes;
+        let mut other_bytes = left_bytes;
+        other_bytes[1] = 0xce;
+
+        let left = SignatureFingerprint::from_sha256(left_bytes);
+        let right = SignatureFingerprint::from_sha256(right_bytes);
+        let other = SignatureFingerprint::from_sha256(other_bytes);
         assert_eq!(left, right);
         assert_ne!(left, other);
-        assert_eq!(left.to_string(), "abcd");
-        assert_eq!(format!("{left:?}"), "SignatureFingerprint(0xabcd)");
+        assert_eq!(left.as_bytes().len(), 32);
+        assert!(left.to_string().starts_with("abcd"));
+        assert!(format!("{left:?}").contains("SignatureFingerprint(0xabcd"));
     }
 }

@@ -7,3 +7,6 @@ description = "Phase 0 structural semantic kernel for Gimbal"
 
 [lints]
 workspace = true
+
+[dependencies]
+sha2 = "0.10"

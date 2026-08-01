@@ -1,0 +1,12 @@
+---
+description: Sticky decisions must be vault-locked, provisional, or asked — never code-only
+alwaysApply: true
+---
+
+# Decision discipline
+
+Design authority: Obsidian `Projects/Gimbal/`. Repo `docs/` = implementation notes only.
+
+**Sticky** = identity/encodings/digests, public API contracts, trust/deps, error taxonomy, or anything painful to change once fixtures/CI/refinement depend on it.
+
+For sticky choices: follow a vault lock, **lock it now** (update vault ± `docs/trusted-base.md`), mark **provisional** in the vault, or **ask**. No “TBD” only in code.

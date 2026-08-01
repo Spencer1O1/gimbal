@@ -6,6 +6,9 @@
 
 use std::fmt;
 
+use crate::id::{BaseId, SignatureContextId};
+use crate::name::Name;
+
 /// Why a candidate identifier was rejected as a [`crate::name::Name`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvalidNameReason {
@@ -63,6 +66,91 @@ impl fmt::Display for InvalidName {
 
 impl std::error::Error for InvalidName {}
 
+/// Failure while building or querying a signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignatureError {
+    /// A supplied identifier failed name validation.
+    InvalidName(InvalidName),
+    /// A base name was declared more than once.
+    DuplicateBase(Name),
+    /// A generator name was declared more than once.
+    DuplicateGenerator(Name),
+    /// A generator object expression referred to an unknown base name.
+    UndeclaredBase {
+        /// Generator being declared when the unknown base was found.
+        generator: Name,
+        /// Missing base name.
+        base: Name,
+    },
+    /// More than `u32::MAX` bases were declared.
+    TooManyBases,
+    /// More than `u32::MAX` generators were declared.
+    TooManyGenerators,
+    /// A typed base id is outside this signature.
+    InvalidBaseId(BaseId),
+    /// A typed generator id is outside this signature.
+    InvalidGeneratorId(crate::id::GeneratorId),
+}
+
+impl fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidName(err) => write!(f, "{err}"),
+            Self::DuplicateBase(name) => write!(f, "duplicate base name `{name}`"),
+            Self::DuplicateGenerator(name) => write!(f, "duplicate generator name `{name}`"),
+            Self::UndeclaredBase { generator, base } => write!(
+                f,
+                "generator `{generator}` refers to undeclared base `{base}`"
+            ),
+            Self::TooManyBases => write!(f, "too many bases (exceeds u32::MAX)"),
+            Self::TooManyGenerators => write!(f, "too many generators (exceeds u32::MAX)"),
+            Self::InvalidBaseId(id) => write!(f, "invalid base id {id}"),
+            Self::InvalidGeneratorId(id) => write!(f, "invalid generator id {id}"),
+        }
+    }
+}
+
+impl std::error::Error for SignatureError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidName(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<InvalidName> for SignatureError {
+    fn from(value: InvalidName) -> Self {
+        Self::InvalidName(value)
+    }
+}
+
+/// Failure while constructing resolved objects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectError {
+    /// An operand belongs to a different signature context.
+    SignatureMismatch {
+        expected: SignatureContextId,
+        actual: SignatureContextId,
+    },
+    /// A base id is not declared in the target signature.
+    InvalidBaseId(BaseId),
+}
+
+impl fmt::Display for ObjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SignatureMismatch { expected, actual } => write!(
+                f,
+                "object signature mismatch: expected {expected}, found {actual}"
+            ),
+            Self::InvalidBaseId(id) => write!(f, "invalid base id {id}"),
+        }
+    }
+}
+
+impl std::error::Error for ObjectError {}
+
 /// Internal kernel inconsistency.
 ///
 /// This is not a user typing or construction error. Ordinary API failures
@@ -115,5 +203,11 @@ mod tests {
             fault.to_string(),
             "kernel fault: object missing signature context"
         );
+    }
+
+    #[test]
+    fn signature_error_from_invalid_name() {
+        let err = SignatureError::from(InvalidName::new("", InvalidNameReason::Empty));
+        assert!(matches!(err, SignatureError::InvalidName(_)));
     }
 }
