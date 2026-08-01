@@ -1,10 +1,11 @@
 //! Phase 0 structural semantic kernel.
 //!
-//! Immediate coding order continues with `format`, then simplification and
-//! equality work.
+//! Next milestone track: Lean core syntax (Milestone 4). Rust simplifier /
+//! equality follow later milestones.
 
 mod check;
 mod error;
+mod format;
 mod id;
 mod morphism;
 mod name;
@@ -15,7 +16,11 @@ mod term;
 
 pub use check::check;
 pub use error::{
-    CheckError, InvalidName, InvalidNameReason, KernelFault, ObjectError, SignatureError, TermError,
+    CheckError, FormatError, InvalidName, InvalidNameReason, KernelFault, ObjectError,
+    SignatureError, TermError,
+};
+pub use format::{
+    format_arrow, format_morphism, format_object, format_term, format_typed_morphism,
 };
 pub use id::{BaseId, GeneratorId, SignatureContextId, SignatureFingerprint};
 pub use morphism::{Morphism, MorphismKind};

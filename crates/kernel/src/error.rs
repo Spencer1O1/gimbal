@@ -190,6 +190,38 @@ impl TermError {
     }
 }
 
+/// Failure while formatting kernel IR under a signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatError {
+    /// The value belongs to a different signature context.
+    SignatureMismatch {
+        expected: SignatureContextId,
+        actual: SignatureContextId,
+    },
+    /// A base id is not declared in the formatting signature.
+    InvalidBaseId(BaseId),
+    /// A generator id is not declared in the formatting signature.
+    InvalidGeneratorId(GeneratorId),
+    /// A checked morphism’s stored objects do not match its node shape.
+    IllFormedMorphism(&'static str),
+}
+
+impl fmt::Display for FormatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SignatureMismatch { expected, actual } => write!(
+                f,
+                "format signature mismatch: expected {expected}, found {actual}"
+            ),
+            Self::InvalidBaseId(id) => write!(f, "invalid base id {id}"),
+            Self::InvalidGeneratorId(id) => write!(f, "invalid generator id {id}"),
+            Self::IllFormedMorphism(msg) => write!(f, "ill-formed morphism for formatting: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for FormatError {}
+
 /// Failure while checking a [`crate::Term`] into a [`crate::Morphism`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {

@@ -45,4 +45,4 @@ lake build
 
 ## Next
 
-Immediate coding order: `format`, then simplifier / equality work (see Phase 0 Implementation Plan in Obsidian).
+Next: Lean core syntax (Milestone 4). See Phase 0 Implementation Plan in Obsidian.
