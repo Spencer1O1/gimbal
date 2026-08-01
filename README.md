@@ -45,4 +45,4 @@ lake build
 
 ## Next
 
-Immediate coding order: `term` → `morphism` → `check` → `format` (see Phase 0 Implementation Plan in Obsidian).
+Immediate coding order: `format`, then simplifier / equality work (see Phase 0 Implementation Plan in Obsidian).

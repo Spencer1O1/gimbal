@@ -6,8 +6,9 @@
 
 use std::fmt;
 
-use crate::id::{BaseId, SignatureContextId};
+use crate::id::{BaseId, GeneratorId, SignatureContextId};
 use crate::name::Name;
+use crate::object::Object;
 
 /// Why a candidate identifier was rejected as a [`crate::name::Name`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +95,7 @@ pub enum SignatureError {
     /// A typed base id is outside this signature.
     InvalidBaseId(BaseId),
     /// A typed generator id is outside this signature.
-    InvalidGeneratorId(crate::id::GeneratorId),
+    InvalidGeneratorId(GeneratorId),
 }
 
 impl fmt::Display for SignatureError {
@@ -138,8 +139,6 @@ pub enum ObjectError {
         expected: SignatureContextId,
         actual: SignatureContextId,
     },
-    /// A base id is not declared in the target signature.
-    InvalidBaseId(BaseId),
 }
 
 impl fmt::Display for ObjectError {
@@ -149,12 +148,124 @@ impl fmt::Display for ObjectError {
                 f,
                 "object signature mismatch: expected {expected}, found {actual}"
             ),
-            Self::InvalidBaseId(id) => write!(f, "invalid base id {id}"),
         }
     }
 }
 
 impl std::error::Error for ObjectError {}
+
+/// Failure while constructing a structurally valid [`crate::Term`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TermError {
+    /// An operand belongs to a different signature context.
+    SignatureMismatch {
+        expected: SignatureContextId,
+        actual: SignatureContextId,
+    },
+    /// A generator id is not declared in the target signature.
+    InvalidGeneratorId(GeneratorId),
+}
+
+impl fmt::Display for TermError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SignatureMismatch { expected, actual } => write!(
+                f,
+                "term signature mismatch: expected {expected}, found {actual}"
+            ),
+            Self::InvalidGeneratorId(id) => write!(f, "invalid generator id {id}"),
+        }
+    }
+}
+
+impl std::error::Error for TermError {}
+
+impl TermError {
+    pub(crate) fn from_object_error(err: ObjectError) -> Self {
+        match err {
+            ObjectError::SignatureMismatch { expected, actual } => {
+                Self::SignatureMismatch { expected, actual }
+            }
+        }
+    }
+}
+
+/// Failure while checking a [`crate::Term`] into a [`crate::Morphism`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckError {
+    /// The term belongs to a different signature context than the checker signature.
+    SignatureMismatch {
+        expected: SignatureContextId,
+        actual: SignatureContextId,
+    },
+    /// Composition middle objects are not structurally equal.
+    ComposeMismatch {
+        left_target: Object,
+        right_source: Object,
+    },
+    /// Pairing components have different sources.
+    PairSourceMismatch {
+        left_source: Object,
+        right_source: Object,
+    },
+    /// Case branches have different targets.
+    CaseTargetMismatch {
+        left_target: Object,
+        right_target: Object,
+    },
+    /// Curry was applied to a morphism whose source is not a product.
+    CurrySourceNotProduct { source: Object },
+    /// A generator id is not declared (should be unreachable for well-formed terms).
+    InvalidGeneratorId(GeneratorId),
+    /// Trusted morphism construction broke an invariant.
+    Kernel(KernelFault),
+}
+
+impl fmt::Display for CheckError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SignatureMismatch { expected, actual } => write!(
+                f,
+                "check signature mismatch: expected {expected}, found {actual}"
+            ),
+            Self::ComposeMismatch {
+                left_target,
+                right_source,
+            } => write!(
+                f,
+                "composition mismatch: left target {left_target:?} ≠ right source {right_source:?}"
+            ),
+            Self::PairSourceMismatch {
+                left_source,
+                right_source,
+            } => write!(
+                f,
+                "pair source mismatch: {left_source:?} ≠ {right_source:?}"
+            ),
+            Self::CaseTargetMismatch {
+                left_target,
+                right_target,
+            } => write!(
+                f,
+                "case target mismatch: {left_target:?} ≠ {right_target:?}"
+            ),
+            Self::CurrySourceNotProduct { source } => {
+                write!(f, "curry source is not a product: {source:?}")
+            }
+            Self::InvalidGeneratorId(id) => write!(f, "invalid generator id {id}"),
+            Self::Kernel(fault) => write!(f, "{fault}"),
+        }
+    }
+}
+
+impl std::error::Error for CheckError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Kernel(fault) => Some(fault),
+            _ => None,
+        }
+    }
+}
 
 /// Internal kernel inconsistency.
 ///
@@ -168,9 +279,6 @@ pub struct KernelFault {
 
 impl KernelFault {
     /// Construct a fault for a broken kernel invariant.
-    ///
-    /// Not yet emitted by production paths; retained for trusted constructors.
-    #[allow(dead_code)]
     pub(crate) const fn new(message: &'static str) -> Self {
         Self { message }
     }
