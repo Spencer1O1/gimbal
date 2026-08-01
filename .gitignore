@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Lean / Lake
+lean/.lake/
+lean/lake-manifest.json
+**/*.olean
+**/*.ilean
+**/*.trace
+**/*.c
+**/*.o
+**/*.olean.hash
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Misc
+*.log
+.env
+.env.*

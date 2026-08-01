@@ -1,0 +1,9 @@
+[package]
+name = "gimbal_kernel"
+version = "0.0.0"
+edition.workspace = true
+repository.workspace = true
+description = "Phase 0 structural semantic kernel for Gimbal"
+
+[lints]
+workspace = true

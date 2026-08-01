@@ -1,0 +1,16 @@
+[package]
+name = "gimbal_cli"
+version = "0.0.0"
+edition.workspace = true
+repository.workspace = true
+description = "Thin CLI dependency smoke test over the Gimbal kernel"
+
+[[bin]]
+name = "gimbal"
+path = "src/main.rs"
+
+[dependencies]
+gimbal_kernel = { path = "../kernel" }
+
+[lints]
+workspace = true

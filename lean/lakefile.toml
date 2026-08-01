@@ -1,0 +1,6 @@
+name = "Gimbal"
+version = "0.0.0"
+defaultTargets = ["Gimbal"]
+
+[[lean_lib]]
+name = "Gimbal"

@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kernel",
+    "crates/cli",
+]
+
+[workspace.package]
+edition = "2024"
+repository = "https://github.com/Spencer1O1/gimbal"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+correctness = "deny"
+suspicious = "warn"
+complexity = "warn"
+perf = "warn"
+style = "warn"
