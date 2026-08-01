@@ -1,7 +1,8 @@
 //! Validated names for signature bases and generators.
 //!
 //! Phase 0 builder API grammar (provisional, not a forever Unicode policy):
-//! non-empty ASCII identifiers `[A-Za-z_][A-Za-z0-9_]*`.
+//! non-empty ASCII identifiers `[A-Za-z_][A-Za-z0-9_]*` whose byte length fits
+//! in `u32` (canonical signature encoding limit).
 //! Surface-language naming may widen later; resolved kernel identity remains typed IDs.
 
 use std::fmt;
@@ -16,7 +17,7 @@ impl Name {
     /// Validate and wrap `text` as a [`Name`].
     ///
     /// Accepted form: non-empty ASCII identifier
-    /// `[A-Za-z_][A-Za-z0-9_]*`.
+    /// `[A-Za-z_][A-Za-z0-9_]*` with byte length at most `u32::MAX`.
     pub fn new(text: impl AsRef<str>) -> Result<Self, InvalidName> {
         let text = text.as_ref();
         validate(text)?;
@@ -26,6 +27,15 @@ impl Name {
     /// Borrow the underlying text.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Byte length as `u32` for canonical encoding.
+    ///
+    /// [`Name::new`] rejects inputs longer than `u32::MAX`.
+    pub(crate) fn len_u32(&self) -> u32 {
+        debug_assert!(self.0.len() <= u32::MAX as usize);
+        // Truncation is impossible: validate rejected longer inputs.
+        self.0.len() as u32
     }
 }
 
@@ -59,6 +69,10 @@ impl TryFrom<String> for Name {
 }
 
 fn validate(text: &str) -> Result<(), InvalidName> {
+    if text.len() > u32::MAX as usize {
+        return Err(InvalidName::new(text, InvalidNameReason::TooLong));
+    }
+
     let mut chars = text.char_indices();
     let Some((start_index, start)) = chars.next() else {
         return Err(InvalidName::new(text, InvalidNameReason::Empty));

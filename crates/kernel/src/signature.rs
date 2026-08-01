@@ -139,7 +139,7 @@ impl SignatureBuilder {
     /// Freeze the builder into an immutable signature.
     pub fn build(self) -> Result<Signature, SignatureError> {
         let context = SignatureContextId::fresh();
-        let encoding = encode_canonical_signature(&self.bases, &self.generators, &self.base_ids);
+        let encoding = encode_canonical_signature(&self.bases, &self.generators, &self.base_ids)?;
         let digest = Sha256::digest(&encoding);
         let fingerprint = SignatureFingerprint::from_sha256(digest.into());
 
@@ -349,30 +349,35 @@ fn encode_canonical_signature(
     bases: &[Name],
     generators: &[PendingGenerator],
     base_ids: &HashMap<Name, BaseId>,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, SignatureError> {
     let mut out = Vec::new();
     out.extend_from_slice(ENCODING_MAGIC);
     write_u32(&mut out, ENCODING_VERSION);
     write_u32(
         &mut out,
-        u32::try_from(bases.len()).expect("add_base enforces u32 bound"),
+        u32::try_from(bases.len()).map_err(|_| SignatureError::TooManyBases)?,
     );
     for name in bases {
         write_name(&mut out, name);
     }
     write_u32(
         &mut out,
-        u32::try_from(generators.len()).expect("add_generator enforces u32 bound"),
+        u32::try_from(generators.len()).map_err(|_| SignatureError::TooManyGenerators)?,
     );
     for generator in generators {
         write_name(&mut out, &generator.name);
-        encode_object_expr(&mut out, &generator.source, base_ids);
-        encode_object_expr(&mut out, &generator.target, base_ids);
+        encode_object_expr(&mut out, &generator.source, base_ids, &generator.name)?;
+        encode_object_expr(&mut out, &generator.target, base_ids, &generator.name)?;
     }
-    out
+    Ok(out)
 }
 
-fn encode_object_expr(out: &mut Vec<u8>, expr: &ObjectExpr, base_ids: &HashMap<Name, BaseId>) {
+fn encode_object_expr(
+    out: &mut Vec<u8>,
+    expr: &ObjectExpr,
+    base_ids: &HashMap<Name, BaseId>,
+    generator: &Name,
+) -> Result<(), SignatureError> {
     match expr {
         ObjectExpr::Unit => out.push(0),
         ObjectExpr::Never => out.push(1),
@@ -380,30 +385,34 @@ fn encode_object_expr(out: &mut Vec<u8>, expr: &ObjectExpr, base_ids: &HashMap<N
             out.push(2);
             let id = base_ids
                 .get(name)
-                .expect("fingerprint encoding runs after base validation");
+                .ok_or_else(|| SignatureError::UndeclaredBase {
+                    generator: generator.clone(),
+                    base: name.clone(),
+                })?;
             write_u32(out, id.as_u32());
         }
         ObjectExpr::Product(left, right) => {
             out.push(3);
-            encode_object_expr(out, left, base_ids);
-            encode_object_expr(out, right, base_ids);
+            encode_object_expr(out, left, base_ids, generator)?;
+            encode_object_expr(out, right, base_ids, generator)?;
         }
         ObjectExpr::Coproduct(left, right) => {
             out.push(4);
-            encode_object_expr(out, left, base_ids);
-            encode_object_expr(out, right, base_ids);
+            encode_object_expr(out, left, base_ids, generator)?;
+            encode_object_expr(out, right, base_ids, generator)?;
         }
         ObjectExpr::Exponential(domain, codomain) => {
             out.push(5);
-            encode_object_expr(out, domain, base_ids);
-            encode_object_expr(out, codomain, base_ids);
+            encode_object_expr(out, domain, base_ids, generator)?;
+            encode_object_expr(out, codomain, base_ids, generator)?;
         }
     }
+    Ok(())
 }
 
 fn write_name(out: &mut Vec<u8>, name: &Name) {
     let bytes = name.as_str().as_bytes();
-    write_u32(out, u32::try_from(bytes.len()).expect("name fits u32"));
+    write_u32(out, name.len_u32());
     out.extend_from_slice(bytes);
 }
 
@@ -538,7 +547,7 @@ mod tests {
 
     #[test]
     fn canonical_encoding_starts_with_magic_and_version() {
-        let encoding = encode_canonical_signature(&[], &[], &HashMap::new());
+        let encoding = encode_canonical_signature(&[], &[], &HashMap::new()).expect("empty");
         assert!(encoding.starts_with(ENCODING_MAGIC));
         assert_eq!(
             &encoding[ENCODING_MAGIC.len()..ENCODING_MAGIC.len() + 4],

@@ -18,6 +18,8 @@ pub enum InvalidNameReason {
     InvalidStart(char),
     /// A later character is not an ASCII letter, digit, or underscore.
     InvalidChar { position: usize, ch: char },
+    /// Byte length does not fit in `u32` (canonical encoding limit).
+    TooLong,
 }
 
 /// A string failed Phase 0 name validation.
@@ -60,6 +62,9 @@ impl fmt::Display for InvalidName {
                 "name {:?} has invalid character {ch:?} at byte index {position}",
                 self.input
             ),
+            InvalidNameReason::TooLong => {
+                write!(f, "name length {} exceeds u32::MAX", self.input.len())
+            }
         }
     }
 }
