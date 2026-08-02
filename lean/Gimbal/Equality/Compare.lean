@@ -70,15 +70,17 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     -- be retrievable. Root starts with empty old; recursive phases promote.
     if !checkOldInvariant Γ.oldPrefix goal then .invariantFailure
     else
-      let (entries, σ) := pairObs Γ goal t u
-      match applyPairObs fuel σ Γ.hyps entries t,
-            applyPairObs fuel σ Γ.hyps entries u with
-      | .exhausted, _ | _, .exhausted => .exhausted .saturate
-      | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
-      | .ok t', .ok u' =>
-          compareInvRec fuel Γ.hyps goal
-            (canonicalize (fuel := fuel) t')
-            (canonicalize (fuel := fuel) u')
+      match pairObs Γ goal t u with
+      | .invariantFailure => .invariantFailure
+      | .ok entries σ =>
+        match applyPairObs fuel σ Γ.hyps entries t,
+              applyPairObs fuel σ Γ.hyps entries u with
+        | .exhausted, _ | _, .exhausted => .exhausted .saturate
+        | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+        | .ok t', .ok u' =>
+            compareInvRec fuel Γ.hyps goal
+              (canonicalize (fuel := fuel) t')
+              (canonicalize (fuel := fuel) u')
 
 /-- Lockstep invertible comparison with re-entry under new binders. -/
 def compareInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))

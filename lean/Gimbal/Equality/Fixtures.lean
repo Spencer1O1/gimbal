@@ -633,8 +633,9 @@ def redundantObsDedup : Bool :=
   let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
   let σ := runReachability Γ goal
   let sched := buildSchedule σ
-  let (entries, _) := pairObs (sig := Sig3) Γ goal cont cont
-  entries.size == sched.size && sched.size == 2
+  match pairObs (sig := Sig3) Γ goal cont cont with
+  | .ok entries _ => entries.size == sched.size && sched.size == 2
+  | .invariantFailure => false
 
 example : redundantObsDedup = true := by native_decide
 
@@ -691,5 +692,69 @@ def hofExpId : CandidateResult :=
     (.generator ⟨0, by decide⟩) (.generator ⟨0, by decide⟩)
 
 example : hofExpId = CandidateResult.equal := by native_decide
+
+/-! ### M8 Slice 2: exact identity + newness -/
+
+/-- Two distinct exact neutrals of the same positive type are both retained. -/
+def twoExactHyps : Array (Object 2) := #[
+  .exp (.base 0) (.base 1),
+  .exp (.base 0) (.base 1),
+  .base 0
+]
+
+def twoExactSameTyRetained : Bool :=
+  let tm : Tm (Ctx.ofHyps (sig := Sig2) twoExactHyps)
+      (.prod (.base 1) (.base 1)) :=
+    .pair
+      (.app (.var (.there (.there .here))) (.var .here))
+      (.app (.var (.there .here)) (.var .here))
+  match focus! tm with
+  | some t =>
+    let ys := (collectExact (sig := Sig2) t).filter (fun e => e.1 == .base 1)
+    ys.size == 2 &&
+      (match ys[0]?, ys[1]? with
+      | some e0, some e1 => NegNeu.toRaw e0.2 != NegNeu.toRaw e1.2
+      | _, _ => false)
+  | none => false
+
+example : twoExactSameTyRetained = true := by native_decide
+
+/-- Pair schedule keeps both same-type exacts (not collapsed by type). -/
+def twoExactBothScheduled : Bool :=
+  let Γ : ReachCtx 2 := ⟨twoExactHyps, 2⟩
+  let tm : Tm (Ctx.ofHyps (sig := Sig2) twoExactHyps)
+      (.prod (.base 1) (.base 1)) :=
+    .pair
+      (.app (.var (.there (.there .here))) (.var .here))
+      (.app (.var (.there .here)) (.var .here))
+  match focus! tm with
+  | some t =>
+    match pairObs (sig := Sig2) Γ (.unit : Object 2) t t with
+    | .ok entries _ =>
+      let nExact :=
+        entries.foldl (init := 0) fun n e =>
+          match e with
+          | .exact .. => n + 1
+          | .consistency .. => n
+      nExact == 2
+    | .invariantFailure => false
+  | none => false
+
+example : twoExactBothScheduled = true := by native_decide
+
+/-- Old-only exact observation is an invariant failure. -/
+def oldOnlyExactInvariantFailure : Bool :=
+  let hyps : Array (Object 1) := #[.exp (.unit : Object 1) (.base 0)]
+  let Γ : ReachCtx 1 := ⟨hyps, 1⟩
+  let tm : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) :=
+    .app (.var .here) .unit
+  match focus! tm with
+  | some t =>
+    match pairObs (sig := Sig1) Γ (.base 0) t t with
+    | .invariantFailure => true
+    | .ok .. => false
+  | none => false
+
+example : oldOnlyExactInvariantFailure = true := by native_decide
 
 end Gimbal.Equality.Fixtures

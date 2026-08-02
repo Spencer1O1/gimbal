@@ -295,7 +295,13 @@ private inductive ExactCmd (sig : Signature) (Γ : Ctx sig) where
   | inv {A : Object sig.nBases} : InvTm Γ A → ExactCmd sig Γ
   | foc {A : Object sig.nBases} : FocTm Γ A → ExactCmd sig Γ
 
-/-- Collect exact positive-typed negative neutrals at the current context. -/
+/-- Exact identity: same result type and raw neutral spine. -/
+def exactIdEq {Γ : Ctx sig}
+    (e₁ e₂ : (P : Object sig.nBases) × NegNeu Γ P) : Bool :=
+  e₁.1 == e₂.1 && NegNeu.toRaw e₁.2 == NegNeu.toRaw e₂.2
+
+/-- Collect exact positive-typed negative neutrals at the current context.
+Deduplicates by neutral identity, not by result type alone. -/
 def exactGo (fuel : Nat) {Γ : Ctx sig} :
     ExactCmd sig Γ → Array ((P : Object sig.nBases) × NegNeu Γ P) →
     Array ((P : Object sig.nBases) × NegNeu Γ P)
@@ -307,7 +313,8 @@ def exactGo (fuel : Nat) {Γ : Ctx sig} :
       | .neu (A := A) n =>
         let acc :=
           if objectPolarity A == .pos then
-            if acc.any (fun e => e.1 == A) then acc else acc.push ⟨A, n⟩
+            let e : (P : Object sig.nBases) × NegNeu Γ P := ⟨A, n⟩
+            if acc.any (exactIdEq e) then acc else acc.push e
           else acc
         match n with
         | .var _ => acc
@@ -332,76 +339,152 @@ def collectExact {Γ : Ctx sig} {A : Object sig.nBases}
     (t : InvTm Γ A) : Array ((P : Object sig.nBases) × NegNeu Γ P) :=
   exactGo 4096 (.inv t) #[]
 
+/-! ### Exact newness (current-phase observations must use Γnew) -/
+
+/-- Hypothesis array index for a de Bruijn-from-end raw index. -/
+def rawIdxToHypIdx (hypsSize rawIdx : Nat) : Option Nat :=
+  if rawIdx < hypsSize then some (hypsSize - 1 - rawIdx) else none
+
+/-- Variable mentions at least one hypothesis in the new fragment. -/
+def varMentionsNew (hypsSize newFrom : Nat) (rawIdx : Nat) : Bool :=
+  match rawIdxToHypIdx hypsSize rawIdx with
+  | some i => decide (newFrom ≤ i)
+  | none => false
+
+mutual
+/-- Whether a negative neutral depends on at least one new hypothesis. -/
+def NegNeu.mentionsNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
+    {A : Object sig.nBases} : NegNeu Γ A → Bool
+  | .var x => varMentionsNew hypsSize newFrom x.toRawIdx
+  | .app n t =>
+      NegNeu.mentionsNew hypsSize newFrom n ||
+        InvTm.mentionsNew hypsSize newFrom t
+  | .fst n => NegNeu.mentionsNew hypsSize newFrom n
+  | .snd n => NegNeu.mentionsNew hypsSize newFrom n
+
+def InvTm.mentionsNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
+    {A : Object sig.nBases} : InvTm Γ A → Bool
+  | .unit => false
+  | .pair t u =>
+      InvTm.mentionsNew hypsSize newFrom t || InvTm.mentionsNew hypsSize newFrom u
+  | .lam t => InvTm.mentionsNew (hypsSize + 1) newFrom t
+  | .case n t u =>
+      NegNeu.mentionsNew hypsSize newFrom n ||
+        InvTm.mentionsNew (hypsSize + 1) newFrom t ||
+        InvTm.mentionsNew (hypsSize + 1) newFrom u
+  | .abort n => NegNeu.mentionsNew hypsSize newFrom n
+  | .foc f => FocTm.mentionsNew hypsSize newFrom f
+
+def FocTm.mentionsNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
+    {A : Object sig.nBases} : FocTm Γ A → Bool
+  | .pos (.done p) => PosNeu.mentionsNew hypsSize newFrom p
+  | .neg (.done n) => NegNeu.mentionsNew hypsSize newFrom n
+  | .letPos n t =>
+      NegNeu.mentionsNew hypsSize newFrom n ||
+        InvTm.mentionsNew (hypsSize + 1) newFrom t
+  | .sat (.mk _ t) => InvTm.mentionsNew hypsSize newFrom t
+
+def PosNeu.mentionsNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
+    {A : Object sig.nBases} : PosNeu Γ A → Bool
+  | .neu n => NegNeu.mentionsNew hypsSize newFrom n
+  | .inl p => PosNeu.mentionsNew hypsSize newFrom p
+  | .inr p => PosNeu.mentionsNew hypsSize newFrom p
+end
+
+/-- Every selected exact observation in this phase must mention `Γnew`. -/
+def exactsAllUseNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
+    (exact : Array ((P : Object sig.nBases) × NegNeu Γ P)) : Bool :=
+  exact.all fun e => NegNeu.mentionsNew hypsSize newFrom e.2
+
 /--
-Union consistency witnesses with exact term-demanded neutrals.
-Exact neutrals win over consistency for the same type (first exact wins).
-Ordered by subformula-table index.
+Exact neutrals that still need observation: positive, not yet retrievable / hyp,
+deduped by identity.
 -/
-def mergePairObs (σ : ReachState sig.nBases)
+def selectExactObs (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
-    (consistency : Schedule sig.nBases)
     (exact : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
-    Array (PairEntry sig hyps) :=
+    Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) :=
   Id.run do
-    let mut byTy : Array (Object sig.nBases) := #[]
-    let mut exactSrc :
+    let mut out :
         Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
-    let mut witSrc : Array (Object sig.nBases × Witness) := #[]
-    -- Exact first (left∪right already ordered by caller).
     for e in exact do
-      if objectPolarity e.1 == .pos && !byTy.contains e.1 then
-        -- Skip if already retrievable (no observation needed).
+      if objectPolarity e.1 == .pos && !out.any (exactIdEq e) then
         let retr :=
           match σ.findTypeIdx e.1 with
           | some i => (σ.getCell i).retrievable
           | none => false
         let isHyp := (findHypVar hyps e.1).isSome
         if !retr && !isHyp then
-          byTy := byTy.push e.1
-          exactSrc := exactSrc.push e
-    -- Consistency fills remaining pending types.
+          out := out.push e
+    pure out
+
+/--
+Union consistency witnesses with exact term-demanded neutrals.
+
+- Exact: keep every distinct neutral identity (same type allowed more than once).
+- Consistency: at least one witness per pending positive type with no exact yet.
+- Ordered by subformula-table index; exacts of a type precede consistency for it.
+-/
+def mergePairObs (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases))
+    (consistency : Schedule sig.nBases)
+    (exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
+    Array (PairEntry sig hyps) :=
+  Id.run do
+    let mut witSrc : Array (Object sig.nBases × Witness) := #[]
+    let hasExactTy (A : Object sig.nBases) : Bool :=
+      exactSrc.any (fun e => e.1 == A)
     for e in consistency.entries do
-      if !byTy.contains e.1 then
-        byTy := byTy.push e.1
+      if !hasExactTy e.1 && !witSrc.any (fun w => w.1 == e.1) then
         witSrc := witSrc.push e
-    -- Order by subformula table.
     let mut out : Array (PairEntry sig hyps) := #[]
+    let mut emittedExact :
+        Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
+    let mut emittedWit : Array (Object sig.nBases) := #[]
     for i in [:σ.types.size] do
       match σ.typeAt i with
       | some A =>
-        match exactSrc.findIdx? (fun e => e.1 == A) with
-        | some j =>
-          match exactSrc[j]? with
-          | some ⟨P, n⟩ => out := out.push (.exact P n)
-          | none => pure ()
-        | none =>
-          match witSrc.findIdx? (fun e => e.1 == A) with
+        for e in exactSrc do
+          if e.1 == A && !emittedExact.any (exactIdEq e) then
+            out := out.push (.exact e.1 e.2)
+            emittedExact := emittedExact.push e
+        if !hasExactTy A then
+          match witSrc.findIdx? (fun w => w.1 == A) with
           | some j =>
             match witSrc[j]? with
-            | some (P, w) => out := out.push (.consistency P w)
+            | some (P, w) =>
+              out := out.push (.consistency P w)
+              emittedWit := emittedWit.push A
             | none => pure ()
           | none => pure ()
       | none => pure ()
     for e in exactSrc do
-      if !out.any (fun o => o.ty == e.1) then
+      if !emittedExact.any (exactIdEq e) then
         out := out.push (.exact e.1 e.2)
     for e in witSrc do
-      if !out.any (fun o => o.ty == e.1) then
+      if !emittedWit.contains e.1 && !hasExactTy e.1 then
         out := out.push (.consistency e.1 e.2)
     pure out
 
+/-- Outcome of building the shared pair observation list. -/
+inductive PairObsResult (sig : Signature) (hyps : Array (Object sig.nBases)) where
+  | ok : Array (PairEntry sig hyps) → ReachState sig.nBases → PairObsResult sig hyps
+  | invariantFailure
+
 /--
 Build the shared pair-directed observation list: consistency ∪ exact demands
-from both terms (left exact before right; first wins per type).
+from both terms. Old-only exact neutrals selected for observation are an
+invariant failure.
 -/
 def pairObs (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     {A : Object sig.nBases}
-    (t u : InvTm (Ctx.ofHyps Γ.hyps) A) :
-    Array (PairEntry sig Γ.hyps) × ReachState sig.nBases :=
+    (t u : InvTm (Ctx.ofHyps Γ.hyps) A) : PairObsResult sig Γ.hyps :=
   let σ := runReachability Γ goal
-  let exact := collectExact t ++ collectExact u
-  let entries := mergePairObs σ Γ.hyps (buildSchedule σ) exact
-  (entries, σ)
+  let exactSel := selectExactObs σ Γ.hyps (collectExact t ++ collectExact u)
+  if !exactsAllUseNew Γ.hyps.size Γ.newFrom exactSel then
+    .invariantFailure
+  else
+    .ok (mergePairObs σ Γ.hyps (buildSchedule σ) exactSel) σ
 
 /--
 Union consistency witnesses with term-demanded positive types.
