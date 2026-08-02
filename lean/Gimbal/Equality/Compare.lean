@@ -159,12 +159,24 @@ def compareInv {A : Object sig.nBases}
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) (fuel : Nat := 2048) : CandidateResult :=
   compareSatRec fuel Γ goal t u
 
-/-- Compare two focused terms under an arbitrary snoc context. -/
+/-- Compare two focused terms under an arbitrary snoc context (all hyps new). -/
 def compareUnder {A : Object sig.nBases}
     (Γ : Ctx sig) (goal : Object sig.nBases)
     (t u : InvTm Γ A) (fuel : Nat := 2048) : CandidateResult :=
   let r := Γ.toReachCtx
   have hctx : Ctx.ofHyps r.hyps = Γ := Ctx.ofHyps_toReachCtx Γ
+  compareSatRec fuel r goal
+    (InvTm.castCtx hctx.symm t)
+    (InvTm.castCtx hctx.symm u)
+
+/--
+Compare focused terms under `Γgen , x : X` with generators old and `x` new.
+-/
+def compareUnderMorphism {X A : Object sig.nBases}
+    (goal : Object sig.nBases)
+    (t u : InvTm (translateCtx X) A) (fuel : Nat := 2048) : CandidateResult :=
+  let r := morphismReachCtx (sig := sig) X
+  have hctx : Ctx.ofHyps r.hyps = translateCtx X := morphismReachCtx_ofHyps X
   compareSatRec fuel r goal
     (InvTm.castCtx hctx.symm t)
     (InvTm.castCtx hctx.symm u)
@@ -180,10 +192,14 @@ def compareTm {Γ : Ctx sig} {A : Object sig.nBases}
 /--
 Private candidate: compare two intrinsic morphisms via translate → focus →
 shared saturation → ICC → structural equality.
+
+Uses `morphismReachCtx`: `Γgen` is old, the source binder is new.
 -/
 def compareIntrinsic {X Y : Object sig.nBases}
     (f g : IntrinsicMorphism sig X Y) (fuel : Nat := 2048) : CandidateResult :=
-  compareTm (goal := Y) (translate f) (translate g) (fuel := fuel)
+  match focusInv fuel (translate f), focusInv fuel (translate g) with
+  | .exhausted, _ | _, .exhausted => .exhausted .focus
+  | .ok t', .ok u' => compareUnderMorphism (goal := Y) t' u' (fuel := fuel)
 
 end Equality
 end Gimbal

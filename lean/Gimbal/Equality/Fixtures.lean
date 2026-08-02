@@ -285,6 +285,11 @@ example : iccCaseUnitCanonical = true := by native_decide
 
 /-! ### Candidate compare -/
 
+/-- Morphism compare treats `Γgen` as old (`newFrom = nGens`). -/
+example :
+    (morphismReachCtx (sig := NumSig) Number).newFrom = NumSig.nGens := by
+  native_decide
+
 example :
     compareIntrinsic (sig := NumSig)
       (IntrinsicMorphism.id (sig := NumSig) Number)
