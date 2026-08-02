@@ -1,0 +1,197 @@
+/-
+  Intrinsically typed nameless STLC for the equality calculus.
+  Snoc contexts, typed de Bruijn variables, renaming, and substitution.
+  Types are Phase 0 `Object`s (unpolarized).
+-/
+
+import Gimbal.Object
+import Gimbal.Signature
+
+namespace Gimbal
+namespace Equality
+
+/-- Snoc typing context over signature `sig`. -/
+inductive Ctx (sig : Signature) : Type where
+  | empty : Ctx sig
+  | snoc : Ctx sig → Object sig.nBases → Ctx sig
+
+/-- Notation for `Ctx.snoc`. -/
+infixl:67 " ▻ " => Ctx.snoc
+
+namespace Ctx
+
+variable {sig : Signature}
+
+def length : Ctx sig → Nat
+  | .empty => 0
+  | .snoc Γ _ => Γ.length + 1
+
+end Ctx
+
+/-- Typed de Bruijn variable: membership of `A` in `Γ`. -/
+inductive Var {sig : Signature} : Ctx sig → Object sig.nBases → Type where
+  | here {Γ : Ctx sig} {A : Object sig.nBases} : Var (Γ ▻ A) A
+  | there {Γ : Ctx sig} {A B : Object sig.nBases} : Var Γ A → Var (Γ ▻ B) A
+
+/-- Intrinsically typed term: `Γ ⊢ A`. -/
+inductive Tm {sig : Signature} : Ctx sig → Object sig.nBases → Type where
+  | var {Γ A} : Var Γ A → Tm Γ A
+  | unit {Γ} : Tm Γ .unit
+  | abort {Γ A} : Tm Γ .never → Tm Γ A
+  | pair {Γ A B} : Tm Γ A → Tm Γ B → Tm Γ (.prod A B)
+  | fst {Γ A B} : Tm Γ (.prod A B) → Tm Γ A
+  | snd {Γ A B} : Tm Γ (.prod A B) → Tm Γ B
+  | inl {Γ A B} : Tm Γ A → Tm Γ (.coprod A B)
+  | inr {Γ A B} : Tm Γ B → Tm Γ (.coprod A B)
+  | case {Γ A B C} :
+      Tm Γ (.coprod A B) →
+      Tm (Γ ▻ A) C →
+      Tm (Γ ▻ B) C →
+      Tm Γ C
+  | lam {Γ A B} : Tm (Γ ▻ A) B → Tm Γ (.exp A B)
+  | app {Γ A B} : Tm Γ (.exp A B) → Tm Γ A → Tm Γ B
+
+/-! ### Renaming -/
+
+/-- A renaming maps variables in `Γ` to variables in `Δ`. -/
+def Rename (sig : Signature) (Γ Δ : Ctx sig) : Type :=
+  ∀ {A : Object sig.nBases}, Var Γ A → Var Δ A
+
+namespace Rename
+
+variable {sig : Signature}
+
+def id {Γ : Ctx sig} : Rename sig Γ Γ :=
+  fun x => x
+
+/-- Extend a renaming under one binder. -/
+def ext {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : Rename sig (Γ ▻ A) (Δ ▻ A)
+  | _, .here => .here
+  | _, .there x => .there (ρ x)
+
+/-- Weaken into an extended context. -/
+def weaken {Γ : Ctx sig} {A : Object sig.nBases} : Rename sig Γ (Γ ▻ A) :=
+  fun x => .there x
+
+end Rename
+
+/-- Apply a renaming to a term. -/
+def rename {sig : Signature} {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : Tm Γ A → Tm Δ A
+  | .var x => .var (ρ x)
+  | .unit => .unit
+  | .abort t => .abort (rename ρ t)
+  | .pair t u => .pair (rename ρ t) (rename ρ u)
+  | .fst t => .fst (rename ρ t)
+  | .snd t => .snd (rename ρ t)
+  | .inl t => .inl (rename ρ t)
+  | .inr t => .inr (rename ρ t)
+  | .case s t u =>
+      .case (rename ρ s) (rename (Rename.ext ρ) t) (rename (Rename.ext ρ) u)
+  | .lam t => .lam (rename (Rename.ext ρ) t)
+  | .app t u => .app (rename ρ t) (rename ρ u)
+
+/-- Weaken a term by one binder. -/
+def weakenTerm {sig : Signature} {Γ : Ctx sig} {A B : Object sig.nBases}
+    (t : Tm Γ B) : Tm (Γ ▻ A) B :=
+  rename Rename.weaken t
+
+/-! ### Substitution -/
+
+/-- A substitution maps variables in `Γ` to terms in `Δ`. -/
+def Subst (sig : Signature) (Γ Δ : Ctx sig) : Type :=
+  ∀ {A : Object sig.nBases}, Var Γ A → Tm Δ A
+
+namespace Subst
+
+variable {sig : Signature}
+
+def ids {Γ : Ctx sig} : Subst sig Γ Γ :=
+  fun x => .var x
+
+/-- Extend a substitution under one binder. -/
+def exts {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (σ : Subst sig Γ Δ) : Subst sig (Γ ▻ A) (Δ ▻ A)
+  | _, .here => .var .here
+  | _, .there x => weakenTerm (σ x)
+
+/-- Substitution that replaces only the most recently bound variable. -/
+def single {Γ : Ctx sig} {A : Object sig.nBases}
+    (n : Tm Γ A) : Subst sig (Γ ▻ A) Γ
+  | _, .here => n
+  | _, .there x => .var x
+
+end Subst
+
+/-- Apply a parallel substitution to a term. -/
+def subst {sig : Signature} {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (σ : Subst sig Γ Δ) : Tm Γ A → Tm Δ A
+  | .var x => σ x
+  | .unit => .unit
+  | .abort t => .abort (subst σ t)
+  | .pair t u => .pair (subst σ t) (subst σ u)
+  | .fst t => .fst (subst σ t)
+  | .snd t => .snd (subst σ t)
+  | .inl t => .inl (subst σ t)
+  | .inr t => .inr (subst σ t)
+  | .case s t u =>
+      .case (subst σ s) (subst (Subst.exts σ) t) (subst (Subst.exts σ) u)
+  | .lam t => .lam (subst (Subst.exts σ) t)
+  | .app t u => .app (subst σ t) (subst σ u)
+
+/-- Substitute `n` for the most recently bound variable in `t`. -/
+def subst0 {sig : Signature} {Γ : Ctx sig} {A B : Object sig.nBases}
+    (t : Tm (Γ ▻ A) B) (n : Tm Γ A) : Tm Γ B :=
+  subst (Subst.single n) t
+
+/-! ### Generator context prefix -/
+
+/-- Arrow type of a signature generator. -/
+def genType (sig : Signature) (q : Fin sig.nGens) : Object sig.nBases :=
+  .exp (sig.gen q).source (sig.gen q).target
+
+/--
+Telescope of rigid generator variables, snoc'd in ID order
+(`0` outermost / largest de Bruijn index).
+-/
+structure GenTelescope (sig : Signature) where
+  ctx : Ctx sig
+  var : (q : Fin sig.nGens) → Var ctx (genType sig q)
+
+/-- Build the generator telescope by snoc'ing generators `0 .. nGens-1`. -/
+def genTelescope (sig : Signature) : GenTelescope sig :=
+  let rec go (i : Nat) (hi : i ≤ sig.nGens) :
+      Σ' Γ : Ctx sig,
+        (q : Fin i) → Var Γ (genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩) :=
+    match i with
+    | 0 =>
+      ⟨.empty, fun q => nomatch q⟩
+    | i + 1 =>
+      have hi' : i ≤ sig.nGens := Nat.le_of_succ_le hi
+      have i_lt : i < sig.nGens := Nat.lt_of_succ_le hi
+      let ⟨Γ, vs⟩ := go i hi'
+      let A := genType sig ⟨i, i_lt⟩
+      ⟨Γ ▻ A, fun q =>
+        if h : q.val = i then
+          have hty : genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩ = A := by
+            simp [h, A]
+          hty ▸ Var.here
+        else
+          have q_lt_i : q.val < i :=
+            Nat.lt_of_le_of_ne (Nat.le_of_lt_succ q.isLt) h
+          .there (vs ⟨q.val, q_lt_i⟩)⟩
+  let ⟨Γ, vs⟩ := go sig.nGens (Nat.le_refl _)
+  ⟨Γ, fun q => vs ⟨q.val, q.isLt⟩⟩
+
+/-- Fixed rigid generator context `Γgen`. -/
+def genCtx (sig : Signature) : Ctx sig :=
+  (genTelescope sig).ctx
+
+/-- Variable for generator `q` in `Γgen`. -/
+def genVar (sig : Signature) (q : Fin sig.nGens) :
+    Var (genCtx sig) (genType sig q) :=
+  (genTelescope sig).var q
+
+end Equality
+end Gimbal

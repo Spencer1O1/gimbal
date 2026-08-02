@@ -17,5 +17,7 @@ import Gimbal.SyntacticCategory
 import Gimbal.SyntacticCategory.BicartesianClosed
 import Gimbal.Equality.IntrinsicMorphism
 import Gimbal.Equality.Elaborate
+import Gimbal.Equality.LambdaSyntax
+import Gimbal.Equality.Translate
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures

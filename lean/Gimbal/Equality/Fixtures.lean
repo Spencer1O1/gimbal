@@ -1,8 +1,8 @@
 /-
-  Early Milestone 7 fixtures: intrinsic elaboration round-trips.
+  Early Milestone 7 fixtures: intrinsic elaboration and translation.
 -/
 
-import Gimbal.Equality.Elaborate
+import Gimbal.Equality.Translate
 import Gimbal.Fixtures
 
 namespace Gimbal.Equality.Fixtures
@@ -29,6 +29,27 @@ example : elaborate (sig := NumSig) illTypedComposeTerm = none :=
 example :
     elaborate (sig := NumSig) two.term =
       some ⟨.unit, Number, .generator ⟨0, by decide⟩⟩ :=
+  rfl
+
+/-- Identity translates to the source variable. -/
+example :
+    translate (sig := NumSig) (.id Number) = .var .here :=
+  rfl
+
+/-- Discard translates to unit. -/
+example :
+    translate (sig := NumSig) (.discard Number) = .unit :=
+  rfl
+
+/-- `first` translates to `fst x`. -/
+example :
+    translate (sig := NumSig) (.first Number Number) = .fst (.var .here) :=
+  rfl
+
+/-- Generator `two` translates to application of the rigid generator variable. -/
+example :
+    translateMorphism two =
+      .app (.var (.there (genVar NumSig ⟨0, by decide⟩))) (.var .here) :=
   rfl
 
 end Gimbal.Equality.Fixtures
