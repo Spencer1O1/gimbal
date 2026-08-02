@@ -1,0 +1,240 @@
+/-
+  Finite positive-type reachability closure (Milestone 7 spike).
+
+  Computes a least fixed point over the finite subformula universe of a root
+  judgment. Does **not** enumerate concrete neutrals: contexts such as
+  `x : X, s : X → X` stay finite because only types are tracked, with a single
+  first-discovery witness (parent pointer) per type.
+-/
+
+import Gimbal.Equality.LambdaSyntax
+import Gimbal.Equality.Polarized
+
+namespace Gimbal
+namespace Equality
+
+/-! ### Subformula universe -/
+
+/-- Immediate subformulas of an object. -/
+def subformulaStep {n : Nat} : Object n → List (Object n)
+  | .base _ | .unit | .never => []
+  | .prod A B | .coprod A B | .exp A B => [A, B]
+
+/-- Finite subformula closure of a list of roots (deduplicated, stable order). -/
+def subformulaClosure {n : Nat} (roots : List (Object n)) (fuel : Nat := 4096) :
+    Array (Object n) :=
+  let rec go (fuel : Nat) (pending : List (Object n)) (acc : Array (Object n)) :
+      Array (Object n) :=
+    match fuel with
+    | 0 => acc
+    | fuel + 1 =>
+      match pending with
+      | [] => acc
+      | A :: rest =>
+        if acc.contains A then
+          go fuel rest acc
+        else
+          go fuel (subformulaStep A ++ rest) (acc.push A)
+  go fuel roots #[]
+
+/-! ### Witness parent pointers -/
+
+/--
+First-discovery derivation for a reachable type.
+`hypIdx` indexes `ReachCtx.hyps`; `ofTypeIdx` / `argTypeIdx` index the
+subformula table.
+-/
+inductive Witness where
+  | ctxVar (hypIdx : Nat)
+  | fst (ofTypeIdx : Nat)
+  | snd (ofTypeIdx : Nat)
+  | app (fnHypIdx : Nat) (argTypeIdx : Nat)
+  deriving DecidableEq, Repr
+
+/-- Per-type reachability cell. -/
+structure ReachCell where
+  retrievable : Bool := false
+  simplyDeducible : Bool := false
+  usesNew : Bool := false
+  witness : Option Witness := none
+  deriving DecidableEq, Repr
+
+def ReachCell.empty : ReachCell := {}
+
+/-! ### Context fragment -/
+
+/--
+Context as an array of hypothesis types (oldest at index 0).
+`newFrom` is the first index belonging to `Γnew`.
+-/
+structure ReachCtx (n : Nat) where
+  hyps : Array (Object n)
+  newFrom : Nat := 0
+  deriving Repr
+
+def ReachCtx.isNew {n : Nat} (Γ : ReachCtx n) (hypIdx : Nat) : Bool :=
+  decide (Γ.newFrom ≤ hypIdx)
+
+def ReachCtx.roots {n : Nat} (Γ : ReachCtx n) (goal : Object n) : List (Object n) :=
+  goal :: Γ.hyps.toList
+
+/-! ### Fixed-point state -/
+
+structure ReachState (n : Nat) where
+  types : Array (Object n)
+  cells : Array ReachCell
+  inconsistent : Bool := false
+  deriving Repr
+
+def ReachState.findTypeIdx {n : Nat} (σ : ReachState n) (A : Object n) : Option Nat :=
+  σ.types.findIdx? (· == A)
+
+def ReachState.getCell {n : Nat} (σ : ReachState n) (i : Nat) : ReachCell :=
+  match σ.cells[i]? with
+  | some c => c
+  | none => ReachCell.empty
+
+def ReachState.setCell {n : Nat} (σ : ReachState n) (i : Nat) (c : ReachCell) : ReachState n :=
+  if h : i < σ.cells.size then
+    { σ with cells := σ.cells.set i c }
+  else
+    σ
+
+def ReachState.typeAt {n : Nat} (σ : ReachState n) (i : Nat) : Option (Object n) :=
+  σ.types[i]?
+
+/-- Discover `i` as simply deducible with the given witness (first wins). -/
+def ReachState.discover {n : Nat} (σ : ReachState n) (i : Nat) (usesNew : Bool)
+    (w : Witness) : ReachState n :=
+  match σ.typeAt i with
+  | none => σ
+  | some A =>
+    let c := σ.getCell i
+    let c' :=
+      if c.simplyDeducible then c
+      else { c with simplyDeducible := true, usesNew := usesNew, witness := some w }
+    let σ := σ.setCell i c'
+    if A == (.never : Object n) then { σ with inconsistent := true } else σ
+
+/-- Mark a context hypothesis as retrievable (and deducible). -/
+def ReachState.markHyp {n : Nat} (σ : ReachState n) (Γ : ReachCtx n) (hypIdx : Nat) :
+    ReachState n :=
+  match Γ.hyps[hypIdx]? with
+  | none => σ
+  | some A =>
+    match σ.findTypeIdx A with
+    | none => σ
+    | some i =>
+      let usesNew := Γ.isNew hypIdx
+      let c := σ.getCell i
+      let c' :=
+        { c with
+          retrievable := true
+          simplyDeducible := true
+          usesNew := c.usesNew || usesNew
+          witness := match c.witness with
+            | some w => some w
+            | none => some (.ctxVar hypIdx) }
+      let σ := σ.setCell i c'
+      if A == (.never : Object n) then { σ with inconsistent := true } else σ
+
+/-- One forward-chaining sweep. -/
+def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
+  Id.run do
+    let mut σ := σ
+    -- Seed positive hypotheses.
+    for i in [:Γ.hyps.size] do
+      match Γ.hyps[i]? with
+      | some A =>
+        if objectPolarity A == .pos then
+          σ := σ.markHyp Γ i
+      | none => pure ()
+    -- Close under hyp products / functions.
+    for i in [:Γ.hyps.size] do
+      match Γ.hyps[i]? with
+      | some (.prod L R) =>
+        match σ.findTypeIdx (.prod L R), σ.findTypeIdx L, σ.findTypeIdx R with
+        | some pIdx, some lIdx, some rIdx =>
+          let pc := σ.getCell pIdx
+          if pc.simplyDeducible || pc.retrievable then
+            let uses := pc.usesNew || Γ.isNew i
+            σ := σ.discover lIdx uses (.fst pIdx)
+            σ := σ.discover rIdx uses (.snd pIdx)
+        | _, _, _ => pure ()
+      | some (.exp Arg Ret) =>
+        match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+        | some aIdx, some rIdx =>
+          let ac := σ.getCell aIdx
+          if ac.simplyDeducible then
+            let uses := ac.usesNew || Γ.isNew i
+            σ := σ.discover rIdx uses (.app i aIdx)
+        | _, _ => pure ()
+      | _ => pure ()
+    -- Project reachable product types.
+    for ti in [:σ.types.size] do
+      match σ.typeAt ti with
+      | some (.prod L R) =>
+        let pc := σ.getCell ti
+        if pc.simplyDeducible then
+          match σ.findTypeIdx L, σ.findTypeIdx R with
+          | some lIdx, some rIdx =>
+            σ := σ.discover lIdx pc.usesNew (.fst ti)
+            σ := σ.discover rIdx pc.usesNew (.snd ti)
+          | _, _ => pure ()
+      | _ => pure ()
+    pure σ
+
+/-- Initialize cells for the subformula universe and seed `Γ`. -/
+def mkReachState {n : Nat} (Γ : ReachCtx n) (goal : Object n) : ReachState n :=
+  Id.run do
+    let types := subformulaClosure (Γ.roots goal)
+    let cells := Array.replicate types.size ReachCell.empty
+    let mut σ : ReachState n := { types, cells }
+    for i in [:Γ.hyps.size] do
+      match Γ.hyps[i]? with
+      | some A =>
+        if objectPolarity A == .pos then
+          σ := σ.markHyp Γ i
+      | none => pure ()
+    pure σ
+
+/-- Least fixed point of simple positive reachability. -/
+def runReachability {n : Nat} (Γ : ReachCtx n) (goal : Object n) (fuel : Nat := 256) :
+    ReachState n :=
+  Id.run do
+    let mut σ := mkReachState Γ goal
+    for _ in [:fuel] do
+      let σ' := reachStep Γ σ
+      if σ'.cells == σ.cells && σ'.inconsistent == σ.inconsistent then
+        return σ'
+      σ := σ'
+    pure σ
+
+/-- Types simply deducible but not yet retrievable (schedule candidates). -/
+def pendingWitnesses {n : Nat} (σ : ReachState n) : Array (Object n × Witness) :=
+  Id.run do
+    let mut out : Array (Object n × Witness) := #[]
+    for i in [:σ.types.size] do
+      match σ.typeAt i, σ.getCell i with
+      | some A, c =>
+        if c.simplyDeducible && !c.retrievable && objectPolarity A == .pos then
+          match c.witness with
+          | some w => out := out.push (A, w)
+          | none => pure ()
+      | _, _ => pure ()
+    pure out
+
+/-- Helper: is this object simply deducible in the result? -/
+def isSimplyDeducible {n : Nat} (σ : ReachState n) (A : Object n) : Bool :=
+  match σ.findTypeIdx A with
+  | some i => (σ.getCell i).simplyDeducible
+  | none => false
+
+/-- Helper: is this object retrievable in the result? -/
+def isRetrievable {n : Nat} (σ : ReachState n) (A : Object n) : Bool :=
+  match σ.findTypeIdx A with
+  | some i => (σ.getCell i).retrievable
+  | none => false
+
+end Equality
+end Gimbal

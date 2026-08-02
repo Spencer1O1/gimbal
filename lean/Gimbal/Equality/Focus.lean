@@ -42,16 +42,40 @@ def focusInv {Γ : Ctx sig} {A : Object sig.nBases} :
   | 0, _ => .exhausted
   | fuel + 1, t =>
     match t with
+    | .unit =>
+        .ok .unit
+    | .pair t₁ t₂ =>
+        match focusInv fuel t₁, focusInv fuel t₂ with
+        | .ok t₁', .ok t₂' => .ok (.pair t₁' t₂')
+        | .exhausted, _ | _, .exhausted => .exhausted
+    | .lam t =>
+        match focusInv fuel t with
+        | .ok t' => .ok (.lam t')
+        | .exhausted => .exhausted
+    | .inl t =>
+        match focusFoc fuel (.inl t) with
+        | some f => .ok (.foc f)
+        | none => .exhausted
+    | .inr t =>
+        match focusFoc fuel (.inr t) with
+        | some f => .ok (.foc f)
+        | none => .exhausted
     | .case s l r =>
         match focusNegNeu fuel s, focusInv fuel l, focusInv fuel r with
         | some n, .ok l', .ok r' => .ok (.case n l' r')
-        | _, _, _ => focusInvByGoal (fuel + 1) t
+        | _, _, _ => focusInvByGoal (fuel + 1) (.case s l r)
     | .abort s =>
         match focusNegNeu fuel s with
         | some n => .ok (.abort n)
-        | none => focusInvByGoal (fuel + 1) t
-    | _ =>
-        focusInvByGoal (fuel + 1) t
+        | none => focusInvByGoal (fuel + 1) (.abort s)
+    | .var x =>
+        focusInvByGoal (fuel + 1) (.var x)
+    | .fst t =>
+        focusInvByGoal (fuel + 1) (.fst t)
+    | .snd t =>
+        focusInvByGoal (fuel + 1) (.snd t)
+    | .app f a =>
+        focusInvByGoal (fuel + 1) (.app f a)
 
 /-- Type-directed invertible introductions / focusing entry. -/
 def focusInvByGoal {Γ : Ctx sig} {A : Object sig.nBases} :

@@ -22,5 +22,6 @@ import Gimbal.Equality.Translate
 import Gimbal.Equality.Polarized
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Focus
+import Gimbal.Equality.Reachability
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures
