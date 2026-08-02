@@ -1,9 +1,12 @@
 /-
-  Private candidate comparison for Milestone 7.
+  Private candidate comparison (M7 prototype; M8 hardening in progress).
 
   Focus → shared-schedule saturation → ICC canonicalize → structural compare.
   Does **not** claim decidability of `DefEq`; exhaustion and invariant failure
   are distinct from inequality.
+
+  Root saturation: whole `Γgen , x : A` is new (`newFrom = 0`). After a phase,
+  recursive binders promote the prior context to old.
 -/
 
 import Gimbal.Equality.Focus
@@ -63,21 +66,13 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
   match fuel with
   | 0 => .exhausted .saturate
   | fuel + 1 =>
-    -- Note: a full `checkOldInvariant` on Γold is too strong once opaque
-    -- generators inhabit positives (targets are simply deducible from Γold
-    -- without being retrievable there). Milestone 8 tightens this against
-    -- Scherer's selection invariant; for M7 we only refuse on hard failure.
-    --
-    -- Fast path: if ICC already identifies the spines, skip re-saturation.
-    -- Shared-schedule application preserves equality, so this stays sound for
-    -- the candidate; it avoids pathological re-observation of sum-valued gens.
-    let t0 := canonicalize (fuel := fuel) t
-    let u0 := canonicalize (fuel := fuel) u
-    if structurallyEqual t0 u0 then .equal
+    -- Scherer selection: positives simply deducible from Γold alone must already
+    -- be retrievable. Root starts with empty old; recursive phases promote.
+    if !checkOldInvariant Γ.oldPrefix goal then .invariantFailure
     else
-      let (entries, σ) := pairObs Γ goal t0 u0
-      match applyPairObs fuel σ Γ.hyps entries t0,
-            applyPairObs fuel σ Γ.hyps entries u0 with
+      let (entries, σ) := pairObs Γ goal t u
+      match applyPairObs fuel σ Γ.hyps entries t,
+            applyPairObs fuel σ Γ.hyps entries u with
       | .exhausted, _ | _, .exhausted => .exhausted .saturate
       | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
       | .ok t', .ok u' =>
@@ -159,24 +154,16 @@ def compareInv {A : Object sig.nBases}
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) (fuel : Nat := 2048) : CandidateResult :=
   compareSatRec fuel Γ goal t u
 
-/-- Compare two focused terms under an arbitrary snoc context (all hyps new). -/
+/--
+Compare two focused terms under an arbitrary snoc context.
+
+The whole context is new at the root (`toReachCtx` keeps `newFrom = 0`).
+-/
 def compareUnder {A : Object sig.nBases}
     (Γ : Ctx sig) (goal : Object sig.nBases)
     (t u : InvTm Γ A) (fuel : Nat := 2048) : CandidateResult :=
   let r := Γ.toReachCtx
   have hctx : Ctx.ofHyps r.hyps = Γ := Ctx.ofHyps_toReachCtx Γ
-  compareSatRec fuel r goal
-    (InvTm.castCtx hctx.symm t)
-    (InvTm.castCtx hctx.symm u)
-
-/--
-Compare focused terms under `Γgen , x : X` with generators old and `x` new.
--/
-def compareUnderMorphism {X A : Object sig.nBases}
-    (goal : Object sig.nBases)
-    (t u : InvTm (translateCtx X) A) (fuel : Nat := 2048) : CandidateResult :=
-  let r := morphismReachCtx (sig := sig) X
-  have hctx : Ctx.ofHyps r.hyps = translateCtx X := morphismReachCtx_ofHyps X
   compareSatRec fuel r goal
     (InvTm.castCtx hctx.symm t)
     (InvTm.castCtx hctx.symm u)
@@ -193,13 +180,11 @@ def compareTm {Γ : Ctx sig} {A : Object sig.nBases}
 Private candidate: compare two intrinsic morphisms via translate → focus →
 shared saturation → ICC → structural equality.
 
-Uses `morphismReachCtx`: `Γgen` is old, the source binder is new.
+Root context `Γgen , x : X` is entirely new (empty old fragment).
 -/
 def compareIntrinsic {X Y : Object sig.nBases}
     (f g : IntrinsicMorphism sig X Y) (fuel : Nat := 2048) : CandidateResult :=
-  match focusInv fuel (translate f), focusInv fuel (translate g) with
-  | .exhausted, _ | _, .exhausted => .exhausted .focus
-  | .ok t', .ok u' => compareUnderMorphism (goal := Y) t' u' (fuel := fuel)
+  compareTm (goal := Y) (translate f) (translate g) (fuel := fuel)
 
 end Equality
 end Gimbal

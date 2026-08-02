@@ -37,22 +37,6 @@ def Ctx.toReachCtxSplit (Γold Γnew : Ctx sig) : ReachCtx sig.nBases :=
   ⟨old.hyps ++ neu.hyps, old.hyps.size⟩
 
 /--
-Morphism comparison context: rigid `Γgen` is old; the source binder `A` is new.
-This matches Scherer's opaque-atom / free-generator discipline.
--/
-def morphismReachCtx (A : Object sig.nBases) : ReachCtx sig.nBases :=
-  Ctx.toReachCtxSplit (genCtx sig) (.empty ▻ A)
-
-theorem morphismReachCtx_ofHyps (A : Object sig.nBases) :
-    Ctx.ofHyps (morphismReachCtx A).hyps = genCtx sig ▻ A := by
-  -- `toReachCtxSplit genCtx (∅ ▻ A)` has hyps `genCtx.toReachCtx.hyps ++ #[A]`.
-  change Ctx.ofHyps ((genCtx sig).toReachCtx.hyps ++ #[A]) = genCtx sig ▻ A
-  have happ : (genCtx sig).toReachCtx.hyps ++ #[A] =
-      (genCtx sig).toReachCtx.hyps.push A := by
-    simp [Array.append_singleton]
-  rw [happ, Ctx.ofHyps_push, Ctx.ofHyps_toReachCtx]
-
-/--
 Build the shared saturation schedule for a context/goal from the finite
 reachability closure.
 -/

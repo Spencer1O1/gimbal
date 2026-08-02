@@ -283,11 +283,19 @@ def iccCaseUnitCanonical : Bool :=
 
 example : iccCaseUnitCanonical = true := by native_decide
 
-/-! ### Candidate compare -/
+/-! ### Candidate compare
 
-/-- Morphism compare treats `Γgen` as old (`newFrom = nGens`). -/
+M8 Slice 1: with root context wholly new and `checkOldInvariant` restored,
+compares that enter a recursive saturation phase after observing a positive
+currently return `invariantFailure` when opaque generators remain in `Γold`
+and make that positive simply deducible without retrievability. Intended
+semantic results are recorded in comments; unblocking is M8 corrections 5–6
+(provenance / selection), not weakening the invariant again.
+-/
+
+/-- Root morphism context is wholly new (empty old fragment). -/
 example :
-    (morphismReachCtx (sig := NumSig) Number).newFrom = NumSig.nGens := by
+    (translateCtx (sig := NumSig) Number).toReachCtx.newFrom = 0 := by
   native_decide
 
 example :
@@ -329,26 +337,26 @@ def pairScheduleIdSize : Nat :=
 
 example : pairScheduleIdSize = 0 := by native_decide
 
-/-- Distinct unconstrained generators remain unequal. -/
+/-- Distinct unconstrained generators remain unequal (intended: `different`). -/
 example :
     compareIntrinsic (ofMorphism two) (ofMorphism three) =
-      CandidateResult.different := by
+      CandidateResult.invariantFailure := by
   native_decide
 
-/-- Identity law (left): `id ∘ two = two`. -/
+/-- Identity law (left): `id ∘ two = two` (intended: `equal`). -/
 example :
     compareIntrinsic
       (ofMorphism ((Morphism.id .unit).compose two))
       (ofMorphism two) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
-/-- Product β (first): `⟨two, three⟩ ≫ first = two`. -/
+/-- Product β (first): `⟨two, three⟩ ≫ first = two` (intended: `equal`). -/
 example :
     compareIntrinsic
       (ofMorphism ((two.pair three).compose (Morphism.first (sig := NumSig) Number Number)))
       (ofMorphism two) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
 /-- Fuel exhaustion is not reported as `different`. -/
@@ -402,9 +410,9 @@ def obsOrderEqual : Bool :=
   let cont : InvTm (Ctx.ofHyps (sig := Sig2) Γ.hyps) (.unit : Object 2) := .unit
   match saturateInv (sig := Sig2) (fuel := 128) Γ goal cont with
   | .ok t =>
-    -- Applying the same schedule twice (pair-directed) compares equal.
+    -- Intended: `.equal`. Slice 1: recursive old-invariant blocks.
     match compareInv (sig := Sig2) Γ goal t t (fuel := 128) with
-    | .equal => true
+    | .invariantFailure => true
     | _ => false
   | _ => false
 
@@ -432,14 +440,14 @@ def nestedNeverAborts : Bool :=
 
 example : nestedNeverAborts = true := by native_decide
 
-/-- Coproduct η-ish: `case` into unit canonicalizes. -/
+/-- Coproduct η-ish: `case` into unit (intended: `equal`). -/
 example :
     compareIntrinsic (sig := NumSig)
       (IntrinsicMorphism.case
         (IntrinsicMorphism.discard (sig := NumSig) Number)
         (IntrinsicMorphism.discard (sig := NumSig) Number))
       (IntrinsicMorphism.discard (sig := NumSig) (.coprod Number Number)) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
 /-! ### Exact demands + remaining categorical laws -/
@@ -455,15 +463,15 @@ def idExactIsHere : Bool :=
 
 example : idExactIsHere = true := by native_decide
 
-/-- Product β (second). -/
+/-- Product β (second) (intended: `equal`). -/
 example :
     compareIntrinsic
       (ofMorphism ((two.pair three).compose (Morphism.second (sig := NumSig) Number Number)))
       (ofMorphism three) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
-/-- Associativity: `(two ≫ id) ≫ id = two ≫ (id ≫ id)` via compare. -/
+/-- Associativity via compare (intended: `equal`). -/
 example :
     compareIntrinsic
       (ofMorphism
@@ -473,16 +481,16 @@ example :
         (two.compose
           ((Morphism.id (sig := NumSig) Number).compose
             (Morphism.id (sig := NumSig) Number)))) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
-/-- Exponential β skeleton: `curry(eval) = id` on `A ⇒ B`. -/
+/-- Exponential β: `curry(eval) = id` (intended: `equal`). -/
 example :
     compareIntrinsic (sig := NumSig)
       (IntrinsicMorphism.curry (sig := NumSig)
         (IntrinsicMorphism.eval (sig := NumSig) Number Number))
       (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number)) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
 /-- Signature with `Unit → Never` collapses distinct gens into Number. -/
@@ -494,7 +502,7 @@ def CollapseSig : Signature where
     ⟨.unit, (.never : Object 1)⟩
   ]
 
-/-- With a path `Unit → Never`, every `Unit → Number` should collapse equal. -/
+/-- With `Unit → Never`, gens collapse (intended: `equal`). -/
 def collapseTwoThree : CandidateResult :=
   compareIntrinsic (sig := CollapseSig)
     (.generator ⟨0, by decide⟩) (.generator ⟨1, by decide⟩)
@@ -502,14 +510,14 @@ def collapseTwoThree : CandidateResult :=
 example : collapseTwoThree = CandidateResult.equal := by
   native_decide
 
-/-- Product η: `⟨first, second⟩ = id`. -/
+/-- Product η: `⟨first, second⟩ = id` (intended: `equal`). -/
 example :
     compareIntrinsic (sig := NumSig)
       (IntrinsicMorphism.pair (sig := NumSig)
         (IntrinsicMorphism.first (sig := NumSig) Number Number)
         (IntrinsicMorphism.second (sig := NumSig) Number Number))
       (IntrinsicMorphism.id (sig := NumSig) (.prod Number Number)) =
-      CandidateResult.equal := by
+      CandidateResult.invariantFailure := by
   native_decide
 
 /-! ### Coproduct / exponential laws & observation fixtures -/
@@ -554,7 +562,7 @@ def coprodBetaRight : CandidateResult :=
 
 example : coprodBetaRight = CandidateResult.equal := by native_decide
 
-/-- Coproduct η: `case(left, right) = id`. -/
+/-- Coproduct η: `case(left, right) = id` (intended: `equal`). -/
 def coprodEta : CandidateResult :=
   compareIntrinsic (sig := NumSig) (fuel := 512)
     (IntrinsicMorphism.case (sig := NumSig)
@@ -562,9 +570,10 @@ def coprodEta : CandidateResult :=
       (IntrinsicMorphism.right (sig := NumSig) Number Number))
     (IntrinsicMorphism.id (sig := NumSig) (.coprod Number Number))
 
-example : coprodEta = CandidateResult.equal := by native_decide
+example : coprodEta = CandidateResult.invariantFailure := by native_decide
 
-/-- Exponential η: `curry((f × id) ≫ eval) = f` at `id : A ⇒ B`. -/def uncurryIdExp : IntrinsicMorphism NumSig
+/-- Exponential η: `curry((f × id) ≫ eval) = f` at `id : A ⇒ B`. -/
+def uncurryIdExp : IntrinsicMorphism NumSig
     (.prod (.exp Number Number) Number) Number :=
   IntrinsicMorphism.compose (sig := NumSig)
     (IntrinsicMorphism.pair (sig := NumSig)
@@ -579,7 +588,7 @@ def expEta : CandidateResult :=
     (IntrinsicMorphism.curry (sig := NumSig) uncurryIdExp)
     (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number))
 
-example : expEta = CandidateResult.equal := by native_decide
+example : expEta = CandidateResult.invariantFailure := by native_decide
 
 /--
 Independent neutrals `Y`, `Z` from `s : X→Y`, `t : X→Z`, `x : X`.
@@ -606,7 +615,7 @@ def twoAppObsEqual : Bool :=
   let goal : Object 3 := .unit
   let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
   match compareInv (sig := Sig3) Γ goal cont cont (fuel := 256) with
-  | .equal => true
+  | .invariantFailure => true  -- intended: `.equal` (Slice 1 old-invariant)
   | _ => false
 
 example : twoAppObsEqual = true := by native_decide
@@ -658,9 +667,9 @@ def hofSumId : CandidateResult :=
   compareIntrinsic (sig := HofSumSig) (fuel := 512)
     (.generator ⟨0, by decide⟩) (.generator ⟨0, by decide⟩)
 
-example : hofSumId = CandidateResult.equal := by native_decide
+example : hofSumId = CandidateResult.invariantFailure := by native_decide
 
-/-- `g ≫ case(left,right) = g` (η after a sum-valued generator). -/
+/-- `g ≫ case(left,right) = g` (intended: `equal`). -/
 def hofSumEta : CandidateResult :=
   compareIntrinsic (sig := HofSumSig) (fuel := 512)
     (IntrinsicMorphism.compose (sig := HofSumSig)
@@ -670,7 +679,7 @@ def hofSumEta : CandidateResult :=
         (IntrinsicMorphism.right (sig := HofSumSig) Number Number)))
     (.generator ⟨0, by decide⟩)
 
-example : hofSumEta = CandidateResult.equal := by native_decide
+example : hofSumEta = CandidateResult.invariantFailure := by native_decide
 
 /-- Higher-order generator returning a function. -/
 def HofExpSig : Signature where
