@@ -45,4 +45,4 @@ lake build
 
 ## Next
 
-Next: Lean core syntax (Milestone 4). See Phase 0 Implementation Plan in Obsidian.
+Lean Milestone 4 core syntax is under `lean/Gimbal/` (`lake build` in `lean/`). Next: syntactic category (Milestone 5) / Rust simplifier as needed.
