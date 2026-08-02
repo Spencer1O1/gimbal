@@ -11,4 +11,5 @@ import Gimbal.Term
 import Gimbal.Typing
 import Gimbal.Morphism
 import Gimbal.DefinitionalEquality
+import Gimbal.SyntacticCategory
 import Gimbal.Fixtures

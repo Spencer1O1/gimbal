@@ -17,7 +17,7 @@ This repository currently holds an **initial Phase 0A workspace scaffold**. It i
 ## Toolchains (pinned)
 
 - Rust: `1.97.1` via [`rust-toolchain.toml`](rust-toolchain.toml)
-- Lean: `leanprover/lean4:v4.32.2` via [`lean/lean-toolchain`](lean/lean-toolchain)
+- Lean: `leanprover/lean4:v4.32.0` via [`lean/lean-toolchain`](lean/lean-toolchain) (aligned with Mathlib pin)
 
 Updates are deliberate commits, not floating `stable` channels.
 

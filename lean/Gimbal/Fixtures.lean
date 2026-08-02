@@ -2,11 +2,12 @@
   Lean fixtures corresponding to the Rust `Number` signature examples.
 -/
 
-import Gimbal.DefinitionalEquality
+import Gimbal.SyntacticCategory
 
 namespace Gimbal.Fixtures
 
 open Gimbal
+open CategoryTheory
 
 /-- `Number` as the unique base. -/
 def Number : Object 1 := .base 0
@@ -51,5 +52,14 @@ theorem pairThenAdd_prod_beta_first :
       ((two.pair three).compose (Morphism.first (sig := NumSig) Number Number))
       two :=
   .prod_beta_first two three
+
+def NumberObject : «CΣ» NumSig := ⟨Number⟩
+def UnitObject : «CΣ» NumSig := ⟨.unit⟩
+
+def quotedTwo : UnitObject ⟶ NumberObject :=
+  «CΣ».Hom.mk two
+
+example : 𝟙 UnitObject ≫ quotedTwo = quotedTwo :=
+  «CΣ».Hom.id_comp quotedTwo
 
 end Gimbal.Fixtures

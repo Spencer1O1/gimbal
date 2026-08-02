@@ -2,5 +2,10 @@ name = "Gimbal"
 version = "0.0.0"
 defaultTargets = ["Gimbal"]
 
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.32.0"
+
 [[lean_lib]]
 name = "Gimbal"

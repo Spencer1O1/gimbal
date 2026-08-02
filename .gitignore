@@ -4,7 +4,7 @@
 
 # Lean / Lake
 lean/.lake/
-lean/lake-manifest.json
+# lake-manifest.json is committed so Mathlib pins stay reproducible in CI
 **/*.olean
 **/*.ilean
 **/*.trace

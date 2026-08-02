@@ -11,8 +11,9 @@ This file lists what the repository currently trusts. Anything that enters a ver
 | --- | --- |
 | Rust compiler `1.97.1` (pinned in `rust-toolchain.toml`) | Builds the production kernel and CLI |
 | Rust standard library for that toolchain | Used by kernel and CLI |
-| Lean 4 kernel `v4.32.2` (pinned in `lean/lean-toolchain`) | Will check metatheory and equality proofs when they exist |
+| Lean 4 kernel `v4.32.0` (pinned in `lean/lean-toolchain`; must match Mathlib’s toolchain for oleans cache) | Checks metatheory and equality proofs |
 | Lake / Lean toolchain installer (elan) | Fetches and runs the pinned Lean |
+| [mathlib4](https://github.com/leanprover-community/mathlib4) (pinned via `lean/lakefile.toml` / `lake-manifest.json`, aligned to Lean 4.32) | Category theory API for the syntactic category `CΣ` and later BCC structure |
 | [`sha2`](https://crates.io/crates/sha2) `0.10.x` | Computes `SignatureFingerprint` as SHA-256 of the canonical signature encoding |
 
 ## Kernel policy
