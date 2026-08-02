@@ -320,6 +320,121 @@ private theorem quotientMorphism_curry
       «CΣ».Hom.curry (quotientMorphism f) :=
   rfl
 
+private theorem quotientMorphism_case
+    {A B X : Object sig.nBases}
+    (f : IntrinsicMorphism sig A X) (g : IntrinsicMorphism sig B X) :
+    quotientMorphism (.case f g) =
+      «CΣ».Hom.case (quotientMorphism f) (quotientMorphism g) :=
+  rfl
+
+private theorem interpret_quotient_eq_of_pointwise
+    {X : Object sig.nBases} {Γ : Ctx sig} {A : Object sig.nBases}
+    {ρ τ : Env X Γ}
+    (h : ∀ {B : Object sig.nBases} (x : Var Γ B),
+      quotientMorphism (ρ x) = quotientMorphism (τ x))
+    (t : Tm Γ A) :
+    quotientMorphism (interpret ρ t) = quotientMorphism (interpret τ t) := by
+  revert X ρ τ h
+  induction t with
+  | var x =>
+      intro X ρ τ h
+      exact h x
+  | unit =>
+      intro X ρ τ h
+      rfl
+  | abort t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.compose (interpret ρ t) _) =
+        quotientMorphism (.compose (interpret τ t) _)
+      rw [quotientMorphism_compose, quotientMorphism_compose, ih h]
+  | pair t u iht ihu =>
+      intro X ρ τ h
+      change «CΣ».Hom.pair
+          (quotientMorphism (interpret ρ t)) (quotientMorphism (interpret ρ u)) =
+        «CΣ».Hom.pair
+          (quotientMorphism (interpret τ t)) (quotientMorphism (interpret τ u))
+      rw [iht h, ihu h]
+  | fst t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.compose (interpret ρ t) (.first _ _)) =
+        quotientMorphism (.compose (interpret τ t) (.first _ _))
+      rw [quotientMorphism_compose, quotientMorphism_compose, ih h]
+  | snd t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.compose (interpret ρ t) (.second _ _)) =
+        quotientMorphism (.compose (interpret τ t) (.second _ _))
+      rw [quotientMorphism_compose, quotientMorphism_compose, ih h]
+  | inl t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.compose (interpret ρ t) (.left _ _)) =
+        quotientMorphism (.compose (interpret τ t) (.left _ _))
+      rw [quotientMorphism_compose, quotientMorphism_compose, ih h]
+  | inr t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.compose (interpret ρ t) (.right _ _)) =
+        quotientMorphism (.compose (interpret τ t) (.right _ _))
+      rw [quotientMorphism_compose, quotientMorphism_compose, ih h]
+  | case s t u ihs iht ihu =>
+      intro X ρ τ h
+      change quotientMorphism
+          (.compose (.pair (.id X) (interpret ρ s))
+            (.compose _ (.case
+              (interpret (Env.extend ρ) t) (interpret (Env.extend ρ) u)))) =
+        quotientMorphism
+          (.compose (.pair (.id X) (interpret τ s))
+            (.compose _ (.case
+              (interpret (Env.extend τ) t) (interpret (Env.extend τ) u))))
+      simp only [quotientMorphism_compose, quotientMorphism_pair,
+        quotientMorphism_case]
+      rw [ihs h]
+      rw [iht (ρ := Env.extend ρ) (τ := Env.extend τ) (fun x => by
+        cases x with
+        | here => rfl
+        | there y =>
+            change quotientMorphism (.compose _ (ρ y)) =
+              quotientMorphism (.compose _ (τ y))
+            rw [quotientMorphism_compose, quotientMorphism_compose, h y])]
+      rw [ihu (ρ := Env.extend ρ) (τ := Env.extend τ) (fun x => by
+        cases x with
+        | here => rfl
+        | there y =>
+            change quotientMorphism (.compose _ (ρ y)) =
+              quotientMorphism (.compose _ (τ y))
+            rw [quotientMorphism_compose, quotientMorphism_compose, h y])]
+  | lam t ih =>
+      intro X ρ τ h
+      change quotientMorphism (.curry (interpret (Env.extend ρ) t)) =
+        quotientMorphism (.curry (interpret (Env.extend τ) t))
+      rw [quotientMorphism_curry, quotientMorphism_curry]
+      rw [ih (ρ := Env.extend ρ) (τ := Env.extend τ) (fun x => by
+        cases x with
+        | here => rfl
+        | there y =>
+            change quotientMorphism (.compose _ (ρ y)) =
+              quotientMorphism (.compose _ (τ y))
+            rw [quotientMorphism_compose, quotientMorphism_compose, h y])]
+  | app t u iht ihu =>
+      intro X ρ τ h
+      change quotientMorphism
+          (.compose (.pair (interpret ρ t) (interpret ρ u)) _) =
+        quotientMorphism
+          (.compose (.pair (interpret τ t) (interpret τ u)) _)
+      rw [quotientMorphism_compose, quotientMorphism_compose,
+        quotientMorphism_pair, quotientMorphism_pair, iht h, ihu h]
+
+/-- Pointwise definitionally equal environments give definitionally equal interpretations. -/
+theorem interpret_defeq_of_pointwise
+    {X : Object sig.nBases} {Γ : Ctx sig} {A : Object sig.nBases}
+    {ρ τ : Env X Γ}
+    (h : ∀ {B : Object sig.nBases} (x : Var Γ B),
+      IntrinsicDefEq (ρ x) (τ x))
+    (t : Tm Γ A) :
+    IntrinsicDefEq (interpret ρ t) (interpret τ t) := by
+  apply intrinsicDefEq_of_quotient_eq
+  apply interpret_quotient_eq_of_pointwise
+  intro B x
+  exact quotient_eq_of_intrinsicDefEq (h x)
+
 private theorem quotient_comp_pair
     {X Y A B : Object sig.nBases}
     (f : «CΣ».Hom (quotientObject X) (quotientObject Y))
@@ -338,6 +453,25 @@ private theorem quotient_comp_pair
         «CΣ».Hom.comp f h
     rw [«CΣ».Hom.assoc]
     exact congrArg («CΣ».Hom.comp f) («CΣ».Hom.pair_second g h)
+
+/-- Generator constants are natural in their domain. -/
+theorem genEnv_genVar_natural
+    {X Y : Object sig.nBases} (f : IntrinsicMorphism sig X Y)
+    (q : Fin sig.nGens) :
+    IntrinsicDefEq
+      (.compose f (genEnv Y (genVar sig q)))
+      (genEnv X (genVar sig q)) := by
+  rw [genEnv_genVar, genEnv_genVar]
+  apply intrinsicDefEq_of_quotient_eq
+  simp only [generatorValue, quotientMorphism_compose]
+  rw [← «CΣ».Hom.assoc]
+  exact congrArg
+    (fun z => «CΣ».Hom.comp z
+      (quotientMorphism
+        (.curry (.compose (.second .unit (sig.gen q).source) (.generator q)))))
+    («CΣ».Hom.terminal_uniq
+      («CΣ».Hom.comp (quotientMorphism f)
+        (quotientMorphism (IntrinsicMorphism.discard Y))))
 
 /-- Translation retraction for opaque generators. -/
 theorem interpret_translate_generator (q : Fin sig.nGens) :
