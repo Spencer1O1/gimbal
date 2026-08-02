@@ -418,12 +418,113 @@ def selectExactObs (σ : ReachState sig.nBases)
           out := out.push e
     pure out
 
-/--
-Union consistency witnesses with exact term-demanded neutrals.
+/-- Commutative idempotent union of exact neutrals by identity. -/
+def unionExact {Γ : Ctx sig}
+    (a b : Array ((P : Object sig.nBases) × NegNeu Γ P)) :
+    Array ((P : Object sig.nBases) × NegNeu Γ P) :=
+  Id.run do
+    let mut out : Array ((P : Object sig.nBases) × NegNeu Γ P) := #[]
+    for e in a do
+      if !out.any (exactIdEq e) then out := out.push e
+    for e in b do
+      if !out.any (exactIdEq e) then out := out.push e
+    pure out
 
-- Exact: keep every distinct neutral identity (same type allowed more than once).
-- Consistency: at least one witness per pending positive type with no exact yet.
-- Ordered by subformula-table index; exacts of a type precede consistency for it.
+/-- Stable identity for a schedule entry (left/right-insensitive). -/
+def PairEntry.idEq {sig : Signature} {hyps : Array (Object sig.nBases)} :
+    PairEntry sig hyps → PairEntry sig hyps → Bool
+  | .exact P n, .exact Q m => P == Q && NegNeu.toRaw n == NegNeu.toRaw m
+  | .consistency P w, .consistency Q v => P == Q && w == v
+  | _, _ => false
+
+/--
+Deterministic total key for schedule ordering (tie-break after dependencies).
+Format: `typeIdx|0|raw` for exact, `typeIdx|1` for consistency.
+-/
+def PairEntry.sortKey {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (σ : ReachState sig.nBases) : PairEntry sig hyps → String
+  | .exact P n =>
+      let ti := (σ.findTypeIdx P).getD σ.types.size
+      s!"{ti}|0|{repr (NegNeu.toRaw n)}"
+  | .consistency P _ =>
+      let ti := (σ.findTypeIdx P).getD σ.types.size
+      s!"{ti}|1"
+
+/-- Later entry depends on earlier: later's exact spine properly contains earlier's. -/
+def PairEntry.dependsOn {sig : Signature} {hyps : Array (Object sig.nBases)} :
+    PairEntry sig hyps → PairEntry sig hyps → Bool
+  | .exact _ later, .exact _ earlier =>
+      RawNeu.dependsOn (NegNeu.toRaw later) (NegNeu.toRaw earlier)
+  | _, _ => false
+
+/--
+Topological order of observations: dependencies first, then `sortKey` tie-break.
+Guarantees left/right symmetry once the entry multiset is fixed.
+-/
+def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) :
+    Array (PairEntry sig hyps) :=
+  Id.run do
+    let n := entries.size
+    if n == 0 then return #[]
+    let mut indeg : Array Nat := Array.replicate n 0
+    for j in [:n] do
+      for i in [:n] do
+        if i != j then
+          match entries[i]?, entries[j]? with
+          | some ei, some ej =>
+            -- edge i → j when j depends on i (i must precede j)
+            if PairEntry.dependsOn ej ei then
+              indeg := indeg.set! j (indeg[j]! + 1)
+          | _, _ => pure ()
+    let mut remaining : Array Bool := Array.replicate n true
+    let mut out : Array (PairEntry sig hyps) := #[]
+    for _ in [:n] do
+      let mut best : Option Nat := none
+      for i in [:n] do
+        if remaining[i]! && indeg[i]! == 0 then
+          match entries[i]? with
+          | none => pure ()
+          | some e =>
+            match best with
+            | none => best := some i
+            | some b =>
+              match entries[b]? with
+              | some eb =>
+                if PairEntry.sortKey σ e < PairEntry.sortKey σ eb then
+                  best := some i
+              | none => best := some i
+      match best with
+      | none =>
+        -- Cycle fallback: emit remaining by sortKey (should not arise for spines).
+        let mut rest : Array (Nat × PairEntry sig hyps) := #[]
+        for i in [:n] do
+          if remaining[i]! then
+            match entries[i]? with
+            | some e => rest := rest.push (i, e)
+            | none => pure ()
+        let rest' := rest.qsort fun a b =>
+          PairEntry.sortKey σ a.2 < PairEntry.sortKey σ b.2
+        for p in rest' do out := out.push p.2
+        return out
+      | some i =>
+        match entries[i]? with
+        | none => return out
+        | some e =>
+          out := out.push e
+          remaining := remaining.set! i false
+          for j in [:n] do
+            if remaining[j]! then
+              match entries[j]? with
+              | some ej =>
+                if PairEntry.dependsOn ej e then
+                  indeg := indeg.set! j (indeg[j]! - 1)
+              | none => pure ()
+    pure out
+
+/--
+Union consistency witnesses with exact term-demanded neutrals, then
+canonicalize order (dependency DAG + stable key).
 -/
 def mergePairObs (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
@@ -431,56 +532,48 @@ def mergePairObs (σ : ReachState sig.nBases)
     (exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
     Array (PairEntry sig hyps) :=
   Id.run do
-    let mut witSrc : Array (Object sig.nBases × Witness) := #[]
+    let mut bag : Array (PairEntry sig hyps) := #[]
+    for e in exactSrc do
+      bag := bag.push (.exact e.1 e.2)
     let hasExactTy (A : Object sig.nBases) : Bool :=
       exactSrc.any (fun e => e.1 == A)
     for e in consistency.entries do
-      if !hasExactTy e.1 && !witSrc.any (fun w => w.1 == e.1) then
-        witSrc := witSrc.push e
-    let mut out : Array (PairEntry sig hyps) := #[]
-    let mut emittedExact :
-        Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
-    let mut emittedWit : Array (Object sig.nBases) := #[]
-    for i in [:σ.types.size] do
-      match σ.typeAt i with
-      | some A =>
-        for e in exactSrc do
-          if e.1 == A && !emittedExact.any (exactIdEq e) then
-            out := out.push (.exact e.1 e.2)
-            emittedExact := emittedExact.push e
-        if !hasExactTy A then
-          match witSrc.findIdx? (fun w => w.1 == A) with
-          | some j =>
-            match witSrc[j]? with
-            | some (P, w) =>
-              out := out.push (.consistency P w)
-              emittedWit := emittedWit.push A
-            | none => pure ()
-          | none => pure ()
-      | none => pure ()
-    for e in exactSrc do
-      if !emittedExact.any (exactIdEq e) then
-        out := out.push (.exact e.1 e.2)
-    for e in witSrc do
-      if !emittedWit.contains e.1 && !hasExactTy e.1 then
-        out := out.push (.consistency e.1 e.2)
-    pure out
+      if !hasExactTy e.1 && !bag.any fun
+          | .consistency Q _ => Q == e.1
+          | .exact .. => false
+      then
+        bag := bag.push (.consistency e.1 e.2)
+    pure (canonicalizePairObsOrder σ bag)
 
 /-- Outcome of building the shared pair observation list. -/
 inductive PairObsResult (sig : Signature) (hyps : Array (Object sig.nBases)) where
   | ok : Array (PairEntry sig hyps) → ReachState sig.nBases → PairObsResult sig hyps
   | invariantFailure
 
+/-- Schedule entry lists compare equal under `PairEntry.idEq`. -/
+def pairObsEntriesEq {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (a b : Array (PairEntry sig hyps)) : Bool :=
+  a.size == b.size &&
+    Id.run do
+      for i in [:a.size] do
+        match a[i]?, b[i]? with
+        | some ea, some eb =>
+          if !PairEntry.idEq ea eb then return false
+        | _, _ => return false
+      pure true
+
 /--
 Build the shared pair-directed observation list: consistency ∪ exact demands
-from both terms. Old-only exact neutrals selected for observation are an
-invariant failure.
+from both terms (union is left/right-symmetric). Old-only exact neutrals
+selected for observation are an invariant failure. Order is dependency-respecting
+and deterministic.
 -/
 def pairObs (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     {A : Object sig.nBases}
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) : PairObsResult sig Γ.hyps :=
   let σ := runReachability Γ goal
-  let exactSel := selectExactObs σ Γ.hyps (collectExact t ++ collectExact u)
+  let exactSel :=
+    selectExactObs σ Γ.hyps (unionExact (collectExact t) (collectExact u))
   if !exactsAllUseNew Γ.hyps.size Γ.newFrom exactSel then
     .invariantFailure
   else

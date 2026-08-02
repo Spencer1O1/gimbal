@@ -757,4 +757,98 @@ def oldOnlyExactInvariantFailure : Bool :=
 
 example : oldOnlyExactInvariantFailure = true := by native_decide
 
+/-! ### M8 Slice 3: canonical shared schedule -/
+
+/-- Left/right swap yields the same canonical schedule. -/
+def scheduleLeftRightSymmetric : Bool :=
+  let tmL : Tm (Ctx.ofHyps (sig := Sig2) twoExactHyps)
+      (.prod (.base 1) (.base 1)) :=
+    .pair
+      (.app (.var (.there (.there .here))) (.var .here))
+      (.app (.var (.there .here)) (.var .here))
+  let tmR : Tm (Ctx.ofHyps (sig := Sig2) twoExactHyps)
+      (.prod (.base 1) (.base 1)) :=
+    .pair
+      (.app (.var (.there .here)) (.var .here))
+      (.app (.var (.there (.there .here))) (.var .here))
+  let Γ : ReachCtx 2 := ⟨twoExactHyps, 2⟩
+  match focus! tmL, focus! tmR with
+  | some t, some u =>
+    match pairObs (sig := Sig2) Γ (.unit : Object 2) t u,
+          pairObs (sig := Sig2) Γ (.unit : Object 2) u t with
+    | .ok a _, .ok b _ => pairObsEntriesEq a b
+    | _, _ => false
+  | _, _ => false
+
+example : scheduleLeftRightSymmetric = true := by native_decide
+
+/-- Exact union is idempotent. -/
+def exactUnionIdempotent : Bool :=
+  let tm : Tm (Ctx.ofHyps (sig := Sig2) twoExactHyps)
+      (.prod (.base 1) (.base 1)) :=
+    .pair
+      (.app (.var (.there (.there .here))) (.var .here))
+      (.app (.var (.there .here)) (.var .here))
+  match focus! tm with
+  | some t =>
+    let ex := collectExact (sig := Sig2) t
+    (unionExact ex ex).size == ex.size
+  | none => false
+
+example : exactUnionIdempotent = true := by native_decide
+
+/--
+Dependent neutrals: `g (f x)` is scheduled after `f x`.
+Context `f : X→Y`, `g : Y→Z`, `x : X`.
+-/
+def depAppHyps : Array (Object 3) := #[
+  .exp (.base 0) (.base 1),
+  .exp (.base 1) (.base 2),
+  .base 0
+]
+
+def depAppOrdered : Bool :=
+  let fx : Tm (Ctx.ofHyps (sig := Sig3) depAppHyps) (.base 1) :=
+    .app (.var (.there (.there .here))) (.var .here)
+  let tm : Tm (Ctx.ofHyps (sig := Sig3) depAppHyps)
+      (.prod (.base 1) (.base 2)) :=
+    .pair fx (.app (.var (.there .here)) fx)
+  let Γ : ReachCtx 3 := ⟨depAppHyps, 2⟩
+  match focus! tm with
+  | some t =>
+    match pairObs (sig := Sig3) Γ (.unit : Object 3) t t with
+    | .ok entries _ =>
+      Id.run do
+        let mut iY : Option Nat := none
+        let mut iZ : Option Nat := none
+        for i in [:entries.size] do
+          match entries[i]? with
+          | some (.exact P _) =>
+            if P == (.base 1 : Object 3) && iY.isNone then iY := some i
+            if P == (.base 2 : Object 3) && iZ.isNone then iZ := some i
+          | _ => pure ()
+        match iY, iZ with
+        | some y, some z => pure (decide (y < z))
+        | _, _ => pure false
+    | .invariantFailure => false
+  | none => false
+
+example : depAppOrdered = true := by native_decide
+
+/--
+Independent consistency observations: reversing the *canonical* schedule and
+re-sorting recovers the same order (canonicalization is a projection).
+-/
+def reverseThenCanonicalSame : Bool :=
+  let Γ := twoAppCtx
+  let goal : Object 3 := .unit
+  let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
+  match pairObs (sig := Sig3) Γ goal cont cont with
+  | .ok entries σ =>
+    let rev := entries.reverse
+    pairObsEntriesEq (canonicalizePairObsOrder σ rev) entries
+  | .invariantFailure => false
+
+example : reverseThenCanonicalSame = true := by native_decide
+
 end Gimbal.Equality.Fixtures

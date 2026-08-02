@@ -241,6 +241,42 @@ def Var.toRawIdx {Γ : Ctx sig} {A : Object sig.nBases} : Var Γ A → Nat
   | .here => 0
   | .there x => x.toRawIdx + 1
 
+/-! ### Raw spine search (schedule dependency) -/
+
+mutual
+/-- `needle` occurs as a sub-neutral of `hay` (possibly equal). -/
+def RawNeu.hasNeu (hay needle : RawNeu) : Bool :=
+  hay == needle ||
+    match hay with
+    | .var _ => false
+    | .app n a => RawNeu.hasNeu n needle || RawFocused.hasNeu a needle
+    | .fst n => RawNeu.hasNeu n needle
+    | .snd n => RawNeu.hasNeu n needle
+
+def RawPos.hasNeu (hay : RawPos) (needle : RawNeu) : Bool :=
+  match hay with
+  | .neu n => RawNeu.hasNeu n needle
+  | .inl p => RawPos.hasNeu p needle
+  | .inr p => RawPos.hasNeu p needle
+
+def RawFocused.hasNeu (hay : RawFocused) (needle : RawNeu) : Bool :=
+  match hay with
+  | .unit => false
+  | .pair t u => RawFocused.hasNeu t needle || RawFocused.hasNeu u needle
+  | .lam t => RawFocused.hasNeu t needle
+  | .case s t u =>
+      RawNeu.hasNeu s needle || RawFocused.hasNeu t needle || RawFocused.hasNeu u needle
+  | .abort n => RawNeu.hasNeu n needle
+  | .pos p => RawPos.hasNeu p needle
+  | .neg n => RawNeu.hasNeu n needle
+  | .letPos n t => RawNeu.hasNeu n needle || RawFocused.hasNeu t needle
+  | .sat _ t => RawFocused.hasNeu t needle
+end
+
+/-- Strict dependency: `outer` mentions `inner` as a proper sub-neutral. -/
+def RawNeu.dependsOn (outer inner : RawNeu) : Bool :=
+  outer != inner && RawNeu.hasNeu outer inner
+
 mutual
 def NegNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → RawNeu
   | .var x => .var x.toRawIdx
