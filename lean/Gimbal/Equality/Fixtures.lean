@@ -851,4 +851,118 @@ def reverseThenCanonicalSame : Bool :=
 
 example : reverseThenCanonicalSame = true := by native_decide
 
+/-!
+### Audit regressions (Steve §5)
+
+Supporting evidence from the pre-M8 `compareSatRec` audit.
+Intended semantics in comments; examples assert current executable behavior
+until the foundation that fixes them lands. Not a replacement for the M8 handoff.
+-/
+
+/-- Audit 5.1: `toRaw` of `sat` records only schedule **length**. -/
+def auditSatRawIgnoresScheduleEntries : Bool :=
+  let s1 : Schedule 1 := ⟨#[((.base 0 : Object 1), Witness.ctxVar 0)]⟩
+  let s2 : Schedule 1 := ⟨#[((.base 0 : Object 1), Witness.ctxVar 1)]⟩
+  let t1 : InvTm (Ctx.empty : Ctx Sig1) (.unit : Object 1) :=
+    .foc (.sat (.mk s1 .unit))
+  let t2 : InvTm (Ctx.empty : Ctx Sig1) (.unit : Object 1) :=
+    .foc (.sat (.mk s2 .unit))
+  s1 != s2 && InvTm.toRaw t1 == InvTm.toRaw t2
+
+example : auditSatRawIgnoresScheduleEntries = true := by native_decide
+
+/--
+Audit 5.2 sharp: `x : X`, `f : 1 → X`, term `f ()`.
+Exact `f()` must remain scheduled even though `X` is retrievable from `x`.
+**Current:** `selectExactObs` drops it (`sel = 0`). **Intended:** `sel = 1`.
+-/
+def auditExactKeptWhenRetrievable : Bool :=
+  let hyps : Array (Object 1) := #[.base 0, .exp (.unit : Object 1) (.base 0)]
+  let tm : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) :=
+    .app (.var .here) .unit
+  match focus! tm with
+  | none => false
+  | some t =>
+    let σ := runReachability (⟨hyps, 0⟩ : ReachCtx 1) (.base 0)
+    let ex := collectExact (sig := Sig1) t
+    let sel := selectExactObs (sig := Sig1) σ hyps ex
+    -- Pin current bug until S5 selection fix:
+    ex.size == 1 && isRetrievable σ (.base 0) && sel.size == 0
+
+example : auditExactKeptWhenRetrievable = true := by native_decide
+
+/-- Audit 5.3: dependency order (also Slice 3 `depAppOrdered`). -/
+example : depAppOrdered = true := by native_decide
+
+/--
+Audit 5.4: observing `n` on continuation `n` must abstract to `let x = n in x`.
+**Current:** `letPos n (weaken n)`. **Intended:** body is the new variable.
+-/
+def auditNoAbstractionYet : Bool :=
+  let hyps : Array (Object 1) := #[.exp (.unit : Object 1) (.base 0)]
+  let Γ : ReachCtx 1 := ⟨hyps, 0⟩
+  let tm : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) :=
+    .app (.var .here) .unit
+  match focus! tm with
+  | none => false
+  | some t =>
+    match pairObs (sig := Sig1) Γ (.base 0) t t with
+    | .invariantFailure => false
+    | .ok entries σ =>
+      match applyPairObs (sig := Sig1) 64 σ hyps entries t with
+      | .ok t' =>
+        match InvTm.toRaw t' with
+        | .letPos _ body =>
+          -- Body still mentions the original app (var 1), not `.var 0`.
+          body != .pos (.neu (.var 0))
+        | _ => false
+      | _ => false
+
+example : auditNoAbstractionYet = true := by native_decide
+
+/--
+Audit 5.5: `f : (X+Y) → Z`, `x : X` should make `Z` simply deducible via `f (inl x)`.
+**Current:** not discovered. **Intended:** `isSimplyDeducible = true`.
+-/
+def auditNoInlSynthesisYet : Bool :=
+  let hyps : Array (Object 3) := #[
+    .exp (.coprod (.base 0) (.base 1)) (.base 2),
+    .base 0
+  ]
+  let Γ : ReachCtx 3 := ⟨hyps, 0⟩
+  isSimplyDeducible (runReachability Γ (.base 2)) (.base 2) == false
+
+example : auditNoInlSynthesisYet = true := by native_decide
+
+/--
+Audit 5.6: hidden inconsistency via `f (inl x) : 0` should collapse `a = b`.
+**Current:** compare reports `.different`. **Intended:** `.equal` (after S5).
+-/
+def auditHiddenInconsistencyFalseNegative : Bool :=
+  let hyps : Array (Object 3) := #[
+    .exp (.coprod (.base 0) (.base 1)) (.never : Object 3),
+    .base 0,
+    .base 2,
+    .base 2
+  ]
+  let Γ : ReachCtx 3 := ⟨hyps, 0⟩
+  let t : InvTm (Ctx.ofHyps (sig := Sig3) hyps) (.base 2) :=
+    .foc (.pos (.done (.neu (.var (.there .here)))))
+  let u : InvTm (Ctx.ofHyps (sig := Sig3) hyps) (.base 2) :=
+    .foc (.pos (.done (.neu (.var .here))))
+  -- a = there.here (older Z), b = here (newer Z) under snoc … ▻ a ▻ b
+  match compareInv (sig := Sig3) Γ (.base 2) t u (fuel := 64) with
+  | .different => true  -- pin current false negative
+  | _ => false
+
+example : auditHiddenInconsistencyFalseNegative = true := by native_decide
+
+/-- Audit 5.7: fuel zero is exhaustion, never a semantic `.different`. -/
+example :
+    compareIntrinsic (fuel := 0)
+      (IntrinsicMorphism.id (sig := NumSig) Number)
+      (IntrinsicMorphism.id (sig := NumSig) Number) =
+      CandidateResult.exhausted .focus := by
+  native_decide
+
 end Gimbal.Equality.Fixtures
