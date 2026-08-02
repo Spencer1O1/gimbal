@@ -507,4 +507,175 @@ example :
       CandidateResult.equal := by
   native_decide
 
+/-! ### Coproduct / exponential laws & observation fixtures -/
+
+/-- Coproduct commuting conversion: `case` past `pair` (ICC). -/
+def iccCasePairCanonical : Bool :=
+  let n : NegNeu (translateCtx (sig := NumSig) (.coprod Number Number))
+      (.coprod Number Number) := .var .here
+  let t : InvTm (translateCtx (sig := NumSig) (.coprod Number Number) ▻ Number)
+      (.prod (.unit : Object 1) (.unit : Object 1)) :=
+    .pair .unit .unit
+  let u : InvTm (translateCtx (sig := NumSig) (.coprod Number Number) ▻ Number)
+      (.prod (.unit : Object 1) (.unit : Object 1)) :=
+    .pair .unit .unit
+  match canonicalize (.case n t u) with
+  | .pair .unit .unit => true
+  | _ => false
+
+example : iccCasePairCanonical = true := by native_decide
+
+/-- Coproduct β (left): `left ≫ case(id,id) = id`. -/
+def coprodBetaLeft : CandidateResult :=
+  compareIntrinsic (sig := NumSig) (fuel := 512)
+    (IntrinsicMorphism.compose (sig := NumSig)
+      (IntrinsicMorphism.left (sig := NumSig) Number Number)
+      (IntrinsicMorphism.case (sig := NumSig)
+        (IntrinsicMorphism.id (sig := NumSig) Number)
+        (IntrinsicMorphism.id (sig := NumSig) Number)))
+    (IntrinsicMorphism.id (sig := NumSig) Number)
+
+example : coprodBetaLeft = CandidateResult.equal := by native_decide
+
+/-- Coproduct β (right): `right ≫ case(id,id) = id`. -/
+def coprodBetaRight : CandidateResult :=
+  compareIntrinsic (sig := NumSig) (fuel := 512)
+    (IntrinsicMorphism.compose (sig := NumSig)
+      (IntrinsicMorphism.right (sig := NumSig) Number Number)
+      (IntrinsicMorphism.case (sig := NumSig)
+        (IntrinsicMorphism.id (sig := NumSig) Number)
+        (IntrinsicMorphism.id (sig := NumSig) Number)))
+    (IntrinsicMorphism.id (sig := NumSig) Number)
+
+example : coprodBetaRight = CandidateResult.equal := by native_decide
+
+/-- Coproduct η: `case(left, right) = id`. -/
+def coprodEta : CandidateResult :=
+  compareIntrinsic (sig := NumSig) (fuel := 512)
+    (IntrinsicMorphism.case (sig := NumSig)
+      (IntrinsicMorphism.left (sig := NumSig) Number Number)
+      (IntrinsicMorphism.right (sig := NumSig) Number Number))
+    (IntrinsicMorphism.id (sig := NumSig) (.coprod Number Number))
+
+example : coprodEta = CandidateResult.equal := by native_decide
+
+/-- Exponential η: `curry((f × id) ≫ eval) = f` at `id : A ⇒ B`. -/def uncurryIdExp : IntrinsicMorphism NumSig
+    (.prod (.exp Number Number) Number) Number :=
+  IntrinsicMorphism.compose (sig := NumSig)
+    (IntrinsicMorphism.pair (sig := NumSig)
+      (IntrinsicMorphism.compose (sig := NumSig)
+        (IntrinsicMorphism.first (sig := NumSig) (.exp Number Number) Number)
+        (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number)))
+      (IntrinsicMorphism.second (sig := NumSig) (.exp Number Number) Number))
+    (IntrinsicMorphism.eval (sig := NumSig) Number Number)
+
+def expEta : CandidateResult :=
+  compareIntrinsic (sig := NumSig) (fuel := 512)
+    (IntrinsicMorphism.curry (sig := NumSig) uncurryIdExp)
+    (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number))
+
+example : expEta = CandidateResult.equal := by native_decide
+
+/--
+Independent neutrals `Y`, `Z` from `s : X→Y`, `t : X→Z`, `x : X`.
+Shared schedule has both; order is subformula-table (not term demand order).
+-/
+def twoAppCtx : ReachCtx 3 where
+  hyps := #[
+    .exp (.base 0) (.base 1),
+    .exp (.base 0) (.base 2),
+    .base 0
+  ]
+  newFrom := 2
+
+private abbrev Sig3 : Signature := ⟨3, #[]⟩
+
+def twoAppScheduleSize : Nat :=
+  (buildSchedule (runReachability twoAppCtx (.unit : Object 3))).size
+
+example : twoAppScheduleSize = 2 := by native_decide
+
+/-- Pair-directed compare under two independent observations. -/
+def twoAppObsEqual : Bool :=
+  let Γ := twoAppCtx
+  let goal : Object 3 := .unit
+  let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
+  match compareInv (sig := Sig3) Γ goal cont cont (fuel := 256) with
+  | .equal => true
+  | _ => false
+
+example : twoAppObsEqual = true := by native_decide
+
+/--
+Redundant repeated observation: duplicating the schedule list yields the same
+raw saturated syntax as applying it once (second copy is still applied as
+`letPos`, but compare of once-saturated continuations stays equal).
+Here we check merge dedup: exact∪consistency schedule size equals consistency
+size when the focused term contributes no extra exact positives.
+-/
+def redundantObsDedup : Bool :=
+  let Γ := twoAppCtx
+  let goal : Object 3 := .unit
+  let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
+  let σ := runReachability Γ goal
+  let sched := buildSchedule σ
+  let (entries, _) := pairObs (sig := Sig3) Γ goal cont cont
+  entries.size == sched.size && sched.size == 2
+
+example : redundantObsDedup = true := by native_decide
+
+/--
+`x : X`, `s : X → X`: concrete observation chains are infinite, but the finite
+subformula schedule stays empty (atom already retrievable from the hyp).
+-/
+def loopCtx : ReachCtx 1 where
+  hyps := #[.exp (.base 0) (.base 0), .base 0]
+  newFrom := 1
+
+example :
+    (buildSchedule (runReachability loopCtx (.unit : Object 1))).size = 0 := by
+  native_decide
+
+example :
+    isSimplyDeducible (runReachability loopCtx (.base 0)) (.base 0) = true := by
+  native_decide
+
+example :
+    isRetrievable (runReachability loopCtx (.base 0)) (.base 0) = true := by
+  native_decide
+
+/-- Higher-order generator returning a sum. -/
+def HofSumSig : Signature where
+  nBases := 1
+  generators := #[⟨.unit, .coprod Number Number⟩]
+
+def hofSumId : CandidateResult :=
+  compareIntrinsic (sig := HofSumSig) (fuel := 512)
+    (.generator ⟨0, by decide⟩) (.generator ⟨0, by decide⟩)
+
+example : hofSumId = CandidateResult.equal := by native_decide
+
+/-- `g ≫ case(left,right) = g` (η after a sum-valued generator). -/
+def hofSumEta : CandidateResult :=
+  compareIntrinsic (sig := HofSumSig) (fuel := 512)
+    (IntrinsicMorphism.compose (sig := HofSumSig)
+      (.generator ⟨0, by decide⟩)
+      (IntrinsicMorphism.case (sig := HofSumSig)
+        (IntrinsicMorphism.left (sig := HofSumSig) Number Number)
+        (IntrinsicMorphism.right (sig := HofSumSig) Number Number)))
+    (.generator ⟨0, by decide⟩)
+
+example : hofSumEta = CandidateResult.equal := by native_decide
+
+/-- Higher-order generator returning a function. -/
+def HofExpSig : Signature where
+  nBases := 1
+  generators := #[⟨.unit, .exp Number Number⟩]
+
+def hofExpId : CandidateResult :=
+  compareIntrinsic (sig := HofExpSig) (fuel := 512)
+    (.generator ⟨0, by decide⟩) (.generator ⟨0, by decide⟩)
+
+example : hofExpId = CandidateResult.equal := by native_decide
+
 end Gimbal.Equality.Fixtures

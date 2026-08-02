@@ -97,6 +97,21 @@ def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
         | u => .case n (.lam t₁) u
     | t => .case n t u
 
+/--
+Coproduct η: `case n (x. inl x) (y. inr y) = n` when the result type is the sum.
+Checked via raw spines so the mutual canonicalizer stays structurally recursive.
+-/
+def tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : Option (InvTm Γ C) :=
+  if h : C = (.coprod A B : Object sig.nBases) then
+    match InvTm.toRaw t, InvTm.toRaw u with
+    | .pos (.inl (.neu (.var 0))), .pos (.inr (.neu (.var 0))) =>
+        some (h ▸ .foc (.pos (.done (.neu n))))
+    | _, _ => none
+  else
+    none
+
 mutual
 /-- Push `case` outward past invertible introductions (fueled). -/
 def canonicalizeInv (fuel : Nat) {Γ : Ctx sig} {A : Object sig.nBases} :
@@ -114,8 +129,11 @@ def canonicalizeInv (fuel : Nat) {Γ : Ctx sig} {A : Object sig.nBases} :
       | .abort n =>
           .abort n
       | .case n t u =>
-          caseCommute fuel n
-            (canonicalizeInv fuel t) (canonicalizeInv fuel u)
+          let t' := canonicalizeInv fuel t
+          let u' := canonicalizeInv fuel u
+          match tryCoprodEta n t' u' with
+          | some r => r
+          | none => caseCommute fuel n t' u'
       | .foc f =>
           .foc (canonicalizeFoc fuel f)
 

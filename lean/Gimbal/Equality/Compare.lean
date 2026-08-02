@@ -67,15 +67,23 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     -- generators inhabit positives (targets are simply deducible from Γold
     -- without being retrievable there). Milestone 8 tightens this against
     -- Scherer's selection invariant; for M7 we only refuse on hard failure.
-    let (entries, σ) := pairObs Γ goal t u
-    match applyPairObs fuel σ Γ.hyps entries t,
-          applyPairObs fuel σ Γ.hyps entries u with
-    | .exhausted, _ | _, .exhausted => .exhausted .saturate
-    | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
-    | .ok t', .ok u' =>
-        compareInvRec fuel Γ.hyps goal
-          (canonicalize (fuel := fuel) t')
-          (canonicalize (fuel := fuel) u')
+    --
+    -- Fast path: if ICC already identifies the spines, skip re-saturation.
+    -- Shared-schedule application preserves equality, so this stays sound for
+    -- the candidate; it avoids pathological re-observation of sum-valued gens.
+    let t0 := canonicalize (fuel := fuel) t
+    let u0 := canonicalize (fuel := fuel) u
+    if structurallyEqual t0 u0 then .equal
+    else
+      let (entries, σ) := pairObs Γ goal t0 u0
+      match applyPairObs fuel σ Γ.hyps entries t0,
+            applyPairObs fuel σ Γ.hyps entries u0 with
+      | .exhausted, _ | _, .exhausted => .exhausted .saturate
+      | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+      | .ok t', .ok u' =>
+          compareInvRec fuel Γ.hyps goal
+            (canonicalize (fuel := fuel) t')
+            (canonicalize (fuel := fuel) u')
 
 /-- Lockstep invertible comparison with re-entry under new binders. -/
 def compareInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
