@@ -207,6 +207,35 @@ def genType (sig : Signature) (q : Fin sig.nGens) : Object sig.nBases :=
   .exp (sig.gen q).source (sig.gen q).target
 
 /--
+Prefix of the generator telescope after snoc'ing generators `0 .. i-1`
+(`0` outermost / largest de Bruijn index).
+-/
+def genCtxPrefix (sig : Signature) : (i : Nat) → i ≤ sig.nGens → Ctx sig
+  | 0, _ => .empty
+  | i + 1, hi =>
+      have hi' : i ≤ sig.nGens := Nat.le_of_succ_le hi
+      have i_lt : i < sig.nGens := Nat.lt_of_succ_le hi
+      genCtxPrefix sig i hi' ▻ genType sig ⟨i, i_lt⟩
+
+/-- Variable for generator `q` in `genCtxPrefix i`. -/
+def genVarPrefix (sig : Signature) :
+    (i : Nat) → (hi : i ≤ sig.nGens) →
+    (q : Fin i) → Var (genCtxPrefix sig i hi)
+      (genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩)
+  | 0, _, q => nomatch q
+  | i + 1, hi, q =>
+      have hi' : i ≤ sig.nGens := Nat.le_of_succ_le hi
+      have i_lt : i < sig.nGens := Nat.lt_of_succ_le hi
+      if h : q.val = i then
+        have hty : genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩ =
+            genType sig ⟨i, i_lt⟩ := by simp [h]
+        hty ▸ Var.here
+      else
+        have q_lt_i : q.val < i :=
+          Nat.lt_of_le_of_ne (Nat.le_of_lt_succ q.isLt) h
+        .there (genVarPrefix sig i hi' ⟨q.val, q_lt_i⟩)
+
+/--
 Telescope of rigid generator variables, snoc'd in ID order
 (`0` outermost / largest de Bruijn index).
 -/
@@ -216,37 +245,17 @@ structure GenTelescope (sig : Signature) where
 
 /-- Build the generator telescope by snoc'ing generators `0 .. nGens-1`. -/
 def genTelescope (sig : Signature) : GenTelescope sig :=
-  let rec go (i : Nat) (hi : i ≤ sig.nGens) :
-      Σ' Γ : Ctx sig,
-        (q : Fin i) → Var Γ (genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩) :=
-    match i with
-    | 0 =>
-      ⟨.empty, fun q => nomatch q⟩
-    | i + 1 =>
-      have hi' : i ≤ sig.nGens := Nat.le_of_succ_le hi
-      have i_lt : i < sig.nGens := Nat.lt_of_succ_le hi
-      let ⟨Γ, vs⟩ := go i hi'
-      let A := genType sig ⟨i, i_lt⟩
-      ⟨Γ ▻ A, fun q =>
-        if h : q.val = i then
-          have hty : genType sig ⟨q.val, Nat.lt_of_lt_of_le q.isLt hi⟩ = A := by
-            simp [h, A]
-          hty ▸ Var.here
-        else
-          have q_lt_i : q.val < i :=
-            Nat.lt_of_le_of_ne (Nat.le_of_lt_succ q.isLt) h
-          .there (vs ⟨q.val, q_lt_i⟩)⟩
-  let ⟨Γ, vs⟩ := go sig.nGens (Nat.le_refl _)
-  ⟨Γ, fun q => vs ⟨q.val, q.isLt⟩⟩
+  ⟨genCtxPrefix sig sig.nGens (Nat.le_refl _),
+   fun q => genVarPrefix sig sig.nGens (Nat.le_refl _) ⟨q.val, q.isLt⟩⟩
 
 /-- Fixed rigid generator context `Γgen`. -/
 def genCtx (sig : Signature) : Ctx sig :=
-  (genTelescope sig).ctx
+  genCtxPrefix sig sig.nGens (Nat.le_refl _)
 
 /-- Variable for generator `q` in `Γgen`. -/
 def genVar (sig : Signature) (q : Fin sig.nGens) :
     Var (genCtx sig) (genType sig q) :=
-  (genTelescope sig).var q
+  genVarPrefix sig sig.nGens (Nat.le_refl _) ⟨q.val, q.isLt⟩
 
 end Equality
 end Gimbal

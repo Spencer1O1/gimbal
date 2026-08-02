@@ -20,6 +20,7 @@ import Gimbal.Equality.Elaborate
 import Gimbal.Equality.LambdaSyntax
 import Gimbal.Equality.Algebra
 import Gimbal.Equality.Translate
+import Gimbal.Equality.Interpret
 import Gimbal.Equality.Polarized
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Focus
