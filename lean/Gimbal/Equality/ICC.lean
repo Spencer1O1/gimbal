@@ -51,6 +51,22 @@ inductive ICCEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
         (.lam (.case (NegNeu.weaken n)
           (InvTm.rename Rename.exchange t)
           (InvTm.rename Rename.exchange u)))
+  | case_case {Γ A B C D E}
+      (n : NegNeu Γ (.coprod A B))
+      (m : NegNeu Γ (.coprod C D))
+      (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
+      (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E) :
+      ICCEq
+        (.case n
+          (.case (NegNeu.weaken m) t₁ t₂)
+          (.case (NegNeu.weaken m) u₁ u₂))
+        (.case m
+          (.case (NegNeu.weaken n)
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+          (.case (NegNeu.weaken n)
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂)))
   | abort_eq {Γ A} (n m : NegNeu Γ .never) :
       ICCEq (.abort (A := A) n) (.abort m)
 
@@ -95,6 +111,29 @@ def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
               (InvTm.rename Rename.exchange t₁)
               (InvTm.rename Rename.exchange u₁))
         | u => .case n (.lam t₁) u
+    | .case (A := C) (B := D) n₁ t₁ u₁ =>
+        match u with
+        | .case (A := C') (B := D') n₂ t₂ u₂ =>
+            if hC : C = C' then
+              if hD : D = D' then
+                match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
+                | some m₁, some m₂ =>
+                  if NegNeu.toRaw m₁ == NegNeu.toRaw m₂ then
+                    let t₂' : InvTm (Γ ▻ B ▻ C) _ := hC.symm ▸ t₂
+                    let u₂' : InvTm (Γ ▻ B ▻ D) _ := hD.symm ▸ u₂
+                    .case m₁
+                      (caseCommute fuel (NegNeu.weaken (B := C) n)
+                        (InvTm.rename Rename.exchange t₁)
+                        (InvTm.rename Rename.exchange t₂'))
+                      (caseCommute fuel (NegNeu.weaken (B := D) n)
+                        (InvTm.rename Rename.exchange u₁)
+                        (InvTm.rename Rename.exchange u₂'))
+                  else
+                    .case n (.case n₁ t₁ u₁) u
+                | _, _ => .case n (.case n₁ t₁ u₁) u
+              else .case n (.case n₁ t₁ u₁) u
+            else .case n (.case n₁ t₁ u₁) u
+        | u => .case n (.case n₁ t₁ u₁) u
     | t => .case n t u
 
 /--
@@ -142,7 +181,11 @@ def canonicalizeFoc (fuel : Nat) {Γ : Ctx sig} {A : Object sig.nBases} :
   | .pos p => .pos p
   | .neg n => .neg n
   | .letPos n t => .letPos n (canonicalizeInv fuel t)
-  | .sat (.mk s t) => .sat (.mk s (canonicalizeInv fuel t))
+  | .sat (.mk _s t) =>
+      -- Drop schedule metadata; keep only the saturated body.
+      match canonicalizeInv fuel t with
+      | .foc f => f
+      | t' => .sat (.mk ⟨#[]⟩ t')
 end
 
 /-- Default-fuel ICC canonicalizer. -/

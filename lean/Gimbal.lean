@@ -18,6 +18,7 @@ import Gimbal.SyntacticCategory.BicartesianClosed
 import Gimbal.Equality.IntrinsicMorphism
 import Gimbal.Equality.Elaborate
 import Gimbal.Equality.LambdaSyntax
+import Gimbal.Equality.Algebra
 import Gimbal.Equality.Translate
 import Gimbal.Equality.Polarized
 import Gimbal.Equality.Focused
@@ -27,5 +28,6 @@ import Gimbal.Equality.Deduction
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.ICC
 import Gimbal.Equality.Compare
+import Gimbal.Equality.Reference
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures

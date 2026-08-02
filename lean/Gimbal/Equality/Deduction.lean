@@ -50,6 +50,10 @@ inductive SimpleDeduction (Γ : ReachCtx n) : Object n → Prop where
       SimpleDeduction Γ (.exp Arg Ret) →
       SimpleDeduction Γ Arg →
       SimpleDeduction Γ Ret
+  /-- Function η / identity expansion: a return type yields `Arg → Ret`. -/
+  | expEta {Arg Ret} :
+      SimpleDeduction Γ Ret →
+      SimpleDeduction Γ (.exp Arg Ret)
   | never {A} :
       SimpleDeduction Γ (.never : Object n) →
       SimpleDeduction Γ A
@@ -110,6 +114,9 @@ inductive UsesNew (Γ : ReachCtx n) : Object n → Prop where
       SimpleDeduction Γ (.exp Arg Ret) →
       UsesNew Γ Arg →
       UsesNew Γ Ret
+  | expEta {Arg Ret} :
+      UsesNew Γ Ret →
+      UsesNew Γ (.exp Arg Ret)
 
 end Equality
 end Gimbal

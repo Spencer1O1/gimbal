@@ -183,8 +183,10 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
         | some (.neu hyps' A' n) =>
           if hH : hyps' = hyps then
             if hA : A' = A then
-              some (.inv hyps A (.foc (.pos (.done (.neu
-                (NegNeu.cast hA (NegNeu.castHyps hH n)))))))
+              let n' := NegNeu.cast hA (NegNeu.castHyps hH n)
+              match objectPolarity A with
+              | .pos => some (.inv hyps A (.foc (.pos (.done (.neu n')))))
+              | .neg => some (.inv hyps A (.foc (.neg (.done n'))))
             else none
           else none
         | _ =>
@@ -243,6 +245,22 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
               match inlVal with
               | some v => some v
               | none => inrVal
+          | .exp Arg Ret =>
+            -- Identity expansion: `λ x. t` when `t : Ret` under `hyps ▻ Arg`.
+            let hyps' := hyps.push Arg
+            have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ Arg :=
+              Ctx.ofHyps_push hyps Arg
+            match reconstructGo fuel σ (.invOf hyps' Ret) with
+            | some (.inv hyps'' B t) =>
+              if hH : hyps'' = hyps' then
+                if hB : B = Ret then
+                  let body : InvTm (Ctx.ofHyps hyps ▻ Arg) Ret :=
+                    InvTm.castCtx hctx
+                      (InvTm.castTy hB (InvTm.castHyps hH t))
+                  some (.inv hyps (.exp Arg Ret) (.lam body))
+                else none
+              else none
+            | _ => none
           | _ => none
 
 /-- Reconstruct a negative neutral for a target type. -/

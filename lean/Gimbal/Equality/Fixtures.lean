@@ -9,6 +9,7 @@ import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.ICC
 import Gimbal.Equality.Compare
+import Gimbal.Equality.Reference
 import Gimbal.Fixtures
 
 namespace Gimbal.Equality.Fixtures
@@ -301,6 +302,33 @@ def iccCaseUnitCanonical : Bool :=
 
 example : iccCaseUnitCanonical = true := by native_decide
 
+/-- Nested case/case commuting + unit collapse. -/
+def iccCaseCaseCanonical : Bool :=
+  let hyps : Array (Object 4) := #[
+    .coprod (.base 0) (.base 1),
+    .coprod (.base 2) (.base 3)
+  ]
+  let Γ := Ctx.ofHyps (sig := ⟨4, #[]⟩) hyps
+  let s : NegNeu Γ (.coprod (.base 0) (.base 1)) := .var (.there .here)
+  let t : NegNeu Γ (.coprod (.base 2) (.base 3)) := .var .here
+  let tm : InvTm Γ (.unit : Object 4) :=
+    .case s
+      (.case (NegNeu.weaken t) .unit .unit)
+      (.case (NegNeu.weaken t) .unit .unit)
+  match canonicalize tm with
+  | .unit => true
+  | _ => false
+
+example : iccCaseCaseCanonical = true := by native_decide
+
+/-- Focusing produces well-focused terms (phase polarity OK). -/
+def focusIdWellFocused : Bool :=
+  match focus! (translate (sig := NumSig) (.id Number)) with
+  | some t => t.wellFocused
+  | none => false
+
+example : focusIdWellFocused = true := by native_decide
+
 /-! ### Candidate compare
 
 M8 Slice 1: with root context wholly new and `checkOldInvariant` restored,
@@ -318,6 +346,14 @@ example :
 
 example :
     compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.id (sig := NumSig) Number)
+      (IntrinsicMorphism.id (sig := NumSig) Number) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Reference pipeline agrees with the private candidate on identity. -/
+example :
+    referenceCompare (sig := NumSig)
       (IntrinsicMorphism.id (sig := NumSig) Number)
       (IntrinsicMorphism.id (sig := NumSig) Number) =
       CandidateResult.equal := by
@@ -606,6 +642,7 @@ def expEta : CandidateResult :=
     (IntrinsicMorphism.curry (sig := NumSig) uncurryIdExp)
     (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number))
 
+/-- Intended: `.equal` (curry/uncurry η). Still blocked on ICC / reference path. -/
 example : expEta = CandidateResult.invariantFailure := by native_decide
 
 /--
@@ -881,17 +918,20 @@ Intended semantics in comments; examples assert current executable behavior
 until the foundation that fixes them lands. Not a replacement for the M8 handoff.
 -/
 
-/-- Audit 5.1: `toRaw` of `sat` records only schedule **length**. -/
-def auditSatRawIgnoresScheduleEntries : Bool :=
+/--
+Audit 5.1 / handoff #12: schedule annotations are erased from structural spines.
+Distinct schedules with the same body compare equal; length alone never decides.
+-/
+def auditSatRawErasesSchedule : Bool :=
   let s1 : Schedule 1 := ⟨#[((.base 0 : Object 1), Witness.ctxVar 0)]⟩
   let s2 : Schedule 1 := ⟨#[((.base 0 : Object 1), Witness.ctxVar 1)]⟩
   let t1 : InvTm (Ctx.empty : Ctx Sig1) (.unit : Object 1) :=
     .foc (.sat (.mk s1 .unit))
   let t2 : InvTm (Ctx.empty : Ctx Sig1) (.unit : Object 1) :=
     .foc (.sat (.mk s2 .unit))
-  s1 != s2 && InvTm.toRaw t1 == InvTm.toRaw t2
+  s1 != s2 && InvTm.toRaw t1 == InvTm.toRaw t2 && InvTm.toRaw t1 == .unit
 
-example : auditSatRawIgnoresScheduleEntries = true := by native_decide
+example : auditSatRawErasesSchedule = true := by native_decide
 
 /--
 Audit 5.2 sharp: `x : X`, `f : 1 → X`, term `f ()`.
@@ -951,6 +991,19 @@ def auditInlSynthesis : Bool :=
 example : auditInlSynthesis = true := by native_decide
 
 /--
+Handoff adversarial #7: `g : (X → Y) → Z`, `y : Y` derives `Z` via `g (λ _. y)`.
+-/
+def auditHoIdentityExpansion : Bool :=
+  let hyps : Array (Object 3) := #[
+    .exp (.exp (.base 0) (.base 1)) (.base 2),
+    .base 1
+  ]
+  let Γ : ReachCtx 3 := ⟨hyps, 0⟩
+  isSimplyDeducible (runReachability Γ (.base 2)) (.base 2)
+
+example : auditHoIdentityExpansion = true := by native_decide
+
+/--
 Audit 5.6: hidden inconsistency via `f (inl x) : 0` collapses `a = b`.
 -/
 def auditHiddenInconsistency : Bool :=
@@ -971,6 +1024,25 @@ def auditHiddenInconsistency : Bool :=
   | _ => false
 
 example : auditHiddenInconsistency = true := by native_decide
+
+/-- Same hidden-`0` case on the reference comparator. -/
+def auditHiddenInconsistencyRef : Bool :=
+  let hyps : Array (Object 3) := #[
+    .exp (.coprod (.base 0) (.base 1)) (.never : Object 3),
+    .base 0,
+    .base 2,
+    .base 2
+  ]
+  let Γ : ReachCtx 3 := ⟨hyps, 0⟩
+  let t : InvTm (Ctx.ofHyps (sig := Sig3) hyps) (.base 2) :=
+    .foc (.pos (.done (.neu (.var (.there .here)))))
+  let u : InvTm (Ctx.ofHyps (sig := Sig3) hyps) (.base 2) :=
+    .foc (.pos (.done (.neu (.var .here))))
+  match referenceCompareInv (sig := Sig3) Γ (.base 2) t u (fuel := 64) with
+  | .equal => true
+  | _ => false
+
+example : auditHiddenInconsistencyRef = true := by native_decide
 
 /-- Audit 5.7: fuel zero is exhaustion, never a semantic `.different`. -/
 example :

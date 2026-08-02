@@ -246,6 +246,17 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
               σ := σ.discover ti uses .eta
           | _, _ => pure ()
       | some (.exp Arg Ret) =>
+        -- Function η / identity expansion: Ret ⇒ Arg → Ret (negative; not scheduled).
+        let fc := σ.getCell ti
+        if !fc.simplyDeducible then
+          match σ.findTypeIdx Ret with
+          | some rIdx =>
+            let rc := σ.getCell rIdx
+            if rc.simplyDeducible then
+              σ := σ.discover ti rc.usesNew .eta
+            else
+              pure ()
+          | none => pure ()
         -- Fire deduced function types when the argument is known.
         let fc := σ.getCell ti
         if fc.simplyDeducible then

@@ -301,8 +301,71 @@ def FocTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → RawFocus
   | .pos (.done p) => .pos (PosNeu.toRaw p)
   | .neg (.done n) => .neg (NegNeu.toRaw n)
   | .letPos n t => .letPos (NegNeu.toRaw n) (InvTm.toRaw t)
-  | .sat (.mk s t) => .sat s.size (InvTm.toRaw t)
+  -- Schedule annotations are operational metadata: erase before structural compare.
+  | .sat (.mk _s t) => InvTm.toRaw t
 end
+
+/-! ### Phase legality (`WellFocused`) -/
+
+mutual
+/-- Invertible terms respect invertible introductions and legal focus entries. -/
+inductive WellInv : {Γ : Ctx sig} → {A : Object sig.nBases} → InvTm Γ A → Prop where
+  | unit {Γ} : WellInv (.unit (Γ := Γ))
+  | pair {Γ A B} {t : InvTm Γ A} {u : InvTm Γ B} :
+      WellInv t → WellInv u → WellInv (.pair t u)
+  | lam {Γ A B} {t : InvTm (Γ ▻ A) B} :
+      WellInv t → WellInv (.lam t)
+  | case {Γ A B C} {n : NegNeu Γ (.coprod A B)}
+      {t : InvTm (Γ ▻ A) C} {u : InvTm (Γ ▻ B) C} :
+      WellInv t → WellInv u → WellInv (.case n t u)
+  | abort {Γ A} {n : NegNeu Γ .never} : WellInv (.abort (A := A) n)
+  | foc {Γ A} {f : FocTm Γ A} : WellFoc f → WellInv (.foc f)
+
+/-- Focused terms match goal polarity (pos/neg) or binder/saturation forms. -/
+inductive WellFoc : {Γ : Ctx sig} → {A : Object sig.nBases} → FocTm Γ A → Prop where
+  | pos {Γ A} {p : PosNeu Γ A} :
+      objectPolarity A = .pos → WellFoc (.pos (.done p))
+  | neg {Γ A} {n : NegNeu Γ A} :
+      objectPolarity A = .neg → WellFoc (.neg (.done n))
+  | letPos {Γ P A} {n : NegNeu Γ P} {t : InvTm (Γ ▻ P) A} :
+      objectPolarity P = .pos → WellInv t → WellFoc (.letPos n t)
+  | sat {Γ A} {s : Schedule sig.nBases} {t : InvTm Γ A} :
+      WellInv t → WellFoc (.sat (.mk s t))
+end
+
+mutual
+def wellInvb {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → Bool
+  | .unit => true
+  | .pair t u => wellInvb t && wellInvb u
+  | .lam t => wellInvb t
+  | .case _ t u => wellInvb t && wellInvb u
+  | .abort _ => true
+  | .foc f => wellFocb f
+
+def wellFocb {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → Bool
+  | .pos (.done _) => objectPolarity A == .pos
+  | .neg (.done _) => objectPolarity A == .neg
+  | .letPos (P := P) _ t => objectPolarity P == .pos && wellInvb t
+  | .sat (.mk _ t) => wellInvb t
+end
+
+/-- Executable phase check (sound for `WellInv` / `WellFoc` by construction). -/
+def InvTm.wellFocused {Γ : Ctx sig} {A : Object sig.nBases} (t : InvTm Γ A) : Bool :=
+  wellInvb t
+
+/-! ### Unweakening (for nested case/case commuting) -/
+
+/--
+Invert a single weakening on a negative neutral when the newest binder is unused.
+Applications are refused (argument unweakening is not needed for case/case).
+-/
+def NegNeu.unweaken? {Γ : Ctx sig} {B A : Object sig.nBases} :
+    NegNeu (Γ ▻ B) A → Option (NegNeu Γ A)
+  | .var .here => none
+  | .var (.there x) => some (.var x)
+  | .fst n => (NegNeu.unweaken? n).map .fst
+  | .snd n => (NegNeu.unweaken? n).map .snd
+  | .app _ _ => none
 
 end Equality
 end Gimbal
