@@ -277,6 +277,132 @@ def collectDemands {Γ : Ctx sig} {A : Object sig.nBases}
     (t : InvTm Γ A) : Array (Object sig.nBases) :=
   demandsInvTm t #[]
 
+/-! ### Exact demand neutrals -/
+
+/-- One scheduled observation: consistency witness or exact term neutral. -/
+inductive PairEntry (sig : Signature) (hyps : Array (Object sig.nBases)) where
+  | consistency (P : Object sig.nBases) (w : Witness)
+  | exact (P : Object sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) P)
+
+def PairEntry.ty {sig : Signature} {hyps : Array (Object sig.nBases)} :
+    PairEntry sig hyps → Object sig.nBases
+  | .consistency P _ => P
+  | .exact P _ => P
+
+private inductive ExactCmd (sig : Signature) (Γ : Ctx sig) where
+  | neu {A : Object sig.nBases} : NegNeu Γ A → ExactCmd sig Γ
+  | pos {A : Object sig.nBases} : PosNeu Γ A → ExactCmd sig Γ
+  | inv {A : Object sig.nBases} : InvTm Γ A → ExactCmd sig Γ
+  | foc {A : Object sig.nBases} : FocTm Γ A → ExactCmd sig Γ
+
+/-- Collect exact positive-typed negative neutrals at the current context. -/
+def exactGo (fuel : Nat) {Γ : Ctx sig} :
+    ExactCmd sig Γ → Array ((P : Object sig.nBases) × NegNeu Γ P) →
+    Array ((P : Object sig.nBases) × NegNeu Γ P)
+  | cmd, acc =>
+    match fuel with
+    | 0 => acc
+    | fuel + 1 =>
+      match cmd with
+      | .neu (A := A) n =>
+        let acc :=
+          if objectPolarity A == .pos then
+            if acc.any (fun e => e.1 == A) then acc else acc.push ⟨A, n⟩
+          else acc
+        match n with
+        | .var _ => acc
+        | .app n t => exactGo fuel (.inv t) (exactGo fuel (.neu n) acc)
+        | .fst n => exactGo fuel (.neu n) acc
+        | .snd n => exactGo fuel (.neu n) acc
+      | .pos (.neu n) => exactGo fuel (.neu n) acc
+      | .pos (.inl p) => exactGo fuel (.pos p) acc
+      | .pos (.inr p) => exactGo fuel (.pos p) acc
+      | .inv .unit => acc
+      | .inv (.pair t u) => exactGo fuel (.inv u) (exactGo fuel (.inv t) acc)
+      | .inv (.lam _) => acc
+      | .inv (.case n _ _) => exactGo fuel (.neu n) acc
+      | .inv (.abort n) => exactGo fuel (.neu n) acc
+      | .inv (.foc f) => exactGo fuel (.foc f) acc
+      | .foc (.pos (.done p)) => exactGo fuel (.pos p) acc
+      | .foc (.neg (.done n)) => exactGo fuel (.neu n) acc
+      | .foc (.letPos n _) => exactGo fuel (.neu n) acc
+      | .foc (.sat (.mk _ t)) => exactGo fuel (.inv t) acc
+
+def collectExact {Γ : Ctx sig} {A : Object sig.nBases}
+    (t : InvTm Γ A) : Array ((P : Object sig.nBases) × NegNeu Γ P) :=
+  exactGo 4096 (.inv t) #[]
+
+/--
+Union consistency witnesses with exact term-demanded neutrals.
+Exact neutrals win over consistency for the same type (first exact wins).
+Ordered by subformula-table index.
+-/
+def mergePairObs (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases))
+    (consistency : Schedule sig.nBases)
+    (exact : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
+    Array (PairEntry sig hyps) :=
+  Id.run do
+    let mut byTy : Array (Object sig.nBases) := #[]
+    let mut exactSrc :
+        Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
+    let mut witSrc : Array (Object sig.nBases × Witness) := #[]
+    -- Exact first (left∪right already ordered by caller).
+    for e in exact do
+      if objectPolarity e.1 == .pos && !byTy.contains e.1 then
+        -- Skip if already retrievable (no observation needed).
+        let retr :=
+          match σ.findTypeIdx e.1 with
+          | some i => (σ.getCell i).retrievable
+          | none => false
+        let isHyp := (findHypVar hyps e.1).isSome
+        if !retr && !isHyp then
+          byTy := byTy.push e.1
+          exactSrc := exactSrc.push e
+    -- Consistency fills remaining pending types.
+    for e in consistency.entries do
+      if !byTy.contains e.1 then
+        byTy := byTy.push e.1
+        witSrc := witSrc.push e
+    -- Order by subformula table.
+    let mut out : Array (PairEntry sig hyps) := #[]
+    for i in [:σ.types.size] do
+      match σ.typeAt i with
+      | some A =>
+        match exactSrc.findIdx? (fun e => e.1 == A) with
+        | some j =>
+          match exactSrc[j]? with
+          | some ⟨P, n⟩ => out := out.push (.exact P n)
+          | none => pure ()
+        | none =>
+          match witSrc.findIdx? (fun e => e.1 == A) with
+          | some j =>
+            match witSrc[j]? with
+            | some (P, w) => out := out.push (.consistency P w)
+            | none => pure ()
+          | none => pure ()
+      | none => pure ()
+    for e in exactSrc do
+      if !out.any (fun o => o.ty == e.1) then
+        out := out.push (.exact e.1 e.2)
+    for e in witSrc do
+      if !out.any (fun o => o.ty == e.1) then
+        out := out.push (.consistency e.1 e.2)
+    pure out
+
+/--
+Build the shared pair-directed observation list: consistency ∪ exact demands
+from both terms (left exact before right; first wins per type).
+-/
+def pairObs (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
+    {A : Object sig.nBases}
+    (t u : InvTm (Ctx.ofHyps Γ.hyps) A) :
+    Array (PairEntry sig Γ.hyps) × ReachState sig.nBases :=
+  let σ := runReachability Γ goal
+  let exact := collectExact t ++ collectExact u
+  let entries := mergePairObs σ Γ.hyps (buildSchedule σ) exact
+  (entries, σ)
+
 /--
 Union consistency witnesses with term-demanded positive types.
 Demands are realized via the reachability first-discovery witness when the type
@@ -298,7 +424,6 @@ def mergeSchedule (σ : ReachState sig.nBases) (consistency : Schedule sig.nBase
           else
             pure ()
         | none => pure ()
-    -- Deterministic order: subformula-table index, then first-seen.
     let mut ordered : Array (Object sig.nBases × Witness) := #[]
     for i in [:σ.types.size] do
       match σ.typeAt i with
@@ -310,13 +435,12 @@ def mergeSchedule (σ : ReachState sig.nBases) (consistency : Schedule sig.nBase
           | none => pure ()
         | none => pure ()
       | none => pure ()
-    -- Any leftover (type outside table) keep at end in prior order.
     for e in entries do
       if !ordered.any (fun o => o.1 == e.1) then
         ordered := ordered.push e
     pure ⟨ordered⟩
 
-/-- Shared pair-directed schedule from reachability + both terms' demands. -/
+/-- Shared pair-directed schedule from reachability + both terms' demand types. -/
 def pairSchedule (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     {Δ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Δ A) : Schedule sig.nBases × ReachState sig.nBases :=
@@ -338,6 +462,123 @@ def SaturateResult.toOption {sig : Signature} {Γ : Ctx sig} {A : Object sig.nBa
   | .ok t => some t
   | .exhausted | .invariantFailure => none
 
+/-- Weaken a negative neutral across a list of newest binders. -/
+def NegNeu.weakenMany {Γ : Ctx sig} {A : Object sig.nBases} :
+    (extras : List (Object sig.nBases)) → NegNeu Γ A →
+    NegNeu (extras.foldl Ctx.snoc Γ) A
+  | [], n => n
+  | _B :: Bs, n => NegNeu.weakenMany Bs (NegNeu.weaken n)
+
+mutual
+/--
+Apply one positive observation `nP`, then continue with `rest` under the
+extended context (positive inversion for `never` / coproducts).
+-/
+def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases)
+    (nP : NegNeu (Ctx.ofHyps hyps) P)
+    (rest : List (PairEntry sig hyps))
+    {A : Object sig.nBases}
+    (cont : InvTm (Ctx.ofHyps hyps) A) : SaturateResult (Ctx.ofHyps hyps) A :=
+  match fuel with
+  | 0 => .exhausted
+  | fuel + 1 =>
+    if hNever : P = (.never : Object sig.nBases) then
+      .ok (.abort (A := A) (NegNeu.cast hNever nP))
+    else
+      let P₀ : Object sig.nBases := P
+      let n₀ : NegNeu (Ctx.ofHyps hyps) P₀ := nP
+      match hP : P₀ with
+      | .coprod L R =>
+          let nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R) := hP ▸ n₀
+          let hypsL := hyps.push L
+          let hypsR := hyps.push R
+          have hL : Ctx.ofHyps hypsL = Ctx.ofHyps hyps ▻ L :=
+            Ctx.ofHyps_push hyps L
+          have hR : Ctx.ofHyps hypsR = Ctx.ofHyps hyps ▻ R :=
+            Ctx.ofHyps_push hyps R
+          let restL := rest.map fun e =>
+            match e with
+            | .consistency Q w => PairEntry.consistency (hyps := hypsL) Q w
+            | .exact Q n =>
+                PairEntry.exact (hyps := hypsL) Q
+                  (NegNeu.castCtx hL.symm (NegNeu.weaken n))
+          let restR := rest.map fun e =>
+            match e with
+            | .consistency Q w => PairEntry.consistency (hyps := hypsR) Q w
+            | .exact Q n =>
+                PairEntry.exact (hyps := hypsR) Q
+                  (NegNeu.castCtx hR.symm (NegNeu.weaken n))
+          let contL : InvTm (Ctx.ofHyps hypsL) A :=
+            InvTm.castCtx hL.symm cont.weaken
+          let contR : InvTm (Ctx.ofHyps hypsR) A :=
+            InvTm.castCtx hR.symm cont.weaken
+          match applyPairObsGo fuel σ hypsL restL contL,
+                applyPairObsGo fuel σ hypsR restR contR with
+          | .ok bodyL', .ok bodyR' =>
+              .ok (.case nSum
+                (InvTm.castCtx hL bodyL')
+                (InvTm.castCtx hR bodyR'))
+          | .exhausted, _ | _, .exhausted => .exhausted
+          | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+      | _ =>
+          let hyps' := hyps.push P₀
+          have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P₀ :=
+            Ctx.ofHyps_push hyps P₀
+          let rest' := rest.map fun e =>
+            match e with
+            | .consistency Q w => PairEntry.consistency (hyps := hyps') Q w
+            | .exact Q n =>
+                PairEntry.exact (hyps := hyps') Q
+                  (NegNeu.castCtx hctx.symm (NegNeu.weaken n))
+          let cont' : InvTm (Ctx.ofHyps hyps') A :=
+            InvTm.castCtx hctx.symm cont.weaken
+          match applyPairObsGo fuel σ hyps' rest' cont' with
+          | .ok body' =>
+              .ok (.foc (.letPos n₀ (InvTm.castCtx hctx body')))
+          | .exhausted => .exhausted
+          | .invariantFailure => .invariantFailure
+
+/-- Apply pair-directed observations (exact ∪ consistency). -/
+def applyPairObsGo (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases))
+    (entries : List (PairEntry sig hyps))
+    {A : Object sig.nBases}
+    (cont : InvTm (Ctx.ofHyps hyps) A) : SaturateResult (Ctx.ofHyps hyps) A :=
+  match fuel with
+  | 0 => .exhausted
+  | fuel + 1 =>
+    match entries with
+    | [] => .ok cont
+    | e :: rest =>
+      match e with
+      | .consistency P w =>
+          match reconstructWitness fuel σ hyps w with
+          | none => .invariantFailure
+          | some ⟨P', n⟩ =>
+            if hP : P' = P then
+              applyObsNeu fuel σ hyps P (hP ▸ n) rest cont
+            else
+              .invariantFailure
+      | .exact P n =>
+          applyObsNeu fuel σ hyps P n rest cont
+end
+
+/-- Top-level pair-obs application (handles inconsistency). -/
+def applyPairObs (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases))
+    (entries : Array (PairEntry sig hyps))
+    {A : Object sig.nBases}
+    (cont : InvTm (Ctx.ofHyps hyps) A) :
+    SaturateResult (Ctx.ofHyps hyps) A :=
+  if σ.inconsistent then
+    match neuOfType fuel σ hyps (.never : Object sig.nBases) with
+    | some n => .ok (.abort n)
+    | none => .invariantFailure
+  else
+    applyPairObsGo fuel σ hyps entries.toList cont
+
 /--
 Apply schedule entries oldest-first. Positive types are inverted:
 `never` collapses to `abort`; coproducts case-split; atoms bind via `letPos`.
@@ -347,53 +588,9 @@ def applyScheduleEntries (fuel : Nat) (σ : ReachState sig.nBases)
     (entries : List (Object sig.nBases × Witness))
     {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) : SaturateResult (Ctx.ofHyps hyps) A :=
-  match fuel with
-  | 0 => .exhausted
-  | fuel + 1 =>
-    match entries with
-    | [] => .ok cont
-    | (P, w) :: rest =>
-      match reconstructWitness fuel σ hyps w with
-      | none => .invariantFailure
-      | some ⟨P', n⟩ =>
-        if hP : P' = P then
-          let nP : NegNeu (Ctx.ofHyps hyps) P := hP ▸ n
-          match hPeq : P with
-          | .never =>
-              .ok (.abort (A := A) (hPeq ▸ nP))
-          | .coprod L R =>
-              let nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R) := hPeq ▸ nP
-              let hypsL := hyps.push L
-              let hypsR := hyps.push R
-              have hL : Ctx.ofHyps hypsL = Ctx.ofHyps hyps ▻ L :=
-                Ctx.ofHyps_push hyps L
-              have hR : Ctx.ofHyps hypsR = Ctx.ofHyps hyps ▻ R :=
-                Ctx.ofHyps_push hyps R
-              let contL : InvTm (Ctx.ofHyps hypsL) A :=
-                InvTm.castCtx hL.symm cont.weaken
-              let contR : InvTm (Ctx.ofHyps hypsR) A :=
-                InvTm.castCtx hR.symm cont.weaken
-              match applyScheduleEntries fuel σ hypsL rest contL,
-                    applyScheduleEntries fuel σ hypsR rest contR with
-              | .ok bodyL', .ok bodyR' =>
-                  .ok (.case nSum
-                    (InvTm.castCtx hL bodyL')
-                    (InvTm.castCtx hR bodyR'))
-              | .exhausted, _ | _, .exhausted => .exhausted
-              | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
-          | _ =>
-              let hyps' := hyps.push P
-              have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P :=
-                Ctx.ofHyps_push hyps P
-              let cont' : InvTm (Ctx.ofHyps hyps') A :=
-                InvTm.castCtx hctx.symm cont.weaken
-              match applyScheduleEntries fuel σ hyps' rest cont' with
-              | .ok body' =>
-                  .ok (.foc (.letPos nP (InvTm.castCtx hctx body')))
-              | .exhausted => .exhausted
-              | .invariantFailure => .invariantFailure
-        else
-          .invariantFailure
+  let pairEntries : List (PairEntry sig hyps) :=
+    entries.map fun e => .consistency e.1 e.2
+  applyPairObsGo fuel σ hyps pairEntries cont
 
 /--
 Saturation invariant on `Γold`: every positive type simply deducible from the

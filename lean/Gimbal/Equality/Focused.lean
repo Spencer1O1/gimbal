@@ -208,5 +208,65 @@ def InvTm.castHyps {hyps hyps' : Array (Object sig.nBases)} {A : Object sig.nBas
     InvTm (Ctx.ofHyps hyps') A :=
   InvTm.castCtx (congrArg Ctx.ofHyps h) t
 
+/-! ### Untyped spines (ordering, structural compare, exact demands) -/
+
+mutual
+inductive RawNeu where
+  | var (i : Nat)
+  | app (n : RawNeu) (arg : RawFocused)
+  | fst (n : RawNeu)
+  | snd (n : RawNeu)
+  deriving DecidableEq, Repr
+
+inductive RawPos where
+  | neu (n : RawNeu)
+  | inl (p : RawPos)
+  | inr (p : RawPos)
+  deriving DecidableEq, Repr
+
+inductive RawFocused where
+  | unit
+  | pair (t u : RawFocused)
+  | lam (t : RawFocused)
+  | case (scrut : RawNeu) (t u : RawFocused)
+  | abort (n : RawNeu)
+  | pos (p : RawPos)
+  | neg (n : RawNeu)
+  | letPos (n : RawNeu) (t : RawFocused)
+  | sat (schedSize : Nat) (t : RawFocused)
+  deriving DecidableEq, Repr
+end
+
+def Var.toRawIdx {Γ : Ctx sig} {A : Object sig.nBases} : Var Γ A → Nat
+  | .here => 0
+  | .there x => x.toRawIdx + 1
+
+mutual
+def NegNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → RawNeu
+  | .var x => .var x.toRawIdx
+  | .app n t => .app (NegNeu.toRaw n) (InvTm.toRaw t)
+  | .fst n => .fst (NegNeu.toRaw n)
+  | .snd n => .snd (NegNeu.toRaw n)
+
+def PosNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → RawPos
+  | .neu n => .neu (NegNeu.toRaw n)
+  | .inl p => .inl (PosNeu.toRaw p)
+  | .inr p => .inr (PosNeu.toRaw p)
+
+def InvTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → RawFocused
+  | .unit => .unit
+  | .pair t u => .pair (InvTm.toRaw t) (InvTm.toRaw u)
+  | .lam t => .lam (InvTm.toRaw t)
+  | .case n t u => .case (NegNeu.toRaw n) (InvTm.toRaw t) (InvTm.toRaw u)
+  | .abort n => .abort (NegNeu.toRaw n)
+  | .foc f => FocTm.toRaw f
+
+def FocTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → RawFocused
+  | .pos (.done p) => .pos (PosNeu.toRaw p)
+  | .neg (.done n) => .neg (NegNeu.toRaw n)
+  | .letPos n t => .letPos (NegNeu.toRaw n) (InvTm.toRaw t)
+  | .sat (.mk s t) => .sat s.size (InvTm.toRaw t)
+end
+
 end Equality
 end Gimbal

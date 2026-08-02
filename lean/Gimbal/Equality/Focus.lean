@@ -130,11 +130,15 @@ def focusNegNeu {Γ : Ctx sig} {A : Object sig.nBases} :
   | 0, _ => .exhausted
   | _fuel + 1, .var x =>
       .ok (.var x)
+  | fuel + 1, .fst (.pair t _) =>
+      focusNegNeu fuel t
   | fuel + 1, .fst t =>
       match focusNegNeu fuel t with
       | .ok n => .ok (.fst n)
       | .exhausted => .exhausted
       | .mismatch => .mismatch
+  | fuel + 1, .snd (.pair _ u) =>
+      focusNegNeu fuel u
   | fuel + 1, .snd t =>
       match focusNegNeu fuel t with
       | .ok n => .ok (.snd n)

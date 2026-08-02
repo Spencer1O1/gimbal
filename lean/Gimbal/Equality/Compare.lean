@@ -34,68 +34,6 @@ inductive CandidateResult where
   | invariantFailure
   deriving DecidableEq, Repr
 
-/-! ### Structural equality on focused spines (preserves `letPos`) -/
-
-mutual
-/-- Untyped negative-neutral spine. -/
-inductive RawNeu where
-  | var (i : Nat)
-  | app (n : RawNeu) (arg : RawFocused)
-  | fst (n : RawNeu)
-  | snd (n : RawNeu)
-  deriving DecidableEq, Repr
-
-inductive RawPos where
-  | neu (n : RawNeu)
-  | inl (p : RawPos)
-  | inr (p : RawPos)
-  deriving DecidableEq, Repr
-
-/-- Untyped focused spine for deterministic structural comparison. -/
-inductive RawFocused where
-  | unit
-  | pair (t u : RawFocused)
-  | lam (t : RawFocused)
-  | case (scrut : RawNeu) (t u : RawFocused)
-  | abort (n : RawNeu)
-  | pos (p : RawPos)
-  | neg (n : RawNeu)
-  | letPos (n : RawNeu) (t : RawFocused)
-  | sat (schedSize : Nat) (t : RawFocused)
-  deriving DecidableEq, Repr
-end
-
-def Var.toRawIdx {Γ : Ctx sig} {A : Object sig.nBases} : Var Γ A → Nat
-  | .here => 0
-  | .there x => x.toRawIdx + 1
-
-mutual
-def NegNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → RawNeu
-  | .var x => .var x.toRawIdx
-  | .app n t => .app (NegNeu.toRaw n) (InvTm.toRaw t)
-  | .fst n => .fst (NegNeu.toRaw n)
-  | .snd n => .snd (NegNeu.toRaw n)
-
-def PosNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → RawPos
-  | .neu n => .neu (NegNeu.toRaw n)
-  | .inl p => .inl (PosNeu.toRaw p)
-  | .inr p => .inr (PosNeu.toRaw p)
-
-def InvTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → RawFocused
-  | .unit => .unit
-  | .pair t u => .pair (InvTm.toRaw t) (InvTm.toRaw u)
-  | .lam t => .lam (InvTm.toRaw t)
-  | .case n t u => .case (NegNeu.toRaw n) (InvTm.toRaw t) (InvTm.toRaw u)
-  | .abort n => .abort (NegNeu.toRaw n)
-  | .foc f => FocTm.toRaw f
-
-def FocTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → RawFocused
-  | .pos (.done p) => .pos (PosNeu.toRaw p)
-  | .neg (.done n) => .neg (NegNeu.toRaw n)
-  | .letPos n t => .letPos (NegNeu.toRaw n) (InvTm.toRaw t)
-  | .sat (.mk s t) => .sat s.size (InvTm.toRaw t)
-end
-
 /-- Structural equality after ICC canonicalization (focused spines, not `subst0`). -/
 def structurallyEqual {Γ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Γ A) : Bool :=
@@ -116,8 +54,8 @@ def ReachCtx.oldPrefix {n : Nat} (Γ : ReachCtx n) : ReachCtx n :=
 mutual
 /--
 Recursive pair-directed saturation under an explicit old/new split.
-After applying the shared schedule, walk invertible structure in lockstep and
-re-enter saturation under each new binder.
+After applying the shared schedule (consistency ∪ exact demands), walk
+invertible structure in lockstep and re-enter saturation under each new binder.
 -/
 def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     (goal : Object sig.nBases) {A : Object sig.nBases}
@@ -129,9 +67,9 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     -- generators inhabit positives (targets are simply deducible from Γold
     -- without being retrievable there). Milestone 8 tightens this against
     -- Scherer's selection invariant; for M7 we only refuse on hard failure.
-    let (sched, σ) := pairSchedule Γ goal t u
-    match applyFixedSchedule fuel σ Γ.hyps sched t,
-          applyFixedSchedule fuel σ Γ.hyps sched u with
+    let (entries, σ) := pairObs Γ goal t u
+    match applyPairObs fuel σ Γ.hyps entries t,
+          applyPairObs fuel σ Γ.hyps entries u with
     | .exhausted, _ | _, .exhausted => .exhausted .saturate
     | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
     | .ok t', .ok u' =>

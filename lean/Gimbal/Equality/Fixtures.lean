@@ -437,4 +437,74 @@ example :
       CandidateResult.equal := by
   native_decide
 
+/-! ### Exact demands + remaining categorical laws -/
+
+/-- Exact demand from a focused identity is the source variable. -/
+def idExactIsHere : Bool :=
+  match focus! (translate (sig := NumSig) (.id Number)) with
+  | some t =>
+    match collectExact t with
+    | #[⟨P, n⟩] => P == Number && NegNeu.toRaw n == .var 0
+    | _ => false
+  | none => false
+
+example : idExactIsHere = true := by native_decide
+
+/-- Product β (second). -/
+example :
+    compareIntrinsic
+      (ofMorphism ((two.pair three).compose (Morphism.second (sig := NumSig) Number Number)))
+      (ofMorphism three) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Associativity: `(two ≫ id) ≫ id = two ≫ (id ≫ id)` via compare. -/
+example :
+    compareIntrinsic
+      (ofMorphism
+        ((two.compose (Morphism.id (sig := NumSig) Number)).compose
+          (Morphism.id (sig := NumSig) Number)))
+      (ofMorphism
+        (two.compose
+          ((Morphism.id (sig := NumSig) Number).compose
+            (Morphism.id (sig := NumSig) Number)))) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Exponential β skeleton: `curry(eval) = id` on `A ⇒ B`. -/
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.curry (sig := NumSig)
+        (IntrinsicMorphism.eval (sig := NumSig) Number Number))
+      (IntrinsicMorphism.id (sig := NumSig) (.exp Number Number)) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Signature with `Unit → Never` collapses distinct gens into Number. -/
+def CollapseSig : Signature where
+  nBases := 1
+  generators := #[
+    ⟨.unit, Number⟩,
+    ⟨.unit, Number⟩,
+    ⟨.unit, (.never : Object 1)⟩
+  ]
+
+/-- With a path `Unit → Never`, every `Unit → Number` should collapse equal. -/
+def collapseTwoThree : CandidateResult :=
+  compareIntrinsic (sig := CollapseSig)
+    (.generator ⟨0, by decide⟩) (.generator ⟨1, by decide⟩)
+
+example : collapseTwoThree = CandidateResult.equal := by
+  native_decide
+
+/-- Product η: `⟨first, second⟩ = id`. -/
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.pair (sig := NumSig)
+        (IntrinsicMorphism.first (sig := NumSig) Number Number)
+        (IntrinsicMorphism.second (sig := NumSig) Number Number))
+      (IntrinsicMorphism.id (sig := NumSig) (.prod Number Number)) =
+      CandidateResult.equal := by
+  native_decide
+
 end Gimbal.Equality.Fixtures
