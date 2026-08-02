@@ -150,5 +150,237 @@ theorem genEnv_genVar (X : Object sig.nBases) (q : Fin sig.nGens) :
           exact ih hi' ⟨q.val, Nat.lt_of_le_of_ne (Nat.le_of_lt_succ q.isLt) h⟩
   simpa [genEnv, genVar, genCtx] using go sig.nGens (Nat.le_refl _) ⟨q.val, q.isLt⟩
 
+private theorem Env.extend_pointwise {X : Object sig.nBases} {Γ : Ctx sig}
+    {A : Object sig.nBases} {ρ τ : Env X Γ}
+    (h : ∀ {B : Object sig.nBases} (x : Var Γ B), ρ x = τ x)
+    {B : Object sig.nBases} (x : Var (Γ ▻ A) B) :
+    Env.extend ρ x = Env.extend τ x := by
+  cases x with
+  | here => rfl
+  | there y =>
+      change IntrinsicMorphism.compose
+        (IntrinsicMorphism.first X A) (ρ y) =
+        IntrinsicMorphism.compose
+          (IntrinsicMorphism.first X A) (τ y)
+      rw [h y]
+
+/-- Pointwise-equal environments give identical interpretations. -/
+theorem interpret_eq_of_pointwise {X : Object sig.nBases} {Γ : Ctx sig}
+    {A : Object sig.nBases} {ρ τ : Env X Γ}
+    (h : ∀ {B : Object sig.nBases} (x : Var Γ B), ρ x = τ x)
+    (t : Tm Γ A) : interpret ρ t = interpret τ t := by
+  revert X ρ τ h
+  induction t with
+  | var x =>
+      intro X ρ τ h
+      exact h x
+  | unit =>
+      intro X ρ τ h
+      rfl
+  | abort t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose (interpret ρ t) _ =
+        IntrinsicMorphism.compose (interpret τ t) _
+      rw [ih h]
+  | pair t u iht ihu =>
+      intro X ρ τ h
+      change IntrinsicMorphism.pair (interpret ρ t) (interpret ρ u) =
+        IntrinsicMorphism.pair (interpret τ t) (interpret τ u)
+      rw [iht h, ihu h]
+  | fst t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose (interpret ρ t) _ =
+        IntrinsicMorphism.compose (interpret τ t) _
+      rw [ih h]
+  | snd t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose (interpret ρ t) _ =
+        IntrinsicMorphism.compose (interpret τ t) _
+      rw [ih h]
+  | inl t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose (interpret ρ t) _ =
+        IntrinsicMorphism.compose (interpret τ t) _
+      rw [ih h]
+  | inr t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose (interpret ρ t) _ =
+        IntrinsicMorphism.compose (interpret τ t) _
+      rw [ih h]
+  | case s t u ihs iht ihu =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (IntrinsicMorphism.id X) (interpret ρ s))
+          (IntrinsicMorphism.compose _ (IntrinsicMorphism.case
+            (interpret (Env.extend ρ) t) (interpret (Env.extend ρ) u))) =
+        IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (IntrinsicMorphism.id X) (interpret τ s))
+          (IntrinsicMorphism.compose _ (IntrinsicMorphism.case
+            (interpret (Env.extend τ) t) (interpret (Env.extend τ) u)))
+      rw [ihs h, iht (Env.extend_pointwise h), ihu (Env.extend_pointwise h)]
+  | lam t ih =>
+      intro X ρ τ h
+      change IntrinsicMorphism.curry (interpret (Env.extend ρ) t) =
+        IntrinsicMorphism.curry (interpret (Env.extend τ) t)
+      rw [ih (Env.extend_pointwise h)]
+  | app t u iht ihu =>
+      intro X ρ τ h
+      change IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (interpret ρ t) (interpret ρ u)) _ =
+        IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (interpret τ t) (interpret τ u)) _
+      rw [iht h, ihu h]
+
+private theorem Env.rename_extend_pointwise {X : Object sig.nBases}
+    {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Env X Δ) (r : Rename sig Γ Δ)
+    {B : Object sig.nBases} (x : Var (Γ ▻ A) B) :
+    Env.rename (Env.extend ρ) (Rename.ext r) x =
+      Env.extend (Env.rename ρ r) x := by
+  cases x <;> rfl
+
+/-- Interpretation commutes with renaming. -/
+theorem interpret_rename {X : Object sig.nBases} {Γ Δ : Ctx sig}
+    {A : Object sig.nBases} (ρ : Env X Δ) (r : Rename sig Γ Δ)
+    (t : Tm Γ A) :
+    interpret ρ (rename r t) = interpret (Env.rename ρ r) t := by
+  induction t generalizing Δ X with
+  | var | unit => rfl
+  | abort t ih => simp [rename, interpret, ih]
+  | pair t u iht ihu => simp [rename, interpret, iht, ihu]
+  | fst t ih | snd t ih | inl t ih | inr t ih =>
+      simp [rename, interpret, ih]
+  | case s t u ihs iht ihu =>
+      change IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (IntrinsicMorphism.id X)
+            (interpret ρ (rename r s)))
+          (IntrinsicMorphism.compose _ (IntrinsicMorphism.case
+            (interpret (Env.extend ρ) (rename (Rename.ext r) t))
+            (interpret (Env.extend ρ) (rename (Rename.ext r) u)))) =
+        IntrinsicMorphism.compose
+          (IntrinsicMorphism.pair (IntrinsicMorphism.id X)
+            (interpret (Env.rename ρ r) s))
+          (IntrinsicMorphism.compose _ (IntrinsicMorphism.case
+            (interpret (Env.extend (Env.rename ρ r)) t)
+            (interpret (Env.extend (Env.rename ρ r)) u)))
+      rw [ihs ρ r, iht (Env.extend ρ) (Rename.ext r),
+        ihu (Env.extend ρ) (Rename.ext r)]
+      rw [interpret_eq_of_pointwise (Env.rename_extend_pointwise ρ r) t,
+        interpret_eq_of_pointwise (Env.rename_extend_pointwise ρ r) u]
+  | lam t ih =>
+      change IntrinsicMorphism.curry
+          (interpret (Env.extend ρ) (rename (Rename.ext r) t)) =
+        IntrinsicMorphism.curry
+          (interpret (Env.extend (Env.rename ρ r)) t)
+      rw [ih (Env.extend ρ) (Rename.ext r)]
+      rw [interpret_eq_of_pointwise (Env.rename_extend_pointwise ρ r) t]
+  | app t u iht ihu => simp [rename, interpret, iht, ihu]
+
+/-- Translation retraction for identities. -/
+theorem interpret_translate_id (A : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv A) (translate (IntrinsicMorphism.id A)))
+      (.id A) := by
+  exact DefEq.refl _
+
+/-- Translation retraction for terminal maps. -/
+theorem interpret_translate_discard (A : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv A) (translate (IntrinsicMorphism.discard A)))
+      (.discard A) := by
+  exact DefEq.refl _
+
+/-- Translation retraction for initial maps. -/
+theorem interpret_translate_absurd (A : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv (.never : Object sig.nBases))
+        (translate (IntrinsicMorphism.absurd A)))
+      (.absurd A) := by
+  change DefEq
+    ((Morphism.id (.never : Object sig.nBases)).compose (Morphism.absurd A))
+    (Morphism.absurd A)
+  exact DefEq.id_left _
+
+/-- Translation retraction for the first product projection. -/
+theorem interpret_translate_first (A B : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv (.prod A B))
+        (translate (IntrinsicMorphism.first A B)))
+      (.first A B) := by
+  change DefEq
+    ((Morphism.id (.prod A B)).compose (Morphism.first A B))
+    (Morphism.first A B)
+  exact DefEq.id_left _
+
+/-- Translation retraction for the second product projection. -/
+theorem interpret_translate_second (A B : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv (.prod A B))
+        (translate (IntrinsicMorphism.second A B)))
+      (.second A B) := by
+  change DefEq
+    ((Morphism.id (.prod A B)).compose (Morphism.second A B))
+    (Morphism.second A B)
+  exact DefEq.id_left _
+
+/-- Translation retraction for the left coproduct injection. -/
+theorem interpret_translate_left (A B : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv A) (translate (IntrinsicMorphism.left A B)))
+      (.left A B) := by
+  change DefEq
+    ((Morphism.id A).compose (Morphism.left A B))
+    (Morphism.left A B)
+  exact DefEq.id_left _
+
+/-- Translation retraction for the right coproduct injection. -/
+theorem interpret_translate_right (A B : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv B) (translate (IntrinsicMorphism.right A B)))
+      (.right A B) := by
+  change DefEq
+    ((Morphism.id B).compose (Morphism.right A B))
+    (Morphism.right A B)
+  exact DefEq.id_left _
+
+/-- The translation retraction is closed under pairing. -/
+theorem interpret_translate_pair {X A B : Object sig.nBases}
+    (f : IntrinsicMorphism sig X A) (g : IntrinsicMorphism sig X B)
+    (hf : IntrinsicDefEq (interpret (rootEnv X) (translate f)) f)
+    (hg : IntrinsicDefEq (interpret (rootEnv X) (translate g)) g) :
+    IntrinsicDefEq
+      (interpret (rootEnv X) (translate (IntrinsicMorphism.pair f g)))
+      (.pair f g) := by
+  exact DefEq.cong_pair hf hg
+
+/-- Translation retraction for evaluation. -/
+theorem interpret_translate_eval (A B : Object sig.nBases) :
+    IntrinsicDefEq
+      (interpret (rootEnv (.prod (.exp A B) A))
+        (translate (IntrinsicMorphism.eval A B)))
+      (.eval A B) := by
+  let X : Object sig.nBases := .prod (.exp A B) A
+  let ev : Morphism sig (.prod (.exp A B) A) B :=
+    Morphism.eval A B
+  change DefEq
+    ((((Morphism.id X).compose (Morphism.first (.exp A B) A)).pair
+      ((Morphism.id X).compose (Morphism.second (.exp A B) A))).compose ev)
+    ev
+  refine DefEq.trans
+    (DefEq.cong_compose
+      (DefEq.cong_pair
+        (DefEq.id_left (Morphism.first (.exp A B) A))
+        (DefEq.id_left (Morphism.second (.exp A B) A)))
+      (DefEq.refl ev)) ?_
+  refine DefEq.trans
+    (DefEq.cong_compose
+      (DefEq.symm (DefEq.cong_pair
+        (DefEq.id_left (Morphism.first (.exp A B) A))
+        (DefEq.id_left (Morphism.second (.exp A B) A))))
+      (DefEq.refl ev)) ?_
+  refine DefEq.trans
+    (DefEq.cong_compose (DefEq.prod_eta (Morphism.id X)) (DefEq.refl ev)) ?_
+  exact DefEq.id_left ev
+
 end Equality
 end Gimbal
