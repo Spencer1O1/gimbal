@@ -6,6 +6,7 @@
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Translate
 import Gimbal.Equality.Reachability
+import Gimbal.Equality.Saturation
 import Gimbal.Fixtures
 
 namespace Gimbal.Equality.Fixtures
@@ -190,5 +191,55 @@ example : isRetrievable appState (.base 1) = false := by
 
 example : (pendingWitnesses appState).size = 1 := by
   native_decide
+
+/-- Pending `Y` uses the new hypothesis `x`. -/
+example : usesNew appState (.base 1) = true := by
+  native_decide
+
+/-- Schedule contains exactly that pending witness. -/
+example : (buildSchedule appState).size = 1 := by
+  native_decide
+
+/-- Product projection: `p : X × Y` makes both components deducible. -/
+def prodCtx : ReachCtx 2 where
+  hyps := #[.prod (.base 0) (.base 1)]
+  newFrom := 0
+
+def prodState : ReachState 2 :=
+  runReachability prodCtx (.base 0)
+
+example : isSimplyDeducible prodState (.base 0) = true := by
+  native_decide
+
+example : isSimplyDeducible prodState (.base 1) = true := by
+  native_decide
+
+/-- Old-only deduction: `Y` reachable without `Γnew` is not scheduled. -/
+def oldOnlyCtx : ReachCtx 2 where
+  hyps := #[
+    .exp (.base 0) (.base 1),
+    .base 0
+  ]
+  newFrom := 2  -- everything is old
+
+example : (buildSchedule (runReachability oldOnlyCtx (.base 1))).size = 0 := by
+  native_decide
+
+example : isSimplyDeducible (runReachability oldOnlyCtx (.base 1)) (.base 1) = true := by
+  native_decide
+
+/-! ### Saturation schedule scaffolding -/
+
+def satUnitEraseOk : Bool :=
+  let s := saturate (sig := NumSig) neverCtx (.unit : Object 1)
+    (InvTm.unit (Γ := Ctx.empty (sig := NumSig)))
+  match s with
+  | .mk sched cont =>
+    sched.size == 0 &&
+      match cont with
+      | .unit => true
+      | _ => false
+
+example : satUnitEraseOk = true := by native_decide
 
 end Gimbal.Equality.Fixtures

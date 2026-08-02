@@ -7,6 +7,7 @@
 
 import Gimbal.Equality.LambdaSyntax
 import Gimbal.Equality.Polarized
+import Gimbal.Equality.Reachability
 
 namespace Gimbal
 namespace Equality
@@ -18,11 +19,6 @@ inductive Phase where
   | foc
   | posIntro
   | negElim
-  deriving DecidableEq, Repr
-
-/-- Opaque schedule token; Reachability builds real schedules later. -/
-inductive Schedule where
-  | empty
   deriving DecidableEq, Repr
 
 variable {sig : Signature}
@@ -75,9 +71,9 @@ inductive PosIntro : Ctx sig → Object sig.nBases → Type where
 inductive NegElim : Ctx sig → Object sig.nBases → Type where
   | done {Γ A} : NegNeu Γ A → NegElim Γ A
 
-/-- Saturation-phase terms (schedule is a placeholder until Reachability). -/
+/-- Saturation-phase terms carrying an explicit finite schedule. -/
 inductive SatTm : Ctx sig → Object sig.nBases → Type where
-  | mk {Γ A} : Schedule → InvTm Γ A → SatTm Γ A
+  | mk {Γ A} : Schedule sig.nBases → InvTm Γ A → SatTm Γ A
 end
 
 /-- Package a focused term at an explicit phase. -/

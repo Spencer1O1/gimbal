@@ -153,21 +153,23 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
     for i in [:Γ.hyps.size] do
       match Γ.hyps[i]? with
       | some (.prod L R) =>
+        -- Product hypotheses are negative; the binding itself is enough to project.
         match σ.findTypeIdx (.prod L R), σ.findTypeIdx L, σ.findTypeIdx R with
         | some pIdx, some lIdx, some rIdx =>
-          let pc := σ.getCell pIdx
-          if pc.simplyDeducible || pc.retrievable then
-            let uses := pc.usesNew || Γ.isNew i
-            σ := σ.discover lIdx uses (.fst pIdx)
-            σ := σ.discover rIdx uses (.snd pIdx)
+          let uses := Γ.isNew i
+          σ := σ.discover lIdx uses (.fst pIdx)
+          σ := σ.discover rIdx uses (.snd pIdx)
         | _, _, _ => pure ()
       | some (.exp Arg Ret) =>
+        -- Function hypotheses are negative; fire when the argument type is known.
         match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
         | some aIdx, some rIdx =>
           let ac := σ.getCell aIdx
           if ac.simplyDeducible then
             let uses := ac.usesNew || Γ.isNew i
             σ := σ.discover rIdx uses (.app i aIdx)
+          else
+            pure ()
         | _, _ => pure ()
       | _ => pure ()
     -- Project reachable product types.
@@ -235,6 +237,45 @@ def isRetrievable {n : Nat} (σ : ReachState n) (A : Object n) : Bool :=
   match σ.findTypeIdx A with
   | some i => (σ.getCell i).retrievable
   | none => false
+
+/-- Helper: does the recorded derivation use `Γnew`? -/
+def usesNew {n : Nat} (σ : ReachState n) (A : Object n) : Bool :=
+  match σ.findTypeIdx A with
+  | some i => (σ.getCell i).usesNew
+  | none => false
+
+/--
+Saturation schedule: ordered positive types to observe, each with its first
+deterministic witness. Built from reachability; exact term-demanded neutrals
+are unioned later by pair-directed saturation.
+-/
+structure Schedule (n : Nat) where
+  entries : Array (Object n × Witness)
+  deriving DecidableEq, Repr
+
+def Schedule.empty {n : Nat} : Schedule n :=
+  ⟨#[]⟩
+
+def Schedule.size {n : Nat} (s : Schedule n) : Nat :=
+  s.entries.size
+
+/--
+Consistency schedule: pending positive types whose witness uses `Γnew`,
+in subformula-table order (already deterministic; deduped by type index).
+-/
+def buildSchedule {n : Nat} (σ : ReachState n) : Schedule n :=
+  Id.run do
+    let mut entries : Array (Object n × Witness) := #[]
+    for i in [:σ.types.size] do
+      match σ.typeAt i, σ.getCell i with
+      | some A, c =>
+        if c.simplyDeducible && !c.retrievable && c.usesNew &&
+            objectPolarity A == .pos then
+          match c.witness with
+          | some w => entries := entries.push (A, w)
+          | none => pure ()
+      | _, _ => pure ()
+    pure ⟨entries⟩
 
 end Equality
 end Gimbal
