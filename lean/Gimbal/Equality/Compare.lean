@@ -34,51 +34,80 @@ inductive CandidateResult where
   | invariantFailure
   deriving DecidableEq, Repr
 
-/-! ### Structural equality via erased untyped spines -/
+/-! ### Structural equality on focused spines (preserves `letPos`) -/
 
-/-- Untyped term spine for deterministic structural comparison. -/
-inductive RawTm where
+mutual
+/-- Untyped negative-neutral spine. -/
+inductive RawNeu where
   | var (i : Nat)
-  | unit
-  | abort (t : RawTm)
-  | pair (t u : RawTm)
-  | fst (t : RawTm)
-  | snd (t : RawTm)
-  | inl (t : RawTm)
-  | inr (t : RawTm)
-  | case (s t u : RawTm)
-  | lam (t : RawTm)
-  | app (f a : RawTm)
+  | app (n : RawNeu) (arg : RawFocused)
+  | fst (n : RawNeu)
+  | snd (n : RawNeu)
   deriving DecidableEq, Repr
 
-def Var.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : Var Γ A → Nat
+inductive RawPos where
+  | neu (n : RawNeu)
+  | inl (p : RawPos)
+  | inr (p : RawPos)
+  deriving DecidableEq, Repr
+
+/-- Untyped focused spine for deterministic structural comparison. -/
+inductive RawFocused where
+  | unit
+  | pair (t u : RawFocused)
+  | lam (t : RawFocused)
+  | case (scrut : RawNeu) (t u : RawFocused)
+  | abort (n : RawNeu)
+  | pos (p : RawPos)
+  | neg (n : RawNeu)
+  | letPos (n : RawNeu) (t : RawFocused)
+  | sat (schedSize : Nat) (t : RawFocused)
+  deriving DecidableEq, Repr
+end
+
+def Var.toRawIdx {Γ : Ctx sig} {A : Object sig.nBases} : Var Γ A → Nat
   | .here => 0
-  | .there x => x.toRaw + 1
+  | .there x => x.toRawIdx + 1
 
-def Tm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : Tm Γ A → RawTm
-  | .var x => .var x.toRaw
+mutual
+def NegNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → RawNeu
+  | .var x => .var x.toRawIdx
+  | .app n t => .app (NegNeu.toRaw n) (InvTm.toRaw t)
+  | .fst n => .fst (NegNeu.toRaw n)
+  | .snd n => .snd (NegNeu.toRaw n)
+
+def PosNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → RawPos
+  | .neu n => .neu (NegNeu.toRaw n)
+  | .inl p => .inl (PosNeu.toRaw p)
+  | .inr p => .inr (PosNeu.toRaw p)
+
+def InvTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → RawFocused
   | .unit => .unit
-  | .abort t => .abort t.toRaw
-  | .pair t u => .pair t.toRaw u.toRaw
-  | .fst t => .fst t.toRaw
-  | .snd t => .snd t.toRaw
-  | .inl t => .inl t.toRaw
-  | .inr t => .inr t.toRaw
-  | .case s t u => .case s.toRaw t.toRaw u.toRaw
-  | .lam t => .lam t.toRaw
-  | .app f a => .app f.toRaw a.toRaw
+  | .pair t u => .pair (InvTm.toRaw t) (InvTm.toRaw u)
+  | .lam t => .lam (InvTm.toRaw t)
+  | .case n t u => .case (NegNeu.toRaw n) (InvTm.toRaw t) (InvTm.toRaw u)
+  | .abort n => .abort (NegNeu.toRaw n)
+  | .foc f => FocTm.toRaw f
 
-/-- Structural equality after ICC canonicalization (via erasure). -/
+def FocTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → RawFocused
+  | .pos (.done p) => .pos (PosNeu.toRaw p)
+  | .neg (.done n) => .neg (NegNeu.toRaw n)
+  | .letPos n t => .letPos (NegNeu.toRaw n) (InvTm.toRaw t)
+  | .sat (.mk s t) => .sat s.size (InvTm.toRaw t)
+end
+
+/-- Structural equality after ICC canonicalization (focused spines, not `subst0`). -/
 def structurallyEqual {Γ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Γ A) : Bool :=
-  decide (Tm.toRaw (InvTm.erase t) == Tm.toRaw (InvTm.erase u))
+  decide (InvTm.toRaw t == InvTm.toRaw u)
 
 /-- Compare two already-focused invertible terms under a shared reachability context. -/
 def compareInv {A : Object sig.nBases}
     (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) (fuel : Nat := 2048) : CandidateResult :=
-  match saturateInv (fuel := fuel) Γ goal t,
-        saturateInv (fuel := fuel) Γ goal u with
+  let (sched, σ) := pairSchedule Γ goal t u
+  match applyFixedSchedule fuel σ Γ.hyps sched t,
+        applyFixedSchedule fuel σ Γ.hyps sched u with
   | .exhausted, _ | _, .exhausted => .exhausted .saturate
   | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
   | .ok t', .ok u' =>
@@ -90,13 +119,18 @@ def compareInv {A : Object sig.nBases}
 def compareUnder {A : Object sig.nBases}
     (Γ : Ctx sig) (goal : Object sig.nBases)
     (t u : InvTm Γ A) (fuel : Nat := 2048) : CandidateResult :=
-  match saturateUnder (fuel := fuel) Γ goal t,
-        saturateUnder (fuel := fuel) Γ goal u with
+  let r := Γ.toReachCtx
+  have hctx : Ctx.ofHyps r.hyps = Γ := Ctx.ofHyps_toReachCtx Γ
+  let t₀ : InvTm (Ctx.ofHyps r.hyps) A := InvTm.castCtx hctx.symm t
+  let u₀ : InvTm (Ctx.ofHyps r.hyps) A := InvTm.castCtx hctx.symm u
+  let (sched, σ) := pairSchedule r goal t₀ u₀
+  match applyFixedSchedule fuel σ r.hyps sched t₀,
+        applyFixedSchedule fuel σ r.hyps sched u₀ with
   | .exhausted, _ | _, .exhausted => .exhausted .saturate
   | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
   | .ok t', .ok u' =>
-      let t'' := canonicalize (fuel := fuel) t'
-      let u'' := canonicalize (fuel := fuel) u'
+      let t'' := canonicalize (fuel := fuel) (InvTm.castCtx hctx t')
+      let u'' := canonicalize (fuel := fuel) (InvTm.castCtx hctx u')
       if structurallyEqual t'' u'' then .equal else .different
 
 /-- Focus then compare ordinary intrinsically typed terms. -/

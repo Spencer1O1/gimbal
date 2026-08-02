@@ -306,4 +306,52 @@ example :
       CandidateResult.different := by
   native_decide
 
+/-! ### Hardening: demands, generators, exhaustion -/
+
+/-- Demands from a focused identity are just the positive source atom. -/
+def idDemandsHasNumber : Bool :=
+  match focus! (translate (sig := NumSig) (.id Number)) with
+  | some t => (collectDemands t).contains Number
+  | none => false
+
+example : idDemandsHasNumber = true := by native_decide
+
+/-- Pair schedule for `id` vs `id` stays consistent (demand already retrievable). -/
+def pairScheduleIdSize : Nat :=
+  match focus! (translate (sig := NumSig) (.id Number)) with
+  | some t => (pairSchedule (translateCtx Number).toReachCtx Number t t).1.size
+  | none => 999
+
+example : pairScheduleIdSize = 0 := by native_decide
+
+/-- Distinct unconstrained generators remain unequal. -/
+example :
+    compareIntrinsic (ofMorphism two) (ofMorphism three) =
+      CandidateResult.different := by
+  native_decide
+
+/-- Identity law (left): `id ∘ two = two`. -/
+example :
+    compareIntrinsic
+      (ofMorphism ((Morphism.id .unit).compose two))
+      (ofMorphism two) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Product β (first): `⟨two, three⟩ ≫ first = two`. -/
+example :
+    compareIntrinsic
+      (ofMorphism ((two.pair three).compose (Morphism.first (sig := NumSig) Number Number)))
+      (ofMorphism two) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Fuel exhaustion is not reported as `different`. -/
+example :
+    compareIntrinsic (fuel := 0)
+      (IntrinsicMorphism.id (sig := NumSig) Number)
+      (IntrinsicMorphism.id (sig := NumSig) Number) =
+      CandidateResult.exhausted .focus := by
+  native_decide
+
 end Gimbal.Equality.Fixtures

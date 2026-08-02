@@ -35,6 +35,16 @@ def tmSize {Γ : Ctx sig} {A : Object sig.nBases} : Tm Γ A → Nat
   | .lam t => 1 + tmSize t
   | .app t u => 1 + tmSize t + tmSize u
 
+/-- Result of attempting to parse a neutral / focused spine. -/
+inductive ParseResult (α : Type) where
+  | ok : α → ParseResult α
+  | exhausted
+  | mismatch
+
+def ParseResult.toOption {α} : ParseResult α → Option α
+  | .ok a => some a
+  | .exhausted | .mismatch => none
+
 mutual
 /-- Focus a term into the invertible phase. -/
 def focusInv {Γ : Ctx sig} {A : Object sig.nBases} :
@@ -54,28 +64,43 @@ def focusInv {Γ : Ctx sig} {A : Object sig.nBases} :
         | .exhausted => .exhausted
     | .inl t =>
         match focusFoc fuel (.inl t) with
-        | some f => .ok (.foc f)
-        | none => .exhausted
+        | .ok f => .ok (.foc f)
+        | .exhausted => .exhausted
+        | .mismatch => .exhausted
     | .inr t =>
         match focusFoc fuel (.inr t) with
-        | some f => .ok (.foc f)
-        | none => .exhausted
-    | .case s l r =>
-        match focusNegNeu fuel s, focusInv fuel l, focusInv fuel r with
-        | some n, .ok l', .ok r' => .ok (.case n l' r')
-        | _, _, _ => focusInvByGoal (fuel + 1) (.case s l r)
-    | .abort s =>
-        match focusNegNeu fuel s with
-        | some n => .ok (.abort n)
-        | none => focusInvByGoal (fuel + 1) (.abort s)
+        | .ok f => .ok (.foc f)
+        | .exhausted => .exhausted
+        | .mismatch => .exhausted
     | .var x =>
         focusInvByGoal (fuel + 1) (.var x)
+    | .fst (.pair t _) =>
+        focusInv fuel t
     | .fst t =>
         focusInvByGoal (fuel + 1) (.fst t)
+    | .snd (.pair _ u) =>
+        focusInv fuel u
     | .snd t =>
         focusInvByGoal (fuel + 1) (.snd t)
+    | .app (.lam body) a =>
+        focusInv fuel (subst0 body a)
     | .app f a =>
         focusInvByGoal (fuel + 1) (.app f a)
+    | .case (.inl v) l _ =>
+        focusInv fuel (subst0 l v)
+    | .case (.inr v) _ r =>
+        focusInv fuel (subst0 r v)
+    | .case s l r =>
+        match focusNegNeu fuel s, focusInv fuel l, focusInv fuel r with
+        | .ok n, .ok l', .ok r' => .ok (.case n l' r')
+        | .exhausted, _, _ | _, .exhausted, _ | _, _, .exhausted => .exhausted
+        | .mismatch, _, _ =>
+            focusInvByGoal (fuel + 1) (.case s l r)
+    | .abort s =>
+        match focusNegNeu fuel s with
+        | .ok n => .ok (.abort n)
+        | .exhausted => .exhausted
+        | .mismatch => focusInvByGoal (fuel + 1) (.abort s)
 
 /-- Type-directed invertible introductions / focusing entry. -/
 def focusInvByGoal {Γ : Ctx sig} {A : Object sig.nBases} :
@@ -95,54 +120,69 @@ def focusInvByGoal {Γ : Ctx sig} {A : Object sig.nBases} :
         | .exhausted => .exhausted
     | .never | .base _ | .coprod _ _ =>
         match focusFoc fuel t with
-        | some f => .ok (.foc f)
-        | none => .exhausted
+        | .ok f => .ok (.foc f)
+        | .exhausted => .exhausted
+        | .mismatch => .exhausted
 
 /-- Try to read a term as a negative neutral spine. -/
 def focusNegNeu {Γ : Ctx sig} {A : Object sig.nBases} :
-    Nat → Tm Γ A → Option (NegNeu Γ A)
-  | 0, _ => none
+    Nat → Tm Γ A → ParseResult (NegNeu Γ A)
+  | 0, _ => .exhausted
   | _fuel + 1, .var x =>
-      some (.var x)
-  | fuel + 1, .fst t => do
-      let n ← focusNegNeu fuel t
-      pure (.fst n)
-  | fuel + 1, .snd t => do
-      let n ← focusNegNeu fuel t
-      pure (.snd n)
-  | fuel + 1, .app f a => do
-      let n ← focusNegNeu fuel f
-      match focusInv fuel a with
-      | .ok a' => pure (.app n a')
-      | .exhausted => none
-  | _, _ => none
+      .ok (.var x)
+  | fuel + 1, .fst t =>
+      match focusNegNeu fuel t with
+      | .ok n => .ok (.fst n)
+      | .exhausted => .exhausted
+      | .mismatch => .mismatch
+  | fuel + 1, .snd t =>
+      match focusNegNeu fuel t with
+      | .ok n => .ok (.snd n)
+      | .exhausted => .exhausted
+      | .mismatch => .mismatch
+  | fuel + 1, .app f a =>
+      match focusNegNeu fuel f, focusInv fuel a with
+      | .ok n, .ok a' => .ok (.app n a')
+      | .exhausted, _ | _, .exhausted => .exhausted
+      | .mismatch, _ => .mismatch
+  | _, _ => .mismatch
 
 /-- Try to read a term as a positive neutral spine. -/
 def focusPosNeu {Γ : Ctx sig} {A : Object sig.nBases} :
-    Nat → Tm Γ A → Option (PosNeu Γ A)
-  | 0, _ => none
-  | fuel + 1, .inl t => do
-      let p ← focusPosNeu fuel t
-      pure (.inl p)
-  | fuel + 1, .inr t => do
-      let p ← focusPosNeu fuel t
-      pure (.inr p)
-  | fuel + 1, t => do
-      let n ← focusNegNeu fuel t
-      pure (.neu n)
+    Nat → Tm Γ A → ParseResult (PosNeu Γ A)
+  | 0, _ => .exhausted
+  | fuel + 1, .inl t =>
+      match focusPosNeu fuel t with
+      | .ok p => .ok (.inl p)
+      | .exhausted => .exhausted
+      | .mismatch => .mismatch
+  | fuel + 1, .inr t =>
+      match focusPosNeu fuel t with
+      | .ok p => .ok (.inr p)
+      | .exhausted => .exhausted
+      | .mismatch => .mismatch
+  | fuel + 1, t =>
+      match focusNegNeu fuel t with
+      | .ok n => .ok (.neu n)
+      | .exhausted => .exhausted
+      | .mismatch => .mismatch
 
 /-- Choice-of-focusing entry. -/
 def focusFoc {Γ : Ctx sig} {A : Object sig.nBases} :
-    Nat → Tm Γ A → Option (FocTm Γ A)
-  | 0, _ => none
+    Nat → Tm Γ A → ParseResult (FocTm Γ A)
+  | 0, _ => .exhausted
   | fuel + 1, t =>
     match objectPolarity A with
-    | .pos => do
-        let p ← focusPosNeu fuel t
-        pure (.pos (.done p))
-    | .neg => do
-        let n ← focusNegNeu fuel t
-        pure (.neg (.done n))
+    | .pos =>
+        match focusPosNeu fuel t with
+        | .ok p => .ok (.pos (.done p))
+        | .exhausted => .exhausted
+        | .mismatch => .mismatch
+    | .neg =>
+        match focusNegNeu fuel t with
+        | .ok n => .ok (.neg (.done n))
+        | .exhausted => .exhausted
+        | .mismatch => .mismatch
 end
 
 /-- Default fuel from term size. -/
