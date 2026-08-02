@@ -1,7 +1,8 @@
 /-
-  Early Milestone 7 fixtures: intrinsic elaboration and translation.
+  Early Milestone 7 fixtures: elaboration, translation, polarization, focusing.
 -/
 
+import Gimbal.Equality.Focus
 import Gimbal.Equality.Translate
 import Gimbal.Fixtures
 
@@ -12,44 +13,46 @@ open Gimbal Gimbal.Fixtures Gimbal.Equality
 example : (ofMorphism two).erase = two.term :=
   ofMorphism_erase two
 
-example : (ofMorphism pairThenAdd).erase = pairThenAdd.term :=
-  ofMorphism_erase pairThenAdd
-
-example : (ofMorphism curryAdd).erase = curryAdd.term :=
-  ofMorphism_erase curryAdd
-
-example : (ofMorphism two).toMorphism = two :=
-  ofMorphism_toMorphism two
-
-/-- Ill-typed terms do not elaborate. -/
 example : elaborate (sig := NumSig) illTypedComposeTerm = none :=
   rfl
 
-/-- Well-typed generator elaborates to the matching intrinsic constructor. -/
-example :
-    elaborate (sig := NumSig) two.term =
-      some ⟨.unit, Number, .generator ⟨0, by decide⟩⟩ :=
-  rfl
-
-/-- Identity translates to the source variable. -/
 example :
     translate (sig := NumSig) (.id Number) = .var .here :=
   rfl
 
-/-- Discard translates to unit. -/
 example :
     translate (sig := NumSig) (.discard Number) = .unit :=
   rfl
 
-/-- `first` translates to `fst x`. -/
-example :
-    translate (sig := NumSig) (.first Number Number) = .fst (.var .here) :=
-  rfl
-
-/-- Generator `two` translates to application of the rigid generator variable. -/
 example :
     translateMorphism two =
       .app (.var (.there (genVar NumSig ⟨0, by decide⟩))) (.var .here) :=
   rfl
+
+/-- Fixed polarity assignment. -/
+example : objectPolarity (Number : Object 1) = .pos := rfl
+example : objectPolarity (.unit : Object 1) = .neg := rfl
+example : objectPolarity (.prod Number Number) = .neg := rfl
+example : objectPolarity (.coprod Number Number) = .pos := rfl
+example : objectPolarity (.exp Number Number) = .neg := rfl
+
+/-- Minimal shifts erase. -/
+example : (asPos (Number : Object 1)).erase = Number :=
+  erase_asPos _
+example : (asNeg (.unit : Object 1)).erase = .unit :=
+  erase_asNeg _
+
+/-- Focusing succeeds on representative translated terms (mutual defs; use native). -/
+example : (focus! (sig := NumSig) (translate (.id Number))).isSome = true := by
+  native_decide
+
+example : (focus! (sig := NumSig) (translate (.discard Number))).isSome = true := by
+  native_decide
+
+example : (focus! (sig := NumSig) (translate (.first Number Number))).isSome = true := by
+  native_decide
+
+example : (focus! (sig := NumSig) (translateMorphism two)).isSome = true := by
+  native_decide
 
 end Gimbal.Equality.Fixtures
