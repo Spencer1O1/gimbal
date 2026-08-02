@@ -41,14 +41,16 @@ def subformulaClosure {n : Nat} (roots : List (Object n)) (fuel : Nat := 4096) :
 
 /--
 First-discovery derivation for a reachable type.
-`hypIdx` indexes `ReachCtx.hyps`; `ofTypeIdx` / `argTypeIdx` index the
-subformula table.
+`hypIdx` indexes `ReachCtx.hyps`; `ofTypeIdx` / `argTypeIdx` / `fnTypeIdx`
+index the subformula table.
 -/
 inductive Witness where
   | ctxVar (hypIdx : Nat)
   | fst (ofTypeIdx : Nat)
   | snd (ofTypeIdx : Nat)
   | app (fnHypIdx : Nat) (argTypeIdx : Nat)
+  | appTy (fnTypeIdx : Nat) (argTypeIdx : Nat)
+  | unit
   deriving DecidableEq, Repr
 
 /-- Per-type reachability cell. -/
@@ -149,6 +151,11 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
         if objectPolarity A == .pos then
           σ := σ.markHyp Γ i
       | none => pure ()
+    -- η-available unit (negative; supports apps with unit domain).
+    match σ.findTypeIdx (.unit : Object n) with
+    | some uIdx =>
+      σ := σ.discover uIdx false .unit
+    | none => pure ()
     -- Close under hyp products / functions.
     for i in [:Γ.hyps.size] do
       match Γ.hyps[i]? with
@@ -172,7 +179,7 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
             pure ()
         | _, _ => pure ()
       | _ => pure ()
-    -- Project reachable product types.
+    -- Project reachable product types; form η-available products.
     for ti in [:σ.types.size] do
       match σ.typeAt ti with
       | some (.prod L R) =>
@@ -182,6 +189,32 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
           | some lIdx, some rIdx =>
             σ := σ.discover lIdx pc.usesNew (.fst ti)
             σ := σ.discover rIdx pc.usesNew (.snd ti)
+          | _, _ => pure ()
+        else
+          match σ.findTypeIdx L, σ.findTypeIdx R with
+          | some lIdx, some rIdx =>
+            let lc := σ.getCell lIdx
+            let rc := σ.getCell rIdx
+            if lc.simplyDeducible && rc.simplyDeducible then
+              -- Product is η-available from components (not scheduled; neg).
+              let uses := lc.usesNew || rc.usesNew
+              let c := σ.getCell ti
+              if !c.simplyDeducible then
+                σ := σ.setCell ti
+                  { c with simplyDeducible := true, usesNew := uses }
+          | _, _ => pure ()
+      | some (.exp Arg Ret) =>
+        -- Fire deduced function types when the argument is known.
+        let fc := σ.getCell ti
+        if fc.simplyDeducible then
+          match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+          | some aIdx, some rIdx =>
+            let ac := σ.getCell aIdx
+            if ac.simplyDeducible then
+              let uses := fc.usesNew || ac.usesNew
+              σ := σ.discover rIdx uses (.appTy ti aIdx)
+            else
+              pure ()
           | _, _ => pure ()
       | _ => pure ()
     pure σ

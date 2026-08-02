@@ -153,6 +153,31 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
             else
               none
           | _, _ => none
+        | .appTy fnTypeIdx argIdx =>
+          match σ.typeAt fnTypeIdx, σ.typeAt argIdx with
+          | some (.exp Arg Ret), some Arg' =>
+            if Arg' = Arg then
+              match reconstructGo fuel σ (.neuOf hyps (.exp Arg Ret)),
+                    reconstructGo fuel σ (.invOf hyps Arg) with
+              | some (.neu hyps₁ A₁ n), some (.inv hyps₂ A₂ argTm) =>
+                if h1 : hyps₁ = hyps then
+                  if h2 : hyps₂ = hyps then
+                    if hFn : A₁ = .exp Arg Ret then
+                      if hA : A₂ = Arg then
+                        some (.wit hyps ⟨Ret,
+                          .app (NegNeu.cast hFn (NegNeu.castHyps h1 n))
+                            (InvTm.castTy hA (InvTm.castHyps h2 argTm))⟩)
+                      else none
+                    else none
+                  else none
+                else none
+              | _, _ => none
+            else
+              none
+          | _, _ => none
+        | .unit =>
+          -- `unit` witnesses only mark η-availability for apps; never scheduled.
+          none
       | .invOf hyps A =>
         match reconstructGo fuel σ (.neuOf hyps A) with
         | some (.neu hyps' A' n) =>
@@ -314,8 +339,8 @@ def SaturateResult.toOption {sig : Signature} {Γ : Ctx sig} {A : Object sig.nBa
   | .exhausted | .invariantFailure => none
 
 /--
-Apply schedule entries oldest-first as nested `letPos`, reconstructing each
-witness in the growing hypothesis array (original Γ plus prior observations).
+Apply schedule entries oldest-first. Positive types are inverted:
+`never` collapses to `abort`; coproducts case-split; atoms bind via `letPos`.
 -/
 def applyScheduleEntries (fuel : Nat) (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
@@ -333,21 +358,58 @@ def applyScheduleEntries (fuel : Nat) (σ : ReachState sig.nBases)
       | some ⟨P', n⟩ =>
         if hP : P' = P then
           let nP : NegNeu (Ctx.ofHyps hyps) P := hP ▸ n
-          let hyps' := hyps.push P
-          have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P :=
-            Ctx.ofHyps_push hyps P
-          let contW : InvTm (Ctx.ofHyps hyps ▻ P) A := cont.weaken
-          let cont' : InvTm (Ctx.ofHyps hyps') A :=
-            InvTm.castCtx hctx.symm contW
-          match applyScheduleEntries fuel σ hyps' rest cont' with
-          | .ok body' =>
-            let body : InvTm (Ctx.ofHyps hyps ▻ P) A :=
-              InvTm.castCtx hctx body'
-            .ok (.foc (.letPos nP body))
-          | .exhausted => .exhausted
-          | .invariantFailure => .invariantFailure
+          match hPeq : P with
+          | .never =>
+              .ok (.abort (A := A) (hPeq ▸ nP))
+          | .coprod L R =>
+              let nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R) := hPeq ▸ nP
+              let hypsL := hyps.push L
+              let hypsR := hyps.push R
+              have hL : Ctx.ofHyps hypsL = Ctx.ofHyps hyps ▻ L :=
+                Ctx.ofHyps_push hyps L
+              have hR : Ctx.ofHyps hypsR = Ctx.ofHyps hyps ▻ R :=
+                Ctx.ofHyps_push hyps R
+              let contL : InvTm (Ctx.ofHyps hypsL) A :=
+                InvTm.castCtx hL.symm cont.weaken
+              let contR : InvTm (Ctx.ofHyps hypsR) A :=
+                InvTm.castCtx hR.symm cont.weaken
+              match applyScheduleEntries fuel σ hypsL rest contL,
+                    applyScheduleEntries fuel σ hypsR rest contR with
+              | .ok bodyL', .ok bodyR' =>
+                  .ok (.case nSum
+                    (InvTm.castCtx hL bodyL')
+                    (InvTm.castCtx hR bodyR'))
+              | .exhausted, _ | _, .exhausted => .exhausted
+              | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+          | _ =>
+              let hyps' := hyps.push P
+              have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P :=
+                Ctx.ofHyps_push hyps P
+              let cont' : InvTm (Ctx.ofHyps hyps') A :=
+                InvTm.castCtx hctx.symm cont.weaken
+              match applyScheduleEntries fuel σ hyps' rest cont' with
+              | .ok body' =>
+                  .ok (.foc (.letPos nP (InvTm.castCtx hctx body')))
+              | .exhausted => .exhausted
+              | .invariantFailure => .invariantFailure
         else
           .invariantFailure
+
+/--
+Saturation invariant on `Γold`: every positive type simply deducible from the
+old fragment alone must already be retrievable.
+-/
+def checkOldInvariant (Γold : ReachCtx sig.nBases) (goal : Object sig.nBases) :
+    Bool :=
+  let σ := runReachability Γold goal
+  Id.run do
+    for i in [:σ.types.size] do
+      match σ.typeAt i, σ.getCell i with
+      | some A, c =>
+        if objectPolarity A == .pos && c.simplyDeducible && !c.retrievable then
+          return false
+      | _, _ => pure ()
+    return true
 
 /--
 If `0` is deducible, collapse through `abort`; otherwise apply the given

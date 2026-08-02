@@ -354,4 +354,87 @@ example :
       CandidateResult.exhausted .focus := by
   native_decide
 
+/-! ### Unit / Never generator laws & observation order -/
+
+/-- Signature: two gens `Unit → Unit` (should compare equal). -/
+def UnitUnitSig : Signature where
+  nBases := 1
+  generators := #[⟨.unit, .unit⟩, ⟨.unit, .unit⟩]
+
+example :
+    compareIntrinsic (sig := UnitUnitSig)
+      (.generator ⟨0, by decide⟩) (.generator ⟨1, by decide⟩) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Signature: two gens `Never → Number` (should compare equal). -/
+def NeverNumSig : Signature where
+  nBases := 1
+  generators := #[⟨.never, Number⟩, ⟨.never, Number⟩]
+
+example :
+    compareIntrinsic (sig := NeverNumSig)
+      (.generator ⟨0, by decide⟩) (.generator ⟨1, by decide⟩) =
+      CandidateResult.equal := by
+  native_decide
+
+/-- Unit η for apps: `f : 1 → X` with no unit hyp still fires when unit is η-available. -/
+def unitAppCtx : ReachCtx 1 where
+  hyps := #[.exp (.unit : Object 1) (.base 0)]
+  newFrom := 0
+
+example :
+    isSimplyDeducible (runReachability unitAppCtx (.base 0)) (.base 0) = true := by
+  native_decide
+
+/--
+Observation-order independence: observing the same atom via two schedule
+entries in a shared schedule yields equal continuations (empty body).
+-/
+def obsOrderEqual : Bool :=
+  let Γ : ReachCtx 2 := appCtx
+  let goal : Object 2 := .base 1
+  let cont : InvTm (Ctx.ofHyps (sig := Sig2) Γ.hyps) (.unit : Object 2) := .unit
+  match saturateInv (sig := Sig2) (fuel := 128) Γ goal cont with
+  | .ok t =>
+    -- Applying the same schedule twice (pair-directed) compares equal.
+    match compareInv (sig := Sig2) Γ goal t t (fuel := 128) with
+    | .equal => true
+    | _ => false
+  | _ => false
+
+example : obsOrderEqual = true := by native_decide
+
+/-- Nested inconsistency: after observing `Y` from `s : X → 0` and `x : X`. -/
+def nestedNeverCtx : ReachCtx 2 where
+  hyps := #[
+    .exp (.base 0) (.never : Object 2),
+    .base 0
+  ]
+  newFrom := 1
+
+example :
+    (runReachability nestedNeverCtx (.base 0)).inconsistent = true := by
+  native_decide
+
+def nestedNeverAborts : Bool :=
+  let cont : InvTm (Ctx.ofHyps (sig := Sig2) nestedNeverCtx.hyps) (.unit : Object 2) :=
+    .unit
+  match saturateInv (sig := Sig2) (fuel := 128) nestedNeverCtx (.unit : Object 2)
+      cont with
+  | .ok (.abort _) => true
+  | _ => false
+
+example : nestedNeverAborts = true := by native_decide
+
+/-- Coproduct η-ish: `case` into unit canonicalizes. -/
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.case
+        (IntrinsicMorphism.discard (sig := NumSig) Number)
+        (IntrinsicMorphism.discard (sig := NumSig) Number))
+      (IntrinsicMorphism.discard (sig := NumSig) (.coprod Number Number)) =
+      CandidateResult.equal := by
+  native_decide
+
 end Gimbal.Equality.Fixtures

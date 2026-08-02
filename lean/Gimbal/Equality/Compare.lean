@@ -101,19 +101,117 @@ def structurallyEqual {Γ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Γ A) : Bool :=
   decide (InvTm.toRaw t == InvTm.toRaw u)
 
+/-- Combine two candidate results (both sides must agree to be equal). -/
+def CandidateResult.and : CandidateResult → CandidateResult → CandidateResult
+  | .equal, .equal => .equal
+  | .exhausted s, _ => .exhausted s
+  | _, .exhausted s => .exhausted s
+  | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+  | _, _ => .different
+
+/-- Old-prefix reachability context (`hyps[0:newFrom]`). -/
+def ReachCtx.oldPrefix {n : Nat} (Γ : ReachCtx n) : ReachCtx n :=
+  ⟨(Γ.hyps.toList.take Γ.newFrom).toArray, Γ.newFrom⟩
+
+mutual
+/--
+Recursive pair-directed saturation under an explicit old/new split.
+After applying the shared schedule, walk invertible structure in lockstep and
+re-enter saturation under each new binder.
+-/
+def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
+    (goal : Object sig.nBases) {A : Object sig.nBases}
+    (t u : InvTm (Ctx.ofHyps Γ.hyps) A) : CandidateResult :=
+  match fuel with
+  | 0 => .exhausted .saturate
+  | fuel + 1 =>
+    -- Note: a full `checkOldInvariant` on Γold is too strong once opaque
+    -- generators inhabit positives (targets are simply deducible from Γold
+    -- without being retrievable there). Milestone 8 tightens this against
+    -- Scherer's selection invariant; for M7 we only refuse on hard failure.
+    let (sched, σ) := pairSchedule Γ goal t u
+    match applyFixedSchedule fuel σ Γ.hyps sched t,
+          applyFixedSchedule fuel σ Γ.hyps sched u with
+    | .exhausted, _ | _, .exhausted => .exhausted .saturate
+    | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
+    | .ok t', .ok u' =>
+        compareInvRec fuel Γ.hyps goal
+          (canonicalize (fuel := fuel) t')
+          (canonicalize (fuel := fuel) u')
+
+/-- Lockstep invertible comparison with re-entry under new binders. -/
+def compareInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
+    (goal : Object sig.nBases) {A : Object sig.nBases}
+    (t u : InvTm (Ctx.ofHyps hyps) A) : CandidateResult :=
+  match fuel with
+  | 0 => .exhausted .saturate
+  | fuel + 1 =>
+    match t, u with
+    | .unit, .unit => .equal
+    | .abort n, .abort m =>
+        if NegNeu.toRaw n == NegNeu.toRaw m then .equal else .different
+    | .pair t₁ t₂, .pair u₁ u₂ =>
+        (compareInvRec fuel hyps goal t₁ u₁).and
+          (compareInvRec fuel hyps goal t₂ u₂)
+    | .lam (A := B) t₁, .lam u₁ =>
+        let hyps' := hyps.push B
+        have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ B :=
+          Ctx.ofHyps_push hyps B
+        let Γ' : ReachCtx sig.nBases := ⟨hyps', hyps.size⟩
+        compareSatRec fuel Γ' goal
+          (InvTm.castCtx hctx.symm t₁)
+          (InvTm.castCtx hctx.symm u₁)
+    | .case (A := L) (B := R) n t₁ t₂, .case (A := L') (B := R') m u₁ u₂ =>
+        if NegNeu.toRaw n != NegNeu.toRaw m then .different
+        else if hL : L = L' then
+          if hR : R = R' then
+            let hypsL := hyps.push L
+            let hypsR := hyps.push R
+            have hxL : Ctx.ofHyps hypsL = Ctx.ofHyps hyps ▻ L :=
+              Ctx.ofHyps_push hyps L
+            have hxR : Ctx.ofHyps hypsR = Ctx.ofHyps hyps ▻ R :=
+              Ctx.ofHyps_push hyps R
+            let ΓL : ReachCtx sig.nBases := ⟨hypsL, hyps.size⟩
+            let ΓR : ReachCtx sig.nBases := ⟨hypsR, hyps.size⟩
+            let u₁' : InvTm (Ctx.ofHyps hyps ▻ L) A :=
+              hL ▸ u₁
+            let u₂' : InvTm (Ctx.ofHyps hyps ▻ R) A :=
+              hR ▸ u₂
+            (compareSatRec fuel ΓL goal
+                (InvTm.castCtx hxL.symm t₁)
+                (InvTm.castCtx hxL.symm u₁')).and
+              (compareSatRec fuel ΓR goal
+                (InvTm.castCtx hxR.symm t₂)
+                (InvTm.castCtx hxR.symm u₂'))
+          else .different
+        else .different
+    | .foc (.letPos (P := P) n t₁), .foc (.letPos (P := P') m u₁) =>
+        if NegNeu.toRaw n != NegNeu.toRaw m then .different
+        else if hP : P = P' then
+          let hyps' := hyps.push P
+          have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P :=
+            Ctx.ofHyps_push hyps P
+          let Γ' : ReachCtx sig.nBases := ⟨hyps', hyps.size⟩
+          let u₁' : InvTm (Ctx.ofHyps hyps ▻ P) A := hP ▸ u₁
+          compareSatRec fuel Γ' goal
+            (InvTm.castCtx hctx.symm t₁)
+            (InvTm.castCtx hctx.symm u₁')
+        else .different
+    | .foc (.pos (.done p)), .foc (.pos (.done q)) =>
+        if PosNeu.toRaw p == PosNeu.toRaw q then .equal else .different
+    | .foc (.neg (.done n)), .foc (.neg (.done m)) =>
+        if NegNeu.toRaw n == NegNeu.toRaw m then .equal else .different
+    | .foc (.sat (.mk _ t₁)), .foc (.sat (.mk _ u₁)) =>
+        compareInvRec fuel hyps goal t₁ u₁
+    | _, _ =>
+        if structurallyEqual t u then .equal else .different
+end
+
 /-- Compare two already-focused invertible terms under a shared reachability context. -/
 def compareInv {A : Object sig.nBases}
     (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) (fuel : Nat := 2048) : CandidateResult :=
-  let (sched, σ) := pairSchedule Γ goal t u
-  match applyFixedSchedule fuel σ Γ.hyps sched t,
-        applyFixedSchedule fuel σ Γ.hyps sched u with
-  | .exhausted, _ | _, .exhausted => .exhausted .saturate
-  | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
-  | .ok t', .ok u' =>
-      let t'' := canonicalize (fuel := fuel) t'
-      let u'' := canonicalize (fuel := fuel) u'
-      if structurallyEqual t'' u'' then .equal else .different
+  compareSatRec fuel Γ goal t u
 
 /-- Compare two focused terms under an arbitrary snoc context. -/
 def compareUnder {A : Object sig.nBases}
@@ -121,17 +219,9 @@ def compareUnder {A : Object sig.nBases}
     (t u : InvTm Γ A) (fuel : Nat := 2048) : CandidateResult :=
   let r := Γ.toReachCtx
   have hctx : Ctx.ofHyps r.hyps = Γ := Ctx.ofHyps_toReachCtx Γ
-  let t₀ : InvTm (Ctx.ofHyps r.hyps) A := InvTm.castCtx hctx.symm t
-  let u₀ : InvTm (Ctx.ofHyps r.hyps) A := InvTm.castCtx hctx.symm u
-  let (sched, σ) := pairSchedule r goal t₀ u₀
-  match applyFixedSchedule fuel σ r.hyps sched t₀,
-        applyFixedSchedule fuel σ r.hyps sched u₀ with
-  | .exhausted, _ | _, .exhausted => .exhausted .saturate
-  | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
-  | .ok t', .ok u' =>
-      let t'' := canonicalize (fuel := fuel) (InvTm.castCtx hctx t')
-      let u'' := canonicalize (fuel := fuel) (InvTm.castCtx hctx u')
-      if structurallyEqual t'' u'' then .equal else .different
+  compareSatRec fuel r goal
+    (InvTm.castCtx hctx.symm t)
+    (InvTm.castCtx hctx.symm u)
 
 /-- Focus then compare ordinary intrinsically typed terms. -/
 def compareTm {Γ : Ctx sig} {A : Object sig.nBases}
