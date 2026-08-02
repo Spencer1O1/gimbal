@@ -26,12 +26,60 @@ def length : Ctx sig → Nat
   | .empty => 0
   | .snoc Γ _ => Γ.length + 1
 
+/-- Build a context by snoc'ing hypotheses oldest-first. -/
+def ofList (xs : List (Object sig.nBases)) : Ctx sig :=
+  xs.foldl Ctx.snoc .empty
+
+/-- Array variant of `ofList`. -/
+def ofHyps (hyps : Array (Object sig.nBases)) : Ctx sig :=
+  ofList hyps.toList
+
+theorem ofList_concat_singleton (xs : List (Object sig.nBases))
+    (A : Object sig.nBases) :
+    ofList (xs ++ [A]) = ofList xs ▻ A := by
+  simp [ofList, List.foldl_append, List.foldl]
+
+theorem ofHyps_push (hyps : Array (Object sig.nBases))
+    (A : Object sig.nBases) :
+    ofHyps (hyps.push A) = ofHyps hyps ▻ A := by
+  simp [ofHyps, Array.toList_push, ofList_concat_singleton]
+
 end Ctx
 
 /-- Typed de Bruijn variable: membership of `A` in `Γ`. -/
 inductive Var {sig : Signature} : Ctx sig → Object sig.nBases → Type where
   | here {Γ : Ctx sig} {A : Object sig.nBases} : Var (Γ ▻ A) A
   | there {Γ : Ctx sig} {A B : Object sig.nBases} : Var Γ A → Var (Γ ▻ B) A
+
+namespace Ctx
+
+variable {sig : Signature}
+
+/-- Variable counted from the newest binder (`0` = `here`). -/
+def varFromEnd : (Γ : Ctx sig) → Nat → Option ((A : Object sig.nBases) × Var Γ A)
+  | .empty, _ => none
+  | .snoc _ A, 0 => some ⟨A, .here⟩
+  | .snoc Γ _, n + 1 =>
+      match varFromEnd Γ n with
+      | some ⟨B, x⟩ => some ⟨B, .there x⟩
+      | none => none
+
+/--
+Variable for hypothesis index `i` (0 = oldest) in `ofHyps hyps`.
+-/
+def varOldest (hyps : Array (Object sig.nBases)) (i : Nat) :
+    Option ((A : Object sig.nBases) × Var (ofHyps hyps) A) :=
+  if i < hyps.size then
+    varFromEnd (ofHyps hyps) (hyps.size - 1 - i)
+  else
+    none
+
+/-- Weaken a variable across one newest binder. -/
+def weakenVar {Γ : Ctx sig} {A B : Object sig.nBases}
+    (x : Var Γ A) : Var (Γ ▻ B) A :=
+  .there x
+
+end Ctx
 
 /-- Intrinsically typed term: `Γ ⊢ A`. -/
 inductive Tm {sig : Signature} : Ctx sig → Object sig.nBases → Type where
@@ -73,6 +121,13 @@ def ext {Γ Δ : Ctx sig} {A : Object sig.nBases}
 /-- Weaken into an extended context. -/
 def weaken {Γ : Ctx sig} {A : Object sig.nBases} : Rename sig Γ (Γ ▻ A) :=
   fun x => .there x
+
+/-- Exchange the two newest binders: `(Γ ▻ A ▻ B) → (Γ ▻ B ▻ A)`. -/
+def exchange {Γ : Ctx sig} {A B : Object sig.nBases} :
+    Rename sig (Γ ▻ A ▻ B) (Γ ▻ B ▻ A)
+  | _, .here => .there .here
+  | _, .there .here => .here
+  | _, .there (.there x) => .there (.there x)
 
 end Rename
 

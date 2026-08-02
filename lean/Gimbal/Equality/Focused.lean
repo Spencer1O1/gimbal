@@ -121,5 +121,92 @@ def SatTm.erase {Γ : Ctx sig} {A : Object sig.nBases} : SatTm Γ A → Tm Γ A
   | .mk _ t => InvTm.erase t
 end
 
+/-! ### Renaming / weakening for focused syntax -/
+
+mutual
+def NegNeu.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : NegNeu Γ A → NegNeu Δ A
+  | .var x => .var (ρ x)
+  | .app n t => .app (NegNeu.rename ρ n) (InvTm.rename ρ t)
+  | .fst n => .fst (NegNeu.rename ρ n)
+  | .snd n => .snd (NegNeu.rename ρ n)
+
+def PosNeu.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : PosNeu Γ A → PosNeu Δ A
+  | .neu n => .neu (NegNeu.rename ρ n)
+  | .inl p => .inl (PosNeu.rename ρ p)
+  | .inr p => .inr (PosNeu.rename ρ p)
+
+def InvTm.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : InvTm Γ A → InvTm Δ A
+  | .unit => .unit
+  | .pair t u => .pair (InvTm.rename ρ t) (InvTm.rename ρ u)
+  | .lam t => .lam (InvTm.rename (Rename.ext ρ) t)
+  | .case n t u =>
+      .case (NegNeu.rename ρ n) (InvTm.rename (Rename.ext ρ) t)
+        (InvTm.rename (Rename.ext ρ) u)
+  | .abort n => .abort (NegNeu.rename ρ n)
+  | .foc f => .foc (FocTm.rename ρ f)
+
+def FocTm.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : FocTm Γ A → FocTm Δ A
+  | .pos p => .pos (PosIntro.rename ρ p)
+  | .neg n => .neg (NegElim.rename ρ n)
+  | .letPos n t => .letPos (NegNeu.rename ρ n) (InvTm.rename (Rename.ext ρ) t)
+  | .sat s => .sat (SatTm.rename ρ s)
+
+def PosIntro.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : PosIntro Γ A → PosIntro Δ A
+  | .done p => .done (PosNeu.rename ρ p)
+
+def NegElim.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : NegElim Γ A → NegElim Δ A
+  | .done n => .done (NegNeu.rename ρ n)
+
+def SatTm.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) : SatTm Γ A → SatTm Δ A
+  | .mk s t => .mk s (InvTm.rename ρ t)
+end
+
+/-- Weaken a focused term by one newest binder. -/
+def InvTm.weaken {Γ : Ctx sig} {A B : Object sig.nBases}
+    (t : InvTm Γ A) : InvTm (Γ ▻ B) A :=
+  InvTm.rename Rename.weaken t
+
+def NegNeu.weaken {Γ : Ctx sig} {A B : Object sig.nBases}
+    (n : NegNeu Γ A) : NegNeu (Γ ▻ B) A :=
+  NegNeu.rename Rename.weaken n
+
+/-- Cast a negative neutral along a type equality. -/
+def NegNeu.cast {Γ : Ctx sig} {A B : Object sig.nBases}
+    (h : A = B) (n : NegNeu Γ A) : NegNeu Γ B :=
+  h ▸ n
+
+/-- Cast an invertible term along a type equality. -/
+def InvTm.castTy {Γ : Ctx sig} {A B : Object sig.nBases}
+    (h : A = B) (t : InvTm Γ A) : InvTm Γ B :=
+  h ▸ t
+
+/-- Cast an invertible term along a context equality. -/
+def InvTm.castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (t : InvTm Γ A) : InvTm Δ A :=
+  h ▸ t
+
+def NegNeu.castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (n : NegNeu Γ A) : NegNeu Δ A :=
+  h ▸ n
+
+/-- Cast a negative neutral along an equality of hypothesis arrays. -/
+def NegNeu.castHyps {hyps hyps' : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (h : hyps = hyps') (n : NegNeu (Ctx.ofHyps hyps) A) :
+    NegNeu (Ctx.ofHyps hyps') A :=
+  NegNeu.castCtx (congrArg Ctx.ofHyps h) n
+
+/-- Cast an invertible term along an equality of hypothesis arrays. -/
+def InvTm.castHyps {hyps hyps' : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (h : hyps = hyps') (t : InvTm (Ctx.ofHyps hyps) A) :
+    InvTm (Ctx.ofHyps hyps') A :=
+  InvTm.castCtx (congrArg Ctx.ofHyps h) t
+
 end Equality
 end Gimbal

@@ -7,6 +7,8 @@ import Gimbal.Equality.Focus
 import Gimbal.Equality.Translate
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
+import Gimbal.Equality.ICC
+import Gimbal.Equality.Compare
 import Gimbal.Fixtures
 
 namespace Gimbal.Equality.Fixtures
@@ -241,5 +243,67 @@ def satUnitEraseOk : Bool :=
       | _ => false
 
 example : satUnitEraseOk = true := by native_decide
+
+/-! ### Schedule application -/
+
+private abbrev Sig2 : Signature := ⟨2, #[]⟩
+private abbrev Sig1 : Signature := ⟨1, #[]⟩
+
+/-- Apply the appCtx schedule: `Y` becomes an observation via `s x`. -/
+def applyAppScheduleIsLetPos : Bool :=
+  let cont : InvTm (Ctx.ofHyps (sig := Sig2) appCtx.hyps) (.unit : Object 2) := .unit
+  match saturateInv (sig := Sig2) (fuel := 128) appCtx (.base 1) cont with
+  | .ok t =>
+    match t with
+    | .foc (.letPos _ .unit) => true
+    | _ => false
+  | _ => false
+
+example : applyAppScheduleIsLetPos = true := by native_decide
+
+/-- Inconsistent context collapses through abort. -/
+def applyNeverAbortUnit : Bool :=
+  let cont : InvTm (Ctx.ofHyps (sig := Sig1) neverCtx.hyps) (.unit : Object 1) := .unit
+  match saturateInv (sig := Sig1) (fuel := 64) neverCtx (.base 0) cont with
+  | .ok (.abort _) => true
+  | _ => false
+
+example : applyNeverAbortUnit = true := by native_decide
+
+/-! ### ICC canonicalizer -/
+
+def iccCaseUnit :
+    InvTm (translateCtx (sig := NumSig) (.coprod Number Number)) .unit :=
+  .case (.var .here) .unit .unit
+
+def iccCaseUnitCanonical : Bool :=
+  match canonicalize iccCaseUnit with
+  | .unit => true
+  | _ => false
+
+example : iccCaseUnitCanonical = true := by native_decide
+
+/-! ### Candidate compare -/
+
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.id (sig := NumSig) Number)
+      (IntrinsicMorphism.id (sig := NumSig) Number) =
+      CandidateResult.equal := by
+  native_decide
+
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.discard (sig := NumSig) Number)
+      (IntrinsicMorphism.discard (sig := NumSig) Number) =
+      CandidateResult.equal := by
+  native_decide
+
+example :
+    compareIntrinsic (sig := NumSig)
+      (IntrinsicMorphism.left (sig := NumSig) Number Number)
+      (IntrinsicMorphism.right (sig := NumSig) Number Number) =
+      CandidateResult.different := by
+  native_decide
 
 end Gimbal.Equality.Fixtures

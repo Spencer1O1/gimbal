@@ -24,5 +24,7 @@ import Gimbal.Equality.Focused
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
+import Gimbal.Equality.ICC
+import Gimbal.Equality.Compare
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures
