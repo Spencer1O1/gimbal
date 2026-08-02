@@ -23,6 +23,7 @@ import Gimbal.Equality.Polarized
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
+import Gimbal.Equality.Deduction
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.ICC
 import Gimbal.Equality.Compare

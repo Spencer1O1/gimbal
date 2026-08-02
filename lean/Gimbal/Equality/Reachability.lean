@@ -3,8 +3,8 @@
 
   Computes a least fixed point over the finite subformula universe of a root
   judgment. Does **not** enumerate concrete neutrals: contexts such as
-  `x : X, s : X → X` stay finite because only types are tracked, with a single
-  first-discovery witness (parent pointer) per type.
+  `x : X, s : X → X` stay finite because only types are tracked.
+  Each type keeps separate old-only and uses-new witnesses (provenance lattice).
 -/
 
 import Gimbal.Equality.LambdaSyntax
@@ -51,17 +51,47 @@ inductive Witness where
   | app (fnHypIdx : Nat) (argTypeIdx : Nat)
   | appTy (fnTypeIdx : Nat) (argTypeIdx : Nat)
   | unit
+  /-- Coproduct introduction from a deducible left payload (`ofTypeIdx` → `L`). -/
+  | inl (ofTypeIdx : Nat)
+  /-- Coproduct introduction from a deducible right payload (`ofTypeIdx` → `R`). -/
+  | inr (ofTypeIdx : Nat)
+  /-- Product η-availability (no neutral; not scheduled). -/
+  | eta
   deriving DecidableEq, Repr
 
-/-- Per-type reachability cell. -/
+/--
+Witnesses that reconstruct to a negative neutral (schedulable observations).
+Introduction / η forms only justify invertible arguments.
+-/
+def Witness.isNeutral : Witness → Bool
+  | .ctxVar _ | .fst _ | .snd _ | .app _ _ | .appTy _ _ => true
+  | .unit | .inl _ | .inr _ | .eta => false
+
+/--
+Per-type reachability cell with a provenance lattice:
+unreachable / old-only / uses-new (the latter two may both be inhabited).
+-/
 structure ReachCell where
   retrievable : Bool := false
-  simplyDeducible : Bool := false
-  usesNew : Bool := false
-  witness : Option Witness := none
+  oldWitness : Option Witness := none
+  newWitness : Option Witness := none
   deriving DecidableEq, Repr
 
 def ReachCell.empty : ReachCell := {}
+
+/-- Simply deducible from old hypotheses, new hypotheses, or a context hyp. -/
+def ReachCell.simplyDeducible (c : ReachCell) : Bool :=
+  c.retrievable || c.oldWitness.isSome || c.newWitness.isSome
+
+/-- At least one recorded derivation uses `Γnew`. -/
+def ReachCell.usesNew (c : ReachCell) : Bool :=
+  c.newWitness.isSome
+
+/-- Preferred witness: uses-new if present, otherwise old-only. -/
+def ReachCell.witness (c : ReachCell) : Option Witness :=
+  match c.newWitness with
+  | some w => some w
+  | none => c.oldWitness
 
 /-! ### Context fragment -/
 
@@ -105,7 +135,10 @@ def ReachState.setCell {n : Nat} (σ : ReachState n) (i : Nat) (c : ReachCell) :
 def ReachState.typeAt {n : Nat} (σ : ReachState n) (i : Nat) : Option (Object n) :=
   σ.types[i]?
 
-/-- Discover `i` as simply deducible with the given witness (first wins). -/
+/--
+Record a derivation at provenance `usesNew`.
+Old-only and uses-new slots are independent: discovering one does not erase the other.
+-/
 def ReachState.discover {n : Nat} (σ : ReachState n) (i : Nat) (usesNew : Bool)
     (w : Witness) : ReachState n :=
   match σ.typeAt i with
@@ -113,12 +146,18 @@ def ReachState.discover {n : Nat} (σ : ReachState n) (i : Nat) (usesNew : Bool)
   | some A =>
     let c := σ.getCell i
     let c' :=
-      if c.simplyDeducible then c
-      else { c with simplyDeducible := true, usesNew := usesNew, witness := some w }
+      if usesNew then
+        match c.newWitness with
+        | some _ => c
+        | none => { c with newWitness := some w }
+      else
+        match c.oldWitness with
+        | some _ => c
+        | none => { c with oldWitness := some w }
     let σ := σ.setCell i c'
     if A == (.never : Object n) then { σ with inconsistent := true } else σ
 
-/-- Mark a context hypothesis as retrievable (and deducible). -/
+/-- Mark a context hypothesis as retrievable (and deducible) at its provenance. -/
 def ReachState.markHyp {n : Nat} (σ : ReachState n) (Γ : ReachCtx n) (hypIdx : Nat) :
     ReachState n :=
   match Γ.hyps[hypIdx]? with
@@ -129,14 +168,20 @@ def ReachState.markHyp {n : Nat} (σ : ReachState n) (Γ : ReachCtx n) (hypIdx :
     | some i =>
       let usesNew := Γ.isNew hypIdx
       let c := σ.getCell i
+      let w : Witness := .ctxVar hypIdx
       let c' :=
-        { c with
-          retrievable := true
-          simplyDeducible := true
-          usesNew := c.usesNew || usesNew
-          witness := match c.witness with
-            | some w => some w
-            | none => some (.ctxVar hypIdx) }
+        if usesNew then
+          { c with
+            retrievable := true
+            newWitness := match c.newWitness with
+              | some w0 => some w0
+              | none => some w }
+        else
+          { c with
+            retrievable := true
+            oldWitness := match c.oldWitness with
+              | some w0 => some w0
+              | none => some w }
       let σ := σ.setCell i c'
       if A == (.never : Object n) then { σ with inconsistent := true } else σ
 
@@ -198,10 +243,7 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
             if lc.simplyDeducible && rc.simplyDeducible then
               -- Product is η-available from components (not scheduled; neg).
               let uses := lc.usesNew || rc.usesNew
-              let c := σ.getCell ti
-              if !c.simplyDeducible then
-                σ := σ.setCell ti
-                  { c with simplyDeducible := true, usesNew := uses }
+              σ := σ.discover ti uses .eta
           | _, _ => pure ()
       | some (.exp Arg Ret) =>
         -- Fire deduced function types when the argument is known.
@@ -213,6 +255,21 @@ def reachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n) : ReachState n :=
             if ac.simplyDeducible then
               let uses := fc.usesNew || ac.usesNew
               σ := σ.discover rIdx uses (.appTy ti aIdx)
+            else
+              pure ()
+          | _, _ => pure ()
+      | some (.coprod L R) =>
+        -- Synthesize a coproduct from either injection when a payload is known.
+        let cc := σ.getCell ti
+        if !cc.simplyDeducible then
+          match σ.findTypeIdx L, σ.findTypeIdx R with
+          | some lIdx, some rIdx =>
+            let lc := σ.getCell lIdx
+            let rc := σ.getCell rIdx
+            if lc.simplyDeducible then
+              σ := σ.discover ti lc.usesNew (.inl lIdx)
+            else if rc.simplyDeducible then
+              σ := σ.discover ti rc.usesNew (.inr rIdx)
             else
               pure ()
           | _, _ => pure ()
@@ -252,9 +309,10 @@ def pendingWitnesses {n : Nat} (σ : ReachState n) : Array (Object n × Witness)
     for i in [:σ.types.size] do
       match σ.typeAt i, σ.getCell i with
       | some A, c =>
-        if c.simplyDeducible && !c.retrievable && objectPolarity A == .pos then
+        if !c.retrievable && objectPolarity A == .pos then
           match c.witness with
-          | some w => out := out.push (A, w)
+          | some w =>
+            if w.isNeutral then out := out.push (A, w) else pure ()
           | none => pure ()
       | _, _ => pure ()
     pure out
@@ -302,10 +360,10 @@ def buildSchedule {n : Nat} (σ : ReachState n) : Schedule n :=
     for i in [:σ.types.size] do
       match σ.typeAt i, σ.getCell i with
       | some A, c =>
-        if c.simplyDeducible && !c.retrievable && c.usesNew &&
-            objectPolarity A == .pos then
-          match c.witness with
-          | some w => entries := entries.push (A, w)
+        if !c.retrievable && objectPolarity A == .pos then
+          match c.newWitness with
+          | some w =>
+            if w.isNeutral then entries := entries.push (A, w) else pure ()
           | none => pure ()
       | _, _ => pure ()
     pure ⟨entries⟩

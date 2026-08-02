@@ -202,6 +202,24 @@ example : usesNew appState (.base 1) = true := by
 example : (buildSchedule appState).size = 1 := by
   native_decide
 
+/--
+Provenance lattice: old hyp `x : X` and new `f : 1 → X` both witness `X`.
+Discovering the uses-new app does not erase the old-only hyp witness.
+-/
+def provenanceDualCtx : ReachCtx 1 where
+  hyps := #[.base 0, .exp (.unit : Object 1) (.base 0)]
+  newFrom := 1
+
+def provenanceDualKeepsBoth : Bool :=
+  let σ := runReachability provenanceDualCtx (.base 0)
+  match σ.findTypeIdx (.base 0) with
+  | some i =>
+    let c := σ.getCell i
+    c.oldWitness.isSome && c.newWitness.isSome && c.retrievable
+  | none => false
+
+example : provenanceDualKeepsBoth = true := by native_decide
+
 /-- Product projection: `p : X × Y` makes both components deducible. -/
 def prodCtx : ReachCtx 2 where
   hyps := #[.prod (.base 0) (.base 1)]
@@ -668,9 +686,13 @@ def hofSumId : CandidateResult :=
   compareIntrinsic (sig := HofSumSig) (fuel := 512)
     (.generator ⟨0, by decide⟩) (.generator ⟨0, by decide⟩)
 
-example : hofSumId = CandidateResult.invariantFailure := by native_decide
+example : hofSumId = CandidateResult.equal := by native_decide
 
-/-- `g ≫ case(left,right) = g` (intended: `equal`). -/
+/--
+`g ≫ case(left,right) = g` (sum η).
+S4 unblocks saturation (was `invariantFailure`); still `.different` until
+ICC / referenceCompare close the η gap.
+-/
 def hofSumEta : CandidateResult :=
   compareIntrinsic (sig := HofSumSig) (fuel := 512)
     (IntrinsicMorphism.compose (sig := HofSumSig)
@@ -680,7 +702,7 @@ def hofSumEta : CandidateResult :=
         (IntrinsicMorphism.right (sig := HofSumSig) Number Number)))
     (.generator ⟨0, by decide⟩)
 
-example : hofSumEta = CandidateResult.invariantFailure := by native_decide
+example : hofSumEta = CandidateResult.different := by native_decide
 
 /-- Higher-order generator returning a function. -/
 def HofExpSig : Signature where
@@ -873,8 +895,7 @@ example : auditSatRawIgnoresScheduleEntries = true := by native_decide
 
 /--
 Audit 5.2 sharp: `x : X`, `f : 1 → X`, term `f ()`.
-Exact `f()` must remain scheduled even though `X` is retrievable from `x`.
-**Current:** `selectExactObs` drops it (`sel = 0`). **Intended:** `sel = 1`.
+Exact `f()` remains scheduled even though `X` is retrievable from `x`.
 -/
 def auditExactKeptWhenRetrievable : Bool :=
   let hyps : Array (Object 1) := #[.base 0, .exp (.unit : Object 1) (.base 0)]
@@ -886,8 +907,7 @@ def auditExactKeptWhenRetrievable : Bool :=
     let σ := runReachability (⟨hyps, 0⟩ : ReachCtx 1) (.base 0)
     let ex := collectExact (sig := Sig1) t
     let sel := selectExactObs (sig := Sig1) σ hyps ex
-    -- Pin current bug until S5 selection fix:
-    ex.size == 1 && isRetrievable σ (.base 0) && sel.size == 0
+    ex.size == 1 && isRetrievable σ (.base 0) && sel.size == 1
 
 example : auditExactKeptWhenRetrievable = true := by native_decide
 
@@ -895,10 +915,9 @@ example : auditExactKeptWhenRetrievable = true := by native_decide
 example : depAppOrdered = true := by native_decide
 
 /--
-Audit 5.4: observing `n` on continuation `n` must abstract to `let x = n in x`.
-**Current:** `letPos n (weaken n)`. **Intended:** body is the new variable.
+Audit 5.4: observing `n` on continuation `n` abstracts to `let x = n in x`.
 -/
-def auditNoAbstractionYet : Bool :=
+def auditAbstractionReplacesNeutral : Bool :=
   let hyps : Array (Object 1) := #[.exp (.unit : Object 1) (.base 0)]
   let Γ : ReachCtx 1 := ⟨hyps, 0⟩
   let tm : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) :=
@@ -912,33 +931,29 @@ def auditNoAbstractionYet : Bool :=
       match applyPairObs (sig := Sig1) 64 σ hyps entries t with
       | .ok t' =>
         match InvTm.toRaw t' with
-        | .letPos _ body =>
-          -- Body still mentions the original app (var 1), not `.var 0`.
-          body != .pos (.neu (.var 0))
+        | .letPos _ body => body == .pos (.neu (.var 0))
         | _ => false
       | _ => false
 
-example : auditNoAbstractionYet = true := by native_decide
+example : auditAbstractionReplacesNeutral = true := by native_decide
 
 /--
-Audit 5.5: `f : (X+Y) → Z`, `x : X` should make `Z` simply deducible via `f (inl x)`.
-**Current:** not discovered. **Intended:** `isSimplyDeducible = true`.
+Audit 5.5: `f : (X+Y) → Z`, `x : X` makes `Z` simply deducible via `f (inl x)`.
 -/
-def auditNoInlSynthesisYet : Bool :=
+def auditInlSynthesis : Bool :=
   let hyps : Array (Object 3) := #[
     .exp (.coprod (.base 0) (.base 1)) (.base 2),
     .base 0
   ]
   let Γ : ReachCtx 3 := ⟨hyps, 0⟩
-  isSimplyDeducible (runReachability Γ (.base 2)) (.base 2) == false
+  isSimplyDeducible (runReachability Γ (.base 2)) (.base 2)
 
-example : auditNoInlSynthesisYet = true := by native_decide
+example : auditInlSynthesis = true := by native_decide
 
 /--
-Audit 5.6: hidden inconsistency via `f (inl x) : 0` should collapse `a = b`.
-**Current:** compare reports `.different`. **Intended:** `.equal` (after S5).
+Audit 5.6: hidden inconsistency via `f (inl x) : 0` collapses `a = b`.
 -/
-def auditHiddenInconsistencyFalseNegative : Bool :=
+def auditHiddenInconsistency : Bool :=
   let hyps : Array (Object 3) := #[
     .exp (.coprod (.base 0) (.base 1)) (.never : Object 3),
     .base 0,
@@ -952,10 +967,10 @@ def auditHiddenInconsistencyFalseNegative : Bool :=
     .foc (.pos (.done (.neu (.var .here))))
   -- a = there.here (older Z), b = here (newer Z) under snoc … ▻ a ▻ b
   match compareInv (sig := Sig3) Γ (.base 2) t u (fuel := 64) with
-  | .different => true  -- pin current false negative
+  | .equal => true
   | _ => false
 
-example : auditHiddenInconsistencyFalseNegative = true := by native_decide
+example : auditHiddenInconsistency = true := by native_decide
 
 /-- Audit 5.7: fuel zero is exhaustion, never a semantic `.different`. -/
 example :

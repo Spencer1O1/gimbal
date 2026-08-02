@@ -175,8 +175,8 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
             else
               none
           | _, _ => none
-        | .unit =>
-          -- `unit` witnesses only mark η-availability for apps; never scheduled.
+        | .unit | .inl _ | .inr _ | .eta =>
+          -- Introduction witnesses justify invertible args only; never neutrals.
           none
       | .invOf hyps A =>
         match reconstructGo fuel σ (.neuOf hyps A) with
@@ -207,6 +207,42 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
                 else none
               else none
             | _, _ => none
+          | .coprod L R =>
+            let preferRight :=
+              match σ.findTypeIdx (.coprod L R) with
+              | some i =>
+                match (σ.getCell i).witness with
+                | some (.inr _) => true
+                | _ => false
+              | none => false
+            let inlVal : Option (ReconstructVal sig) :=
+              match reconstructGo fuel σ (.invOf hyps L) with
+              | some (.inv hyps' A' (.foc (.pos (.done p)))) =>
+                if hH : hyps' = hyps then
+                  if hA : A' = L then
+                    some (.inv hyps (.coprod L R)
+                      (.foc (.pos (.done (.inl (hA ▸ (hH ▸ p)))))))
+                  else none
+                else none
+              | _ => none
+            let inrVal : Option (ReconstructVal sig) :=
+              match reconstructGo fuel σ (.invOf hyps R) with
+              | some (.inv hyps' A' (.foc (.pos (.done p)))) =>
+                if hH : hyps' = hyps then
+                  if hA : A' = R then
+                    some (.inv hyps (.coprod L R)
+                      (.foc (.pos (.done (.inr (hA ▸ (hH ▸ p)))))))
+                  else none
+                else none
+              | _ => none
+            if preferRight then
+              match inrVal with
+              | some v => some v
+              | none => inlVal
+            else
+              match inlVal with
+              | some v => some v
+              | none => inrVal
           | _ => none
 
 /-- Reconstruct a negative neutral for a target type. -/
@@ -397,10 +433,12 @@ def exactsAllUseNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
   exact.all fun e => NegNeu.mentionsNew hypsSize newFrom e.2
 
 /--
-Exact neutrals that still need observation: positive, not yet retrievable / hyp,
-deduped by identity.
+Exact neutrals that still need observation.
+A type may already be retrievable from a hypothesis while a distinct exact
+neutral (e.g. `f ()` vs hyp `x : X`) still requires strong positive cut.
+Bare hypothesis variables are skipped — they are already bound.
 -/
-def selectExactObs (σ : ReachState sig.nBases)
+def selectExactObs (_σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
     (exact : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
     Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) :=
@@ -409,12 +447,11 @@ def selectExactObs (σ : ReachState sig.nBases)
         Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
     for e in exact do
       if objectPolarity e.1 == .pos && !out.any (exactIdEq e) then
-        let retr :=
-          match σ.findTypeIdx e.1 with
-          | some i => (σ.getCell i).retrievable
-          | none => false
-        let isHyp := (findHypVar hyps e.1).isSome
-        if !retr && !isHyp then
+        let bareHyp :=
+          match e.2 with
+          | .var _ => true
+          | _ => false
+        if !bareHyp then
           out := out.push e
     pure out
 
@@ -645,10 +682,268 @@ def NegNeu.weakenMany {Γ : Ctx sig} {A : Object sig.nBases} :
   | [], n => n
   | _B :: Bs, n => NegNeu.weakenMany Bs (NegNeu.weaken n)
 
+/-! ### Strong positive cut (neutral abstraction) -/
+
+mutual
+/-- Shift a raw spine under one newest binder (all de Bruijn indices +1). -/
+def RawNeu.shift : RawNeu → RawNeu
+  | .var i => .var (i + 1)
+  | .app n a => .app (RawNeu.shift n) (RawFocused.shift a)
+  | .fst n => .fst (RawNeu.shift n)
+  | .snd n => .snd (RawNeu.shift n)
+
+def RawPos.shift : RawPos → RawPos
+  | .neu n => .neu (RawNeu.shift n)
+  | .inl p => .inl (RawPos.shift p)
+  | .inr p => .inr (RawPos.shift p)
+
+def RawFocused.shift : RawFocused → RawFocused
+  | .unit => .unit
+  | .pair t u => .pair (RawFocused.shift t) (RawFocused.shift u)
+  | .lam t => .lam (RawFocused.shift t)
+  | .case s t u =>
+      .case (RawNeu.shift s) (RawFocused.shift t) (RawFocused.shift u)
+  | .abort n => .abort (RawNeu.shift n)
+  | .pos p => .pos (RawPos.shift p)
+  | .neg n => .neg (RawNeu.shift n)
+  | .letPos n t => .letPos (RawNeu.shift n) (RawFocused.shift t)
+  | .sat k t => .sat k (RawFocused.shift t)
+end
+
+mutual
+/--
+Replace occurrences of the observed neutral (raw spine `targetRaw`)
+by the abstraction variable `x` (initially `.here` under `Γ ▻ P`).
+-/
+def NegNeu.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
+    (x : Var Γ P) (targetRaw : RawNeu) : NegNeu Γ A → NegNeu Γ A
+  | .var y =>
+      if NegNeu.toRaw (.var y) == targetRaw then
+        match decEq A P with
+        | isTrue h => h ▸ .var x
+        | isFalse _ => .var y
+      else
+        .var y
+  | .app f a =>
+      if NegNeu.toRaw (.app f a) == targetRaw then
+        match decEq A P with
+        | isTrue h => h ▸ .var x
+        | isFalse _ =>
+            .app (NegNeu.abstractAtom x targetRaw f) (InvTm.abstractAtom x targetRaw a)
+      else
+        .app (NegNeu.abstractAtom x targetRaw f) (InvTm.abstractAtom x targetRaw a)
+  | .fst m =>
+      if NegNeu.toRaw (.fst m) == targetRaw then
+        match decEq A P with
+        | isTrue h => h ▸ .var x
+        | isFalse _ => .fst (NegNeu.abstractAtom x targetRaw m)
+      else
+        .fst (NegNeu.abstractAtom x targetRaw m)
+  | .snd m =>
+      if NegNeu.toRaw (.snd m) == targetRaw then
+        match decEq A P with
+        | isTrue h => h ▸ .var x
+        | isFalse _ => .snd (NegNeu.abstractAtom x targetRaw m)
+      else
+        .snd (NegNeu.abstractAtom x targetRaw m)
+
+def PosNeu.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
+    (x : Var Γ P) (targetRaw : RawNeu) : PosNeu Γ A → PosNeu Γ A
+  | .neu n => .neu (NegNeu.abstractAtom x targetRaw n)
+  | .inl p => .inl (PosNeu.abstractAtom x targetRaw p)
+  | .inr p => .inr (PosNeu.abstractAtom x targetRaw p)
+
+def InvTm.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
+    (x : Var Γ P) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
+  | .unit => .unit
+  | .pair t u =>
+      .pair (InvTm.abstractAtom x targetRaw t) (InvTm.abstractAtom x targetRaw u)
+  | .lam t => .lam (InvTm.abstractAtom (.there x) (RawNeu.shift targetRaw) t)
+  | .case n t u =>
+      .case (NegNeu.abstractAtom x targetRaw n)
+        (InvTm.abstractAtom (.there x) (RawNeu.shift targetRaw) t)
+        (InvTm.abstractAtom (.there x) (RawNeu.shift targetRaw) u)
+  | .abort n => .abort (NegNeu.abstractAtom x targetRaw n)
+  | .foc f => .foc (FocTm.abstractAtom x targetRaw f)
+
+def FocTm.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
+    (x : Var Γ P) (targetRaw : RawNeu) : FocTm Γ A → FocTm Γ A
+  | .pos (.done p) => .pos (.done (PosNeu.abstractAtom x targetRaw p))
+  | .neg (.done n) => .neg (.done (NegNeu.abstractAtom x targetRaw n))
+  | .letPos n t =>
+      .letPos (NegNeu.abstractAtom x targetRaw n)
+        (InvTm.abstractAtom (.there x) (RawNeu.shift targetRaw) t)
+  | .sat (.mk s t) => .sat (.mk s (InvTm.abstractAtom x targetRaw t))
+
+/-- Sum-branch walk and injection synthesis (same mutual as abstractAtom). -/
+def NegNeu.abstractSum {Γ : Ctx sig} {B A : Object sig.nBases}
+    (x : Var Γ B) (targetRaw : RawNeu) : NegNeu Γ A → NegNeu Γ A
+  | .var y => .var y
+  | .app f a =>
+      .app (NegNeu.abstractSum x targetRaw f) (InvTm.abstractSumWalk x targetRaw a)
+  | .fst m => .fst (NegNeu.abstractSum x targetRaw m)
+  | .snd m => .snd (NegNeu.abstractSum x targetRaw m)
+
+def PosNeu.abstractSumWalk {Γ : Ctx sig} {B A : Object sig.nBases}
+    (x : Var Γ B) (targetRaw : RawNeu) : PosNeu Γ A → PosNeu Γ A
+  | .neu n => .neu (NegNeu.abstractSum x targetRaw n)
+  | .inl p => .inl (PosNeu.abstractSumWalk x targetRaw p)
+  | .inr p => .inr (PosNeu.abstractSumWalk x targetRaw p)
+
+def InvTm.abstractSumWalk {Γ : Ctx sig} {B A : Object sig.nBases}
+    (x : Var Γ B) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
+  | .unit => .unit
+  | .pair t u =>
+      .pair (InvTm.abstractSumWalk x targetRaw t) (InvTm.abstractSumWalk x targetRaw u)
+  | .lam t => .lam (InvTm.abstractSumWalk (.there x) (RawNeu.shift targetRaw) t)
+  | .case n t u =>
+      .case (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumWalk (.there x) (RawNeu.shift targetRaw) t)
+        (InvTm.abstractSumWalk (.there x) (RawNeu.shift targetRaw) u)
+  | .abort n => .abort (NegNeu.abstractSum x targetRaw n)
+  | .foc f => .foc (FocTm.abstractSumWalk x targetRaw f)
+
+def FocTm.abstractSumWalk {Γ : Ctx sig} {B A : Object sig.nBases}
+    (x : Var Γ B) (targetRaw : RawNeu) : FocTm Γ A → FocTm Γ A
+  | .pos (.done p) => .pos (.done (PosNeu.abstractSumWalk x targetRaw p))
+  | .neg (.done n) => .neg (.done (NegNeu.abstractSum x targetRaw n))
+  | .letPos n t =>
+      .letPos (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumWalk (.there x) (RawNeu.shift targetRaw) t)
+  | .sat (.mk s t) => .sat (.mk s (InvTm.abstractSumWalk x targetRaw t))
+
+def PosNeu.abstractSumInl {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ L) (targetRaw : RawNeu) : PosNeu Γ A → PosNeu Γ A
+  | .neu n =>
+      if NegNeu.toRaw n == targetRaw then
+        match decEq A (.coprod L R) with
+        | isTrue h => h ▸ .inl (.neu (.var x))
+        | isFalse _ => .neu (NegNeu.abstractSum x targetRaw n)
+      else
+        .neu (NegNeu.abstractSum x targetRaw n)
+  | .inl p => .inl (PosNeu.abstractSumInl (R := R) x targetRaw p)
+  | .inr p => .inr (PosNeu.abstractSumInl (R := R) x targetRaw p)
+
+def PosNeu.abstractSumInr {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ R) (targetRaw : RawNeu) : PosNeu Γ A → PosNeu Γ A
+  | .neu n =>
+      if NegNeu.toRaw n == targetRaw then
+        match decEq A (.coprod L R) with
+        | isTrue h => h ▸ .inr (.neu (.var x))
+        | isFalse _ => .neu (NegNeu.abstractSum x targetRaw n)
+      else
+        .neu (NegNeu.abstractSum x targetRaw n)
+  | .inl p => .inl (PosNeu.abstractSumInr (L := L) x targetRaw p)
+  | .inr p => .inr (PosNeu.abstractSumInr (L := L) x targetRaw p)
+
+def InvTm.abstractSumInl {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ L) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
+  | .unit => .unit
+  | .pair t u =>
+      .pair (InvTm.abstractSumInl (R := R) x targetRaw t) (InvTm.abstractSumInl (R := R) x targetRaw u)
+  | .lam t => .lam (InvTm.abstractSumInl (R := R) (.there x) (RawNeu.shift targetRaw) t)
+  | .case n t u =>
+      .case (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumInl (R := R) (.there x) (RawNeu.shift targetRaw) t)
+        (InvTm.abstractSumInl (R := R) (.there x) (RawNeu.shift targetRaw) u)
+  | .abort n => .abort (NegNeu.abstractSum x targetRaw n)
+  | .foc f => .foc (FocTm.abstractSumInl (R := R) x targetRaw f)
+
+def InvTm.abstractSumInr {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ R) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
+  | .unit => .unit
+  | .pair t u =>
+      .pair (InvTm.abstractSumInr (L := L) x targetRaw t) (InvTm.abstractSumInr (L := L) x targetRaw u)
+  | .lam t => .lam (InvTm.abstractSumInr (L := L) (.there x) (RawNeu.shift targetRaw) t)
+  | .case n t u =>
+      .case (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumInr (L := L) (.there x) (RawNeu.shift targetRaw) t)
+        (InvTm.abstractSumInr (L := L) (.there x) (RawNeu.shift targetRaw) u)
+  | .abort n => .abort (NegNeu.abstractSum x targetRaw n)
+  | .foc f => .foc (FocTm.abstractSumInr (L := L) x targetRaw f)
+
+def FocTm.abstractSumInl {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ L) (targetRaw : RawNeu) : FocTm Γ A → FocTm Γ A
+  | .pos (.done p) => .pos (.done (PosNeu.abstractSumInl (R := R) x targetRaw p))
+  | .neg (.done n) => .neg (.done (NegNeu.abstractSum x targetRaw n))
+  | .letPos n t =>
+      .letPos (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumInl (R := R) (.there x) (RawNeu.shift targetRaw) t)
+  | .sat (.mk s t) => .sat (.mk s (InvTm.abstractSumInl (R := R) x targetRaw t))
+
+def FocTm.abstractSumInr {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (x : Var Γ R) (targetRaw : RawNeu) : FocTm Γ A → FocTm Γ A
+  | .pos (.done p) => .pos (.done (PosNeu.abstractSumInr (L := L) x targetRaw p))
+  | .neg (.done n) => .neg (.done (NegNeu.abstractSum x targetRaw n))
+  | .letPos n t =>
+      .letPos (NegNeu.abstractSum x targetRaw n)
+        (InvTm.abstractSumInr (L := L) (.there x) (RawNeu.shift targetRaw) t)
+  | .sat (.mk s t) => .sat (.mk s (InvTm.abstractSumInr (L := L) x targetRaw t))
+end
+
+/--
+Map a remaining schedule entry under a new binder, abstracting the observed
+neutral. Consistency witnesses are reconstructed at the old context, weakened,
+abstracted, and stored as exact entries when possible.
+-/
+def mapRestAbstractAtom (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    (hctx : Ctx.ofHyps (hyps.push P) = Ctx.ofHyps hyps ▻ P)
+    (targetRaw : RawNeu) :
+    PairEntry sig hyps → PairEntry sig (hyps.push P)
+  | .exact Q n =>
+      let nA := NegNeu.abstractAtom (P := P) .here targetRaw (NegNeu.weaken (B := P) n)
+      .exact Q (NegNeu.castCtx hctx.symm nA)
+  | .consistency Q w =>
+      match reconstructWitness fuel σ hyps w with
+      | some ⟨Q', n⟩ =>
+        if h : Q' = Q then
+          let nA := NegNeu.abstractAtom (P := P) .here targetRaw (NegNeu.weaken (B := P) (h ▸ n))
+          .exact Q (NegNeu.castCtx hctx.symm nA)
+        else
+          .consistency (hyps := hyps.push P) Q w
+      | none => .consistency (hyps := hyps.push P) Q w
+
+def mapRestAbstractSumInl (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (L _R : Object sig.nBases)
+    (hL : Ctx.ofHyps (hyps.push L) = Ctx.ofHyps hyps ▻ L)
+    (targetRaw : RawNeu) :
+    PairEntry sig hyps → PairEntry sig (hyps.push L)
+  | .exact Q n =>
+      let nA := NegNeu.abstractSum (B := L) .here targetRaw (NegNeu.weaken (B := L) n)
+      .exact Q (NegNeu.castCtx hL.symm nA)
+  | .consistency Q w =>
+      match reconstructWitness fuel σ hyps w with
+      | some ⟨Q', n⟩ =>
+        if h : Q' = Q then
+          let nA := NegNeu.abstractSum (B := L) .here targetRaw (NegNeu.weaken (B := L) (h ▸ n))
+          .exact Q (NegNeu.castCtx hL.symm nA)
+        else
+          .consistency (hyps := hyps.push L) Q w
+      | none => .consistency (hyps := hyps.push L) Q w
+
+def mapRestAbstractSumInr (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (_L R : Object sig.nBases)
+    (hR : Ctx.ofHyps (hyps.push R) = Ctx.ofHyps hyps ▻ R)
+    (targetRaw : RawNeu) :
+    PairEntry sig hyps → PairEntry sig (hyps.push R)
+  | .exact Q n =>
+      let nA := NegNeu.abstractSum (B := R) .here targetRaw (NegNeu.weaken (B := R) n)
+      .exact Q (NegNeu.castCtx hR.symm nA)
+  | .consistency Q w =>
+      match reconstructWitness fuel σ hyps w with
+      | some ⟨Q', n⟩ =>
+        if h : Q' = Q then
+          let nA := NegNeu.abstractSum (B := R) .here targetRaw (NegNeu.weaken (B := R) (h ▸ n))
+          .exact Q (NegNeu.castCtx hR.symm nA)
+        else
+          .consistency (hyps := hyps.push R) Q w
+      | none => .consistency (hyps := hyps.push R) Q w
+
 mutual
 /--
 Apply one positive observation `nP`, then continue with `rest` under the
-extended context (positive inversion for `never` / coproducts).
+extended context. Uses strong positive cut (neutral abstraction).
 -/
 def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
@@ -674,22 +969,18 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
             Ctx.ofHyps_push hyps L
           have hR : Ctx.ofHyps hypsR = Ctx.ofHyps hyps ▻ R :=
             Ctx.ofHyps_push hyps R
-          let restL := rest.map fun e =>
-            match e with
-            | .consistency Q w => PairEntry.consistency (hyps := hypsL) Q w
-            | .exact Q n =>
-                PairEntry.exact (hyps := hypsL) Q
-                  (NegNeu.castCtx hL.symm (NegNeu.weaken n))
-          let restR := rest.map fun e =>
-            match e with
-            | .consistency Q w => PairEntry.consistency (hyps := hypsR) Q w
-            | .exact Q n =>
-                PairEntry.exact (hyps := hypsR) Q
-                  (NegNeu.castCtx hR.symm (NegNeu.weaken n))
+          let targetL := NegNeu.toRaw (NegNeu.weaken (B := L) nSum)
+          let targetR := NegNeu.toRaw (NegNeu.weaken (B := R) nSum)
+          let restL := rest.map (mapRestAbstractSumInl fuel σ hyps L R hL targetL)
+          let restR := rest.map (mapRestAbstractSumInr fuel σ hyps L R hR targetR)
           let contL : InvTm (Ctx.ofHyps hypsL) A :=
-            InvTm.castCtx hL.symm cont.weaken
+            InvTm.castCtx hL.symm
+              (InvTm.abstractSumInl (L := L) (R := R) .here targetL
+                (InvTm.weaken (B := L) cont))
           let contR : InvTm (Ctx.ofHyps hypsR) A :=
-            InvTm.castCtx hR.symm cont.weaken
+            InvTm.castCtx hR.symm
+              (InvTm.abstractSumInr (L := L) (R := R) .here targetR
+                (InvTm.weaken (B := R) cont))
           match applyPairObsGo fuel σ hypsL restL contL,
                 applyPairObsGo fuel σ hypsR restR contR with
           | .ok bodyL', .ok bodyR' =>
@@ -702,14 +993,12 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
           let hyps' := hyps.push P₀
           have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P₀ :=
             Ctx.ofHyps_push hyps P₀
-          let rest' := rest.map fun e =>
-            match e with
-            | .consistency Q w => PairEntry.consistency (hyps := hyps') Q w
-            | .exact Q n =>
-                PairEntry.exact (hyps := hyps') Q
-                  (NegNeu.castCtx hctx.symm (NegNeu.weaken n))
+          let targetRaw := NegNeu.toRaw (NegNeu.weaken (B := P₀) n₀)
+          let rest' := rest.map (mapRestAbstractAtom fuel σ hyps P₀ hctx targetRaw)
           let cont' : InvTm (Ctx.ofHyps hyps') A :=
-            InvTm.castCtx hctx.symm cont.weaken
+            InvTm.castCtx hctx.symm
+              (InvTm.abstractAtom (P := P₀) .here targetRaw
+                (InvTm.weaken (B := P₀) cont))
           match applyPairObsGo fuel σ hyps' rest' cont' with
           | .ok body' =>
               .ok (.foc (.letPos n₀ (InvTm.castCtx hctx body')))
@@ -779,8 +1068,13 @@ def checkOldInvariant (Γold : ReachCtx sig.nBases) (goal : Object sig.nBases) :
     for i in [:σ.types.size] do
       match σ.typeAt i, σ.getCell i with
       | some A, c =>
+        -- Intro-only positives (`inl`/`inr`) are constructible terms, not
+        -- pending neutral observations that an earlier phase must have cut.
         if objectPolarity A == .pos && c.simplyDeducible && !c.retrievable then
-          return false
+          match c.witness with
+          | some w =>
+            if w.isNeutral then return false else pure ()
+          | none => return false
       | _, _ => pure ()
     return true
 
