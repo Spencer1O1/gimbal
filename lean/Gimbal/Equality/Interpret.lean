@@ -5,11 +5,14 @@
 import Gimbal.Equality.Algebra
 import Gimbal.Equality.Translate
 import Gimbal.DefinitionalEquality
+import Gimbal.SyntacticCategory.BicartesianClosed
 
 namespace Gimbal
 namespace Equality
 
 variable {sig : Signature}
+
+open CategoryTheory
 
 /-- Typed environment: each variable of `Γ` is a morphism from domain `X`. -/
 def Env (X : Object sig.nBases) (Γ : Ctx sig) : Type :=
@@ -275,6 +278,142 @@ theorem interpret_rename {X : Object sig.nBases} {Γ Δ : Ctx sig}
       rw [ih (Env.extend ρ) (Rename.ext r)]
       rw [interpret_eq_of_pointwise (Env.rename_extend_pointwise ρ r) t]
   | app t u iht ihu => simp [rename, interpret, iht, ihu]
+
+private abbrev quotientObject (A : Object sig.nBases) : «CΣ» sig :=
+  ⟨A⟩
+
+private def quotientMorphism {A B : Object sig.nBases}
+    (f : IntrinsicMorphism sig A B) :
+    «CΣ».Hom (quotientObject A) (quotientObject B) :=
+  «CΣ».Hom.mk f.toMorphism
+
+private theorem intrinsicDefEq_of_quotient_eq
+    {A B : Object sig.nBases} {f g : IntrinsicMorphism sig A B}
+    (h : quotientMorphism f = quotientMorphism g) :
+    IntrinsicDefEq f g :=
+  («CΣ».Hom.mk_eq_mk_iff f.toMorphism g.toMorphism).mp h
+
+private theorem quotient_eq_of_intrinsicDefEq
+    {A B : Object sig.nBases} {f g : IntrinsicMorphism sig A B}
+    (h : IntrinsicDefEq f g) :
+    quotientMorphism f = quotientMorphism g :=
+  («CΣ».Hom.mk_eq_mk_iff f.toMorphism g.toMorphism).mpr h
+
+private theorem quotientMorphism_compose
+    {A B C : Object sig.nBases}
+    (f : IntrinsicMorphism sig A B) (g : IntrinsicMorphism sig B C) :
+    quotientMorphism (.compose f g) =
+      «CΣ».Hom.comp (quotientMorphism f) (quotientMorphism g) :=
+  rfl
+
+private theorem quotientMorphism_pair
+    {X A B : Object sig.nBases}
+    (f : IntrinsicMorphism sig X A) (g : IntrinsicMorphism sig X B) :
+    quotientMorphism (.pair f g) =
+      «CΣ».Hom.pair (quotientMorphism f) (quotientMorphism g) :=
+  rfl
+
+private theorem quotientMorphism_curry
+    {X A B : Object sig.nBases}
+    (f : IntrinsicMorphism sig (.prod X A) B) :
+    quotientMorphism (.curry f) =
+      «CΣ».Hom.curry (quotientMorphism f) :=
+  rfl
+
+private theorem quotient_comp_pair
+    {X Y A B : Object sig.nBases}
+    (f : «CΣ».Hom (quotientObject X) (quotientObject Y))
+    (g : «CΣ».Hom (quotientObject Y) (quotientObject A))
+    (h : «CΣ».Hom (quotientObject Y) (quotientObject B)) :
+    «CΣ».Hom.comp f («CΣ».Hom.pair g h) =
+      «CΣ».Hom.pair («CΣ».Hom.comp f g) («CΣ».Hom.comp f h) := by
+  apply «CΣ».Hom.pair_unique
+  · change «CΣ».Hom.comp
+      («CΣ».Hom.comp f («CΣ».Hom.pair g h)) («CΣ».Hom.first _ _) =
+        «CΣ».Hom.comp f g
+    rw [«CΣ».Hom.assoc]
+    exact congrArg («CΣ».Hom.comp f) («CΣ».Hom.pair_first g h)
+  · change «CΣ».Hom.comp
+      («CΣ».Hom.comp f («CΣ».Hom.pair g h)) («CΣ».Hom.second _ _) =
+        «CΣ».Hom.comp f h
+    rw [«CΣ».Hom.assoc]
+    exact congrArg («CΣ».Hom.comp f) («CΣ».Hom.pair_second g h)
+
+/-- Translation retraction for opaque generators. -/
+theorem interpret_translate_generator (q : Fin sig.nGens) :
+    IntrinsicDefEq
+      (interpret (rootEnv (sig.gen q).source)
+        (translate (IntrinsicMorphism.generator q)))
+      (.generator q) := by
+  apply intrinsicDefEq_of_quotient_eq
+  let S := (sig.gen q).source
+  let T := (sig.gen q).target
+  change quotientMorphism
+      (IntrinsicMorphism.compose
+        (IntrinsicMorphism.pair
+          (rootEnv S (.there (genVar sig q)))
+          (rootEnv S .here))
+        (IntrinsicMorphism.eval S T)) =
+    quotientMorphism (IntrinsicMorphism.generator q)
+  rw [show rootEnv S (.there (genVar sig q)) = generatorValue S q by
+      exact genEnv_genVar S q]
+  change quotientMorphism
+      (IntrinsicMorphism.compose
+        (IntrinsicMorphism.pair (generatorValue S q) (IntrinsicMorphism.id S))
+        (IntrinsicMorphism.eval S T)) =
+    quotientMorphism (IntrinsicMorphism.generator q)
+  let drop : «CΣ».Hom (quotientObject S) (quotientObject .unit) :=
+    quotientMorphism (IntrinsicMorphism.discard S)
+  let fstUS : «CΣ».Hom
+      («CΣ».prodObj (quotientObject .unit) (quotientObject S))
+      (quotientObject .unit) :=
+    quotientMorphism (IntrinsicMorphism.first .unit S)
+  let sndUS : «CΣ».Hom
+      («CΣ».prodObj (quotientObject .unit) (quotientObject S))
+      (quotientObject S) :=
+    quotientMorphism (IntrinsicMorphism.second .unit S)
+  let gen : «CΣ».Hom (quotientObject S) (quotientObject T) :=
+    quotientMorphism (IntrinsicMorphism.generator q)
+  let k : «CΣ».Hom
+      («CΣ».prodObj (quotientObject .unit) (quotientObject S))
+      (quotientObject T) :=
+    «CΣ».Hom.comp sndUS gen
+  let ev : «CΣ».Hom
+      (quotientObject (.prod (.exp S T) S)) (quotientObject T) :=
+    quotientMorphism (IntrinsicMorphism.eval S T)
+  let into : «CΣ».Hom (quotientObject S)
+      («CΣ».prodObj (quotientObject .unit) (quotientObject S)) :=
+    «CΣ».Hom.pair drop («CΣ».Hom.id (quotientObject S))
+  change
+    «CΣ».Hom.comp
+      («CΣ».Hom.pair
+        («CΣ».Hom.comp drop («CΣ».Hom.curry k))
+        («CΣ».Hom.id (quotientObject S)))
+      ev = gen
+  have hpair :
+      «CΣ».Hom.comp into
+          («CΣ».Hom.pair
+            («CΣ».Hom.comp fstUS («CΣ».Hom.curry k)) sndUS) =
+        «CΣ».Hom.pair
+          («CΣ».Hom.comp drop («CΣ».Hom.curry k))
+          («CΣ».Hom.id (quotientObject S)) := by
+    refine (quotient_comp_pair into
+      («CΣ».Hom.comp fstUS («CΣ».Hom.curry k)) sndUS).trans ?_
+    apply congrArg₂ «CΣ».Hom.pair
+    · rw [← «CΣ».Hom.assoc]
+      exact congrArg
+        (fun z => «CΣ».Hom.comp z («CΣ».Hom.curry k))
+        («CΣ».Hom.pair_first drop («CΣ».Hom.id (quotientObject S)))
+    · exact «CΣ».Hom.pair_second drop («CΣ».Hom.id (quotientObject S))
+  rw [← hpair, «CΣ».Hom.assoc]
+  change «CΣ».Hom.comp into («CΣ».Hom.uncurry («CΣ».Hom.curry k)) = gen
+  rw [«CΣ».Hom.uncurry_curry]
+  change «CΣ».Hom.comp into («CΣ».Hom.comp sndUS gen) = gen
+  rw [← «CΣ».Hom.assoc]
+  have hsnd : «CΣ».Hom.comp into sndUS =
+      «CΣ».Hom.id (quotientObject S) :=
+    «CΣ».Hom.pair_second drop («CΣ».Hom.id (quotientObject S))
+  rw [hsnd, «CΣ».Hom.id_comp]
 
 /-- Translation retraction for identities. -/
 theorem interpret_translate_id (A : Object sig.nBases) :
