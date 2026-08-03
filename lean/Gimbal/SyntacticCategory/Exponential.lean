@@ -12,7 +12,7 @@ open CategoryTheory
 variable {sig : Signature}
 
 /-- Chosen exponential object `A ⇒ B`. -/
-def expObj (A B : «CΣ» sig) : «CΣ» sig :=
+abbrev expObj (A B : «CΣ» sig) : «CΣ» sig :=
   ⟨.exp A.asObject B.asObject⟩
 
 def Hom.eval (A B : «CΣ» sig) : Hom (prodObj (expObj A B) A) B :=

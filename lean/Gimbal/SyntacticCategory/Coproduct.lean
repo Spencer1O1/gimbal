@@ -13,7 +13,7 @@ open CategoryTheory CategoryTheory.Limits
 variable {sig : Signature}
 
 /-- Chosen coproduct object. -/
-def coprodObj (A B : «CΣ» sig) : «CΣ» sig :=
+abbrev coprodObj (A B : «CΣ» sig) : «CΣ» sig :=
   ⟨.coprod A.asObject B.asObject⟩
 
 def Hom.left (A B : «CΣ» sig) : Hom A (coprodObj A B) :=

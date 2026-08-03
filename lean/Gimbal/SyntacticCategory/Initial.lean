@@ -13,7 +13,7 @@ open CategoryTheory CategoryTheory.Limits
 variable {sig : Signature}
 
 /-- Chosen initial object: syntactic `Never`. -/
-def neverObj : «CΣ» sig := ⟨.never⟩
+abbrev neverObj : «CΣ» sig := ⟨.never⟩
 
 def Hom.absurd (A : «CΣ» sig) : Hom neverObj A :=
   Hom.mk (Morphism.absurd A.asObject)

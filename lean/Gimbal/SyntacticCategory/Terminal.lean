@@ -13,7 +13,7 @@ open CategoryTheory CategoryTheory.Limits
 variable {sig : Signature}
 
 /-- Chosen terminal object: syntactic `Unit`. -/
-def unitObj : «CΣ» sig := ⟨.unit⟩
+abbrev unitObj : «CΣ» sig := ⟨.unit⟩
 
 def Hom.discard (A : «CΣ» sig) : Hom A unitObj :=
   Hom.mk (Morphism.discard A.asObject)

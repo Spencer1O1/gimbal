@@ -13,7 +13,7 @@ open CategoryTheory CategoryTheory.Limits
 variable {sig : Signature}
 
 /-- Chosen product object. -/
-def prodObj (A B : «CΣ» sig) : «CΣ» sig :=
+abbrev prodObj (A B : «CΣ» sig) : «CΣ» sig :=
   ⟨.prod A.asObject B.asObject⟩
 
 def Hom.first (A B : «CΣ» sig) : Hom (prodObj A B) A :=
