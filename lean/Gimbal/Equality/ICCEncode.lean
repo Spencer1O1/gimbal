@@ -201,13 +201,46 @@ theorem encodeICC_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
   simpa [hm] using
     encodeICCGo_case_case fuel e ws ε 0 0 xs xt t₁ t₂ u₁ u₂ hty hit miss
 
+/-! ### Right-introduction unfolds (nil worklist) -/
+
+theorem forcedRule_nil_prod (L R : Object sig.nBases) :
+    forcedRule ([] : List (PosEntry sig)) (.prod L R) = .rightProd L R := rfl
+
+theorem forcedRule_nil_exp (Arg Ret : Object sig.nBases) :
+    forcedRule ([] : List (PosEntry sig)) (.exp Arg Ret) = .rightExp Arg Ret := rfl
+
+theorem encodeICCGo_pair_nil {Γ : Ctx sig} {L R : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (t : InvTm Γ L) (u : InvTm Γ R) :
+    encodeICCGo (fuel + 1) ([] : List (PosEntry sig)) ε domNest obsSlot (.pair t u) =
+      match encodeICCGo fuel ([] : List (PosEntry sig)) ε domNest obsSlot t,
+            encodeICCGo fuel ([] : List (PosEntry sig)) ε domNest obsSlot u with
+      | some c₁, some c₂ => some (.pair c₁ c₂)
+      | _, _ => none := by
+  simp [encodeICCGo, forcedRule_nil_prod, peelPair]
+  rfl
+
+theorem encodeICCGo_lam_nil {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (body : InvTm (Γ ▻ Arg) Ret) :
+    encodeICCGo (fuel + 1) ([] : List (PosEntry sig)) ε domNest obsSlot (.lam body) =
+      match encodeICCGo fuel
+            (pushPos ([] : List (PosEntry sig)) (.dom (sig := sig) domNest) Arg)
+            (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) domNest))
+            (domNest + 1) obsSlot body with
+      | some c => some (.lam c)
+      | none => none := by
+  simp [encodeICCGo, forcedRule_nil_exp, peelLam]
+  rfl
+
 /-! ### Open obligations (design E remaining work)
 
 Tracked as goal Props in `Completeness.lean`:
 
 1. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom`, `obsSlot`/`domNest`)
 2. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done**
-3. `EncodeIccInvariant` / rigidity / `ICCCompleteness` (guarded by `isSome`)
+3. `EncodeIccInvariant` / rigidity / `ICCCompleteness` — commute rules for
+   forced-head `case_pair`/`case_lam`/`case_case` landed; congruence + package remain
 4. `EncodeTotal` — measure adequacy; no proof-critical fuel exhaustion
 5. `ReferenceCompareTotal` + iff — total comparator; **no `2048` decidability**
 6. Wire code equality into the total `referenceCompare`; resume 8G
