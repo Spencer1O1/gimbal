@@ -348,6 +348,39 @@ def iccCaseCaseCanonical : Bool :=
 
 example : iccCaseCaseCanonical = true := by native_decide
 
+/--
+Handoff adversarial #11, with leaves that do not collapse: the two nestings of
+an independent `case`/`case` pair canonicalize to the same term, and
+canonicalization is idempotent on both. The second half is what the orientation
+guard in `caseCommute` buys — without it the canonicalizer swaps the scrutinees
+back on every pass.
+-/
+def iccCaseCaseOriented : Bool :=
+  let hyps : Array (Object 5) := #[
+    .base 0,
+    .coprod (.base 1) (.base 2),
+    .coprod (.base 3) (.base 4)
+  ]
+  let Γ := Ctx.ofHyps (sig := ⟨5, #[]⟩) hyps
+  let s : NegNeu Γ (.coprod (.base 1) (.base 2)) := .var (.there .here)
+  let t : NegNeu Γ (.coprod (.base 3) (.base 4)) := .var .here
+  let leaf : ∀ L R : Object 5, InvTm (Γ ▻ L ▻ R) (.base 0) := fun _ _ =>
+    .foc (.pos (.done (.neu (.var (.there (.there (.there (.there .here))))))))
+  let x : InvTm Γ (.base 0) :=
+    .case s
+      (.case (NegNeu.weaken t) (leaf _ _) (leaf _ _))
+      (.case (NegNeu.weaken t) (leaf _ _) (leaf _ _))
+  let y : InvTm Γ (.base 0) :=
+    .case t
+      (.case (NegNeu.weaken s) (leaf _ _) (leaf _ _))
+      (.case (NegNeu.weaken s) (leaf _ _) (leaf _ _))
+  !InvTm.beq x y &&
+    InvTm.beq (canonicalize x) (canonicalize y) &&
+    InvTm.beq (canonicalize (canonicalize x)) (canonicalize x) &&
+    InvTm.beq (canonicalize (canonicalize y)) (canonicalize y)
+
+example : iccCaseCaseOriented = true := by native_decide
+
 /-- Focusing produces well-focused terms (phase polarity OK). -/
 def focusIdWellFocused : Bool :=
   match focus! (translate (sig := NumSig) (.id Number)) with
