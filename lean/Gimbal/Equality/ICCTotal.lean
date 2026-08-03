@@ -2177,6 +2177,184 @@ theorem encodeReady_applyObsNeu_atom_basesOnly
     encodeReady_of_noPeel
       (encodeReady_foc_letPos_basesOnly_noPeel hws hfr hbody)
 
+/-! ### `Ctx.ofHyps_push` cast transport (atom / applyObsNeu) -/
+
+/-- Transport peel-free readiness along a context equality. -/
+theorem encodeReadyNoPeel_castCtx {Γ Δ : Ctx sig} (hΓ : Γ = Δ)
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ} {ε' : OriginEnv Δ}
+    {domNest obsSlot : Nat} {A : Object sig.nBases} {t : InvTm Γ A}
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' (hΓ ▸ x))
+    (h : EncodeReadyNoPeel ws ε domNest obsSlot t) :
+    EncodeReadyNoPeel ws ε' domNest obsSlot (InvTm.castCtx hΓ t) := by
+  subst hΓ
+  exact encodeReadyNoPeel_env_eq (fun {B} x => hε x) h
+
+theorem encodeReadyFocNoPeel_castCtx {Γ Δ : Ctx sig} (hΓ : Γ = Δ)
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ} {ε' : OriginEnv Δ}
+    {domNest obsSlot : Nat} {A : Object sig.nBases} {f : FocTm Γ A}
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' (hΓ ▸ x))
+    (h : EncodeReadyFocNoPeel ws ε domNest obsSlot f) :
+    EncodeReadyFocNoPeel ws ε' domNest obsSlot (hΓ ▸ f) := by
+  subst hΓ
+  -- reuse env transport via the mutual rec already in encodeReadyNoPeel_env_eq's foc motive
+  refine
+    (EncodeReadyFocNoPeel.rec
+      (motive_1 := fun {Γ} ws ε d o {A} t _ =>
+        ∀ ε' : OriginEnv Γ, (∀ {B} (x : Var Γ B), ε x = ε' x) →
+          EncodeReadyNoPeel ws ε' d o t)
+      (motive_2 := fun {Γ} ws ε d o {A} f _ =>
+        ∀ ε' : OriginEnv Γ, (∀ {B} (x : Var Γ B), ε x = ε' x) →
+          EncodeReadyFocNoPeel ws ε' d o f)
+      ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat h) ε' hε
+  case ms =>
+    intro Γ A e ws ε d o t hfr _ ih ε' hε'
+    exact .moveStable hfr (ih ε' hε')
+  case ln => intros; exact .leftNever ‹_›
+  case ru => intros; exact .rightUnit ‹_›
+  case rp =>
+    intro Γ L R ws ε d o t u hfr _ _ iht ihu ε' hε'
+    exact .rightProd_pair hfr (iht ε' hε') (ihu ε' hε')
+  case rpf =>
+    intro Γ L R ws ε d o f hfr _ ihf ε' hε'
+    exact .rightProd_foc hfr (ihf ε' hε')
+  case re =>
+    intro Γ Arg Ret ws ε d o body hfr _ ihb ε' hε'
+    refine .rightExp_lam hfr (ihb (OriginEnv.weaken (A := Arg) ε' (.dom (sig := sig) d)) ?_)
+    intro B x; cases x with | here => rfl | there y => exact hε' y
+  case ref =>
+    intro Γ Arg Ret ws ε d o f hfr _ ihf ε' hε'
+    exact .rightExp_foc hfr (ihf ε' hε')
+  case fo =>
+    intro Γ A ws ε d o f hfr _ ihf ε' hε'
+    exact .focus hfr (ihf ε' hε')
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case lp =>
+    intro Γ P A ws ε d o n t _ iht ε' hε'
+    refine .letPos (iht (OriginEnv.weaken (A := P) ε' (.obs (sig := sig) o)) ?_)
+    intro B x; cases x with | here => rfl | there y => exact hε' y
+  case sat =>
+    intro Γ A ws ε d o s t _ iht ε' hε'
+    exact .sat (iht ε' hε')
+
+/--
+Cast recursive `ofHyps (hyps.push P)` readiness onto the weaken-hyp snoc
+environment used by newest-hyp → obs rekey.
+-/
+theorem encodeReadyNoPeel_ofHyps_push
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (h : EncodeReadyNoPeel
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 t) :
+    EncodeReadyNoPeel
+      (OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)))
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps P) t) := by
+  have hctx := Ctx.ofHyps_push hyps P
+  have hws := posWorklist_ofHyps_push (sig := sig) hyps P
+  have h' :
+      EncodeReadyNoPeel
+        (OriginEnv.posWorklist
+          (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+            (.hyp (sig := sig) hyps.size)))
+        (OriginEnv.ofHyps (hyps.push P)) 0 0 t := by
+    simpa [hws] using h
+  exact encodeReadyNoPeel_castCtx hctx
+    (fun {B} y => OriginEnv.ofHyps_eq_weaken_hyp_cast hyps P y) h'
+
+/-- Push-body readiness → obs-side readiness under `pushPos (ofHyps) (.obs 0)`. -/
+theorem encodeReadyNoPeel_ofHyps_push_to_obs
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (h : EncodeReadyNoPeel
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 t) :
+    EncodeReadyNoPeel
+      (pushPos (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+        (.obs (sig := sig) 0) P)
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.obs (sig := sig) 0))
+      0 1
+      (InvTm.castCtx (Ctx.ofHyps_push hyps P) t) :=
+  encodeReady_newest_hyp_to_obs_noPeel hyps P
+    (encodeReadyNoPeel_ofHyps_push hyps P h)
+
+/--
+Observing under `ofHyps` appends the new obs after all hyp entries (hyp < obs).
+-/
+theorem pushPos_obs_ofHyps_eq_append (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) (k : Nat) :
+    pushPos (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+        (.obs (sig := sig) k) P =
+      OriginEnv.posWorklist (OriginEnv.ofHyps hyps) ++
+        pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) k) P := by
+  dsimp only [pushPos]
+  cases hpol : objectPolarity P == Polarity.pos
+  · simp [hpol]
+  · have hws : ∀ e ∈ OriginEnv.posCollect (OriginEnv.ofHyps hyps),
+        ∃ i, e.origin = .hyp (sig := sig) i :=
+      fun e he =>
+        match posCollect_ofHyps_origin_hyp_lt hyps he with
+        | ⟨i, _, hi⟩ => ⟨i, hi⟩
+    let le : PosEntry sig → PosEntry sig → Bool :=
+      fun a b => Origin.ble a.origin b.origin
+    have hR := mergeSort_cons_obs_of_hyps
+      ((OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le) P k
+      (fun e he => hws e (List.mem_mergeSort.mp he))
+    have hid :
+        ((OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le).mergeSort le =
+          (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le :=
+      List.mergeSort_of_pairwise
+        (List.pairwise_mergeSort ble_posEntry_trans ble_posEntry_total _)
+    simp only [OriginEnv.posWorklist, hpol, ↓reduceIte]
+    -- LHS: mergeSort (obs :: collect.mergeSort); RHS: collect.mergeSort ++ mergeSort [obs]
+    change
+      (({ origin := .obs (sig := sig) k, ty := P } ::
+          (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le).mergeSort le) =
+        (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le ++
+          ([{ origin := .obs (sig := sig) k, ty := P }] : List (PosEntry sig)).mergeSort le
+    have hsingle :
+        ([{ origin := .obs (sig := sig) k, ty := P }] : List (PosEntry sig)).mergeSort le =
+          [{ origin := .obs (sig := sig) k, ty := P }] := by
+      simp [le, List.mergeSort]
+    rw [hR, hid, hsingle]
+
+/--
+Atom `applyObsNeu` wrap: recursive readiness on `ofHyps (hyps.push P)` casts
+across `Ctx.ofHyps_push`, rekeys newest hyp → `.obs 0`, strips base prefix, and
+packages outer `focus` + `letPos`.
+-/
+theorem encodeReady_applyObsNeu_atom_of_push_body
+    {hyps : Array (Object sig.nBases)} {A P : Object sig.nBases}
+    {n : NegNeu (Ctx.ofHyps hyps) P}
+    {body : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hbody : EncodeReadyNoPeel
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 body) :
+    PhaseEncodeReady
+      (.foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body)) :
+        InvTm (Ctx.ofHyps hyps) A) := by
+  have hobs := encodeReadyNoPeel_ofHyps_push_to_obs hyps P hbody
+  have happen := pushPos_obs_ofHyps_eq_append hyps P 0
+  have hbody' :
+      EncodeReadyNoPeel
+        (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) 0) P)
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.obs (sig := sig) 0))
+        0 1
+        (InvTm.castCtx (Ctx.ofHyps_push hyps P) body) := by
+    refine encodeReadyNoPeel_of_base_prefix hws ?_
+    simpa [happen] using hobs
+  exact encodeReady_applyObsNeu_atom_basesOnly hws hfr hbody'
+
 /-! ### Schedule application preserves EncodeReady -/
 
 /-- Empty schedule: result is the continuation. -/
@@ -2267,13 +2445,14 @@ Required: `encodeReady_of_rawReferenceProduced` /
 Until then `ValidEncodeFragment.ready` is a provisional stash and
 `EncodeTotal_holds_provisional` is not semantic totality.
 
-* `leftCoprod_peel` / `leftCoprod_unitEta` rekey needs `find?` / `peelCaseOuter`
-  under `rekeyHypToObs` (temp dig `.obs 0` ≠ shifted obs slots).
-* Closing `applyObsNeu` needs `EncodeReady` cast along `Ctx.ofHyps_push`
-  so `encodeReady_newest_hyp_to_obs_noPeel` + `encodeReadyNoPeel_of_base_prefix`
-  feed `encodeReady_applyObsNeu_atom_basesOnly` (body under `pushPos [] (.obs 0)`).
+* `leftCoprod_peel` / `leftCoprod_unitEta` rekey needs `peelCaseOuter` under
+  `rekeyHypToObs` (temp dig `.obs 0` ≠ shifted obs slots). `find?_rekeyHypToObs`
+  landed.
+* ~~`Ctx.ofHyps_push` cast~~ **Landed** (`encodeReadyNoPeel_ofHyps_push` /
+  `encodeReady_applyObsNeu_atom_of_push_body`).
 * Coprod observation → outer `case` + ready branches.
 * Empty-schedule case needs cont readiness from `WellInv` (raw has no stash).
+* Forced `leftCoprod` beneath outer `letPos` (EncodeReady transport after peel dig).
 -/
 
 /--

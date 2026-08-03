@@ -308,6 +308,25 @@ theorem OriginEnv.ofHyps_push_eq_weaken_hyp (hyps : Array (Object sig.nBases))
       rw [hraw, Var.toRawIdx_there, Array.size_push]
       omega
 
+theorem Var.cast_cast {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (x : Var Γ A) :
+    (h.symm ▸ (h ▸ x) : Var Γ A) = x := by
+  subst h
+  rfl
+
+/-- Forward cast form of `ofHyps_push_eq_weaken_hyp`. -/
+theorem OriginEnv.ofHyps_eq_weaken_hyp_cast (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) {A : Object sig.nBases}
+    (y : Var (Ctx.ofHyps (hyps.push P)) A) :
+    OriginEnv.ofHyps (hyps.push P) y =
+      OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size)
+        ((Ctx.ofHyps_push hyps P) ▸ y) := by
+  have hΓ := Ctx.ofHyps_push hyps P
+  refine Eq.trans
+    (congrArg (OriginEnv.ofHyps (hyps.push P)) (Var.cast_cast hΓ y).symm) ?_
+  exact OriginEnv.ofHyps_push_eq_weaken_hyp hyps P (hΓ ▸ y)
+
 /-! ### Origin order facts for hyp↔obs rename -/
 
 @[simp] theorem Origin.cmp_hyp_obs (i k : Nat) :
@@ -505,6 +524,37 @@ theorem Origin.beq_rekeyHypToObs (hypIdx k : Nat) (o₁ o₂ : Origin sig) :
         Origin.rekeyHypToObs hypIdx k o₂ := fun hr =>
       heq (Origin.rekeyHypToObs_inj hr)
     rw [beq_eq_false_iff_ne.mpr heq, beq_eq_false_iff_ne.mpr hne]
+
+@[simp] theorem OriginEnv.find?_empty (ε : OriginEnv (Ctx.empty : Ctx sig))
+    (o : Origin sig) :
+    OriginEnv.find? ε o = none :=
+  rfl
+
+theorem OriginEnv.find?_snoc {Δ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv (Δ ▻ A)) (o : Origin sig) :
+    OriginEnv.find? ε o =
+      (if ε (.here : Var (Δ ▻ A) A) == o then
+        some ⟨A, .here⟩
+      else
+        (OriginEnv.find? (fun {_B} x => ε (.there x)) o).map
+          fun p => ⟨p.1, .there p.2⟩) :=
+  rfl
+
+/-- `find?` is invariant under simultaneous rekey of the environment and query. -/
+theorem OriginEnv.find?_rekeyHypToObs {Γ : Ctx sig} (ε : OriginEnv Γ)
+    (hypIdx k : Nat) (o : Origin sig) :
+    OriginEnv.find?
+        (fun {_B} x => Origin.rekeyHypToObs hypIdx k (ε x))
+        (Origin.rekeyHypToObs hypIdx k o) =
+      OriginEnv.find? ε o := by
+  induction Γ with
+  | empty =>
+      rw [OriginEnv.find?_empty, OriginEnv.find?_empty]
+  | snoc Δ A ih =>
+      rw [OriginEnv.find?_snoc, OriginEnv.find?_snoc, Origin.beq_rekeyHypToObs]
+      split
+      · rfl
+      · rw [ih]
 
 /-- Next observation slot after rekeying `hypIdx ↦ obs k` (obs indices `≥ k` shift). -/
 def Origin.obsSlotAfterRekey (k obsSlot : Nat) : Nat :=
@@ -1000,6 +1050,29 @@ theorem posCollect_weaken_hyp (hyps : Array (Object sig.nBases))
       (fun {B} x => rfl)
   cases hpol : objectPolarity P == Polarity.pos <;>
     simp [hpol, OriginEnv.weaken, OriginEnv.snoc, hrest]
+
+/-- `posCollect` is invariant under context cast when environments agree. -/
+theorem posCollect_castCtx {Γ Δ : Ctx sig} (hΓ : Γ = Δ)
+    (ε : OriginEnv Γ) (ε' : OriginEnv Δ)
+    (hε : ∀ {A} (x : Var Γ A), ε x = ε' (hΓ ▸ x)) :
+    OriginEnv.posCollect ε = OriginEnv.posCollect ε' := by
+  subst hΓ
+  exact posCollect_env_eq hε
+
+/-- Phase worklists agree across `Ctx.ofHyps_push`. -/
+theorem posWorklist_ofHyps_push (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) :
+    OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)) =
+      OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) := by
+  dsimp only [OriginEnv.posWorklist]
+  congr 1
+  exact posCollect_castCtx (Ctx.ofHyps_push hyps P)
+    (OriginEnv.ofHyps (hyps.push P))
+    (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+      (.hyp (sig := sig) hyps.size))
+    (fun {A} y => OriginEnv.ofHyps_eq_weaken_hyp_cast hyps P y)
 
 end Equality
 end Gimbal
