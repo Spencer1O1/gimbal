@@ -704,9 +704,9 @@ def PairEntry.dependsOn {sig : Signature} {hyps : Array (Object sig.nBases)} :
 Topological order of observations: dependencies first, then `sortKey` tie-break.
 Guarantees left/right symmetry once the entry multiset is fixed.
 -/
-def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+def pairObsOrderIndices {sig : Signature} {hyps : Array (Object sig.nBases)}
     (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) :
-    Array (PairEntry sig hyps) :=
+    Array Nat :=
   Id.run do
     let n := entries.size
     if n == 0 then return #[]
@@ -721,7 +721,7 @@ def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)
               indeg := indeg.set! j (indeg[j]! + 1)
           | _, _ => pure ()
     let mut remaining : Array Bool := Array.replicate n true
-    let mut out : Array (PairEntry sig hyps) := #[]
+    let mut out : Array Nat := #[]
     for _ in [:n] do
       let mut best : Option Nat := none
       for i in [:n] do
@@ -748,13 +748,13 @@ def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)
             | none => pure ()
         let rest' := rest.qsort fun a b =>
           PairEntry.sortKey σ a.2 < PairEntry.sortKey σ b.2
-        for p in rest' do out := out.push p.2
+        for p in rest' do out := out.push p.1
         return out
       | some i =>
         match entries[i]? with
         | none => return out
         | some e =>
-          out := out.push e
+          out := out.push i
           remaining := remaining.set! i false
           for j in [:n] do
             if remaining[j]! then
@@ -766,6 +766,25 @@ def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)
     pure out
 
 /--
+Topological order of observations: dependencies first, then `sortKey`
+tie-break. The order is chosen as a list of positions into the input, so the
+result is visibly a selection of the entries it was given.
+-/
+def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) :
+    Array (PairEntry sig hyps) :=
+  (pairObsOrderIndices σ entries).filterMap (fun i => entries[i]?)
+
+/-- Ordering only ever emits entries it was given. -/
+theorem mem_of_mem_canonicalizePairObsOrder {sig : Signature}
+    {hyps : Array (Object sig.nBases)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig hyps)} {e : PairEntry sig hyps}
+    (h : e ∈ canonicalizePairObsOrder σ entries) : e ∈ entries := by
+  rw [canonicalizePairObsOrder, Array.mem_filterMap] at h
+  obtain ⟨i, _, hi⟩ := h
+  exact Array.getElem?_eq_some_iff.1 hi |>.elim fun hlt hval => hval ▸ entries.getElem_mem hlt
+
+/--
 Union consistency witnesses with exact term-demanded neutrals, then
 canonicalize order (dependency DAG + stable key).
 -/
@@ -774,19 +793,20 @@ def mergePairObs (σ : ReachState sig.nBases)
     (consistency : Schedule sig.nBases)
     (exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
     Array (PairEntry sig hyps) :=
-  Id.run do
-    let mut bag : Array (PairEntry sig hyps) := #[]
-    for e in exactSrc do
-      bag := bag.push (.exact e.1 e.2)
-    let hasExactTy (A : Object sig.nBases) : Bool :=
-      exactSrc.any (fun e => e.1 == A)
-    for e in consistency.entries do
-      if !hasExactTy e.1 && !bag.any fun
+  let exactBag : Array (PairEntry sig hyps) :=
+    exactSrc.map fun e => .exact e.1 e.2
+  let hasExactTy (A : Object sig.nBases) : Bool :=
+    exactSrc.any (fun e => e.1 == A)
+  -- The dedupe below only inspects `consistency` entries, so it is unaffected
+  -- by the exact half of the bag; keeping the two apart makes the provenance
+  -- of every entry visible.
+  let consBag : Array (PairEntry sig hyps) :=
+    consistency.entries.foldl (init := #[]) fun acc e =>
+      if !hasExactTy e.1 && !acc.any fun
           | .consistency Q _ => Q == e.1
           | .exact .. => false
-      then
-        bag := bag.push (.consistency e.1 e.2)
-    pure (canonicalizePairObsOrder σ bag)
+      then acc.push (.consistency e.1 e.2) else acc
+  canonicalizePairObsOrder σ (exactBag ++ consBag)
 
 /-- Outcome of building the shared pair observation list. -/
 inductive PairObsResult (sig : Signature) (hyps : Array (Object sig.nBases)) where

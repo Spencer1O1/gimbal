@@ -236,6 +236,176 @@ theorem wellEntries_map {hyps hyps' : Array (Object sig.nBases)}
   obtain ⟨e', he', rfl⟩ := List.mem_map.1 he
   exact hf e' (h e' he')
 
+/-! ### The collected exact demands are admissible -/
+
+/-- A collected observation: a legal spine at a positive result type. -/
+def ExactOk {Γ : Ctx sig}
+    (e : (P : Object sig.nBases) × NegNeu Γ P) : Prop :=
+  objectPolarity e.1 = .pos ∧ WellNeg e.2
+
+theorem exactOk_insertExact {Γ : Ctx sig}
+    {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)}
+    {a : (P : Object sig.nBases) × NegNeu Γ P}
+    (hacc : ∀ e ∈ acc, ExactOk e) (ha : ExactOk a) :
+    ∀ e ∈ insertExact acc a, ExactOk e := by
+  intro e he
+  rw [insertExact] at he
+  split at he
+  · exact hacc e he
+  · rcases Array.mem_push.1 he with h | h
+    · exact hacc e h
+    · exact h ▸ ha
+
+theorem exactOk_pushExact {Γ : Ctx sig} {A : Object sig.nBases}
+    {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)} {n : NegNeu Γ A}
+    (hacc : ∀ e ∈ acc, ExactOk e) (hn : WellNeg n) :
+    ∀ e ∈ pushExact acc n, ExactOk e := by
+  intro e he
+  rw [pushExact] at he
+  split at he
+  · rename_i hpol
+    exact exactOk_insertExact hacc ⟨by simpa using hpol, hn⟩ e he
+  · exact hacc e he
+
+mutual
+theorem exactOk_exactNegNeu {Γ : Ctx sig} {A : Object sig.nBases} :
+    ∀ {n : NegNeu Γ A} {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)},
+      WellNeg n → (∀ e ∈ acc, ExactOk e) → ∀ e ∈ exactNegNeu n acc, ExactOk e
+  | .var _, _, hn, hacc => by
+      rw [exactNegNeu]; exact exactOk_pushExact hacc hn
+  | .app _ _, _, .app hf ht, hacc => by
+      rw [exactNegNeu]
+      exact exactOk_exactInvTm ht
+        (exactOk_exactNegNeu hf (exactOk_pushExact hacc (.app hf ht)))
+  | .fst _, _, .fst hf, hacc => by
+      rw [exactNegNeu]
+      exact exactOk_exactNegNeu hf (exactOk_pushExact hacc (.fst hf))
+  | .snd _, _, .snd hf, hacc => by
+      rw [exactNegNeu]
+      exact exactOk_exactNegNeu hf (exactOk_pushExact hacc (.snd hf))
+termination_by n => NegNeu.size n
+
+theorem exactOk_exactPosNeu {Γ : Ctx sig} {A : Object sig.nBases} :
+    ∀ {p : PosNeu Γ A} {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)},
+      WellPos p → (∀ e ∈ acc, ExactOk e) → ∀ e ∈ exactPosNeu p acc, ExactOk e
+  | .neu _, _, .neu _ hn, hacc => by
+      rw [exactPosNeu]; exact exactOk_exactNegNeu hn hacc
+  | .inl _, _, .inl hp, hacc => by
+      rw [exactPosNeu]; exact exactOk_exactPosNeu hp hacc
+  | .inr _, _, .inr hp, hacc => by
+      rw [exactPosNeu]; exact exactOk_exactPosNeu hp hacc
+  | .val _, _, .val _ ht, hacc => by
+      rw [exactPosNeu]; exact exactOk_exactInvTm ht hacc
+termination_by p => PosNeu.size p
+
+theorem exactOk_exactInvTm {Γ : Ctx sig} {A : Object sig.nBases} :
+    ∀ {t : InvTm Γ A} {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)},
+      WellInv t → (∀ e ∈ acc, ExactOk e) → ∀ e ∈ exactInvTm t acc, ExactOk e
+  | .unit, _, _, hacc => by rw [exactInvTm]; exact hacc
+  | .pair _ _, _, .pair ht hu, hacc => by
+      rw [exactInvTm]
+      exact exactOk_exactInvTm hu (exactOk_exactInvTm ht hacc)
+  | .lam _, _, _, hacc => by rw [exactInvTm]; exact hacc
+  | .case _ _ _, _, .case hn _ _, hacc => by
+      rw [exactInvTm]; exact exactOk_exactNegNeu hn hacc
+  | .abort _, _, .abort hn, hacc => by
+      rw [exactInvTm]; exact exactOk_exactNegNeu hn hacc
+  | .foc _, _, .foc hf, hacc => by
+      rw [exactInvTm]; exact exactOk_exactFocTm hf hacc
+termination_by t => InvTm.size t
+
+theorem exactOk_exactFocTm {Γ : Ctx sig} {A : Object sig.nBases} :
+    ∀ {f : FocTm Γ A} {acc : Array ((P : Object sig.nBases) × NegNeu Γ P)},
+      WellFoc f → (∀ e ∈ acc, ExactOk e) → ∀ e ∈ exactFocTm f acc, ExactOk e
+  | .pos (.done _), _, .pos _ hp, hacc => by
+      rw [exactFocTm]; exact exactOk_exactPosNeu hp hacc
+  | .neg (.done _), _, .neg _ hn, hacc => by
+      rw [exactFocTm]; exact exactOk_exactNegNeu hn hacc
+  | .letPos _ _, _, .letPos _ hn _, hacc => by
+      rw [exactFocTm]; exact exactOk_exactNegNeu hn hacc
+  | .sat (.mk _ _), _, .sat ht, hacc => by
+      rw [exactFocTm]; exact exactOk_exactInvTm ht hacc
+termination_by f => FocTm.size f
+end
+
+theorem exactOk_collectExact {Γ : Ctx sig} {A : Object sig.nBases}
+    {t : InvTm Γ A} (ht : WellInv t) : ∀ e ∈ collectExact t, ExactOk e :=
+  exactOk_exactInvTm ht (by simp)
+
+/-- Folding admissible observations into an accumulator keeps it admissible. -/
+theorem exactOk_foldl_insertExact {Γ : Ctx sig}
+    {a : Array ((P : Object sig.nBases) × NegNeu Γ P)}
+    {init : Array ((P : Object sig.nBases) × NegNeu Γ P)}
+    (ha : ∀ e ∈ a, ExactOk e) (hinit : ∀ e ∈ init, ExactOk e) :
+    ∀ e ∈ a.foldl insertExact init, ExactOk e := by
+  refine Array.foldl_induction (as := a)
+    (motive := fun _ acc => ∀ e ∈ acc, ExactOk e) hinit ?_
+  intro i acc hacc
+  exact exactOk_insertExact hacc (ha _ (a.getElem_mem i.2))
+
+theorem exactOk_unionExact {Γ : Ctx sig}
+    {a b : Array ((P : Object sig.nBases) × NegNeu Γ P)}
+    (ha : ∀ e ∈ a, ExactOk e) (hb : ∀ e ∈ b, ExactOk e) :
+    ∀ e ∈ unionExact a b, ExactOk e :=
+  exactOk_foldl_insertExact hb (exactOk_foldl_insertExact ha (by simp))
+
+theorem exactOk_selectExactObs {hyps : Array (Object sig.nBases)}
+    {σ : ReachState sig.nBases}
+    {a : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)}
+    (ha : ∀ e ∈ a, ExactOk e) :
+    ∀ e ∈ selectExactObs σ hyps a, ExactOk e := by
+  refine Array.foldl_induction (as := a)
+    (motive := fun _ acc => ∀ e ∈ acc, ExactOk e) (by simp) ?_
+  intro i acc hacc
+  rw [selectExactStep]
+  split
+  · exact exactOk_insertExact hacc (ha _ (a.getElem_mem i.2))
+  · exact hacc
+
+/-! ### The shared schedule is admissible -/
+
+theorem wellEntry_of_mem_mergePairObs {σ : ReachState sig.nBases}
+    {hyps : Array (Object sig.nBases)} {consistency : Schedule sig.nBases}
+    {exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)}
+    (hcons : ∀ e ∈ consistency.entries, objectPolarity e.1 = .pos)
+    (hexact : ∀ e ∈ exactSrc, ExactOk e) {e : PairEntry sig hyps}
+    (h : e ∈ mergePairObs σ hyps consistency exactSrc) : WellEntry e := by
+  simp only [mergePairObs] at h
+  rcases Array.mem_append.1 (mem_of_mem_canonicalizePairObsOrder h) with hm | hm
+  · obtain ⟨a, ha, rfl⟩ := Array.mem_map.1 hm
+    exact .exact (hexact a ha).1 (hexact a ha).2
+  · revert hm
+    refine Array.foldl_induction (as := consistency.entries)
+      (motive := fun _ acc => e ∈ acc → WellEntry e) (by simp) ?_
+    intro i acc hacc
+    split
+    · intro hmem
+      rcases Array.mem_push.1 hmem with h1 | h1
+      · exact hacc h1
+      · exact h1 ▸ .consistency (hcons _ (consistency.entries.getElem_mem i.2))
+    · exact hacc
+
+/--
+The schedule built for a pair of well-focused terms is admissible: every
+observation is a legal spine at a positive type.
+-/
+theorem wellEntries_pairObs {Γ : ReachCtx sig.nBases} {goal : Object sig.nBases}
+    {A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    (ht : WellInv t) (hu : WellInv u)
+    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    (h : pairObs Γ goal t u = .ok entries σ) : WellEntries entries.toList := by
+  rw [pairObs] at h
+  split at h
+  · exact absurd h (by simp)
+  · simp only [PairObsResult.ok.injEq] at h
+    obtain ⟨rfl, -⟩ := h
+    intro e he
+    exact wellEntry_of_mem_mergePairObs
+      (fun _ hm => objectPolarity_of_mem_buildSchedule hm)
+      (exactOk_selectExactObs
+        (exactOk_unionExact (exactOk_collectExact ht) (exactOk_collectExact hu)))
+      (Array.mem_def.2 he)
+
 /-! ### Applying an admissible schedule stays well focused -/
 
 /--
@@ -345,6 +515,19 @@ theorem wellInv_applyPairObs (fuel : Nat) (σ : ReachState sig.nBases)
       exact .abort (wellNeg_neuOfType _ _ _ _ (by assumption))
     · exact absurd h (by simp)
   · exact (wellInv_applySchedule fuel).2 _ _ _ hentries hcont h
+
+/--
+End to end: the shared schedule built from two well-focused terms saturates a
+well-focused continuation to a well-focused term.
+-/
+theorem wellInv_saturate_pairObs (fuel : Nat) {Γ : ReachCtx sig.nBases}
+    {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {B : Object sig.nBases} {cont t' : InvTm (Ctx.ofHyps Γ.hyps) B}
+    (ht : WellInv t) (hu : WellInv u) (hobs : pairObs Γ goal t u = .ok entries σ)
+    (hcont : WellInv cont)
+    (h : applyPairObs fuel σ Γ.hyps entries cont = .ok t') : WellInv t' :=
+  wellInv_applyPairObs fuel σ Γ.hyps entries (wellEntries_pairObs ht hu hobs) hcont h
 
 /--
 An inconsistent context collapses to the canonical absurd branch: saturation

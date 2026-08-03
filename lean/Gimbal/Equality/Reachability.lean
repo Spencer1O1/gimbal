@@ -754,19 +754,39 @@ def Schedule.size {n : Nat} (s : Schedule n) : Nat :=
 Consistency schedule: pending positive types whose witness uses `Γnew`,
 in subformula-table order (already deterministic; deduped by type index).
 -/
+def scheduleEntryAt {n : Nat} (σ : ReachState n) (i : Nat) :
+    Option (Object n × Witness) :=
+  match σ.typeAt i, σ.getCell i with
+  | some A, c =>
+    if !c.retrievable && objectPolarity A == .pos then
+      match c.newWitness with
+      | some w => if w.isNeutral then some (A, w) else none
+      | none => none
+    else none
+  | _, _ => none
+
 def buildSchedule {n : Nat} (σ : ReachState n) : Schedule n :=
-  Id.run do
-    let mut entries : Array (Object n × Witness) := #[]
-    for i in [:σ.types.size] do
-      match σ.typeAt i, σ.getCell i with
-      | some A, c =>
-        if !c.retrievable && objectPolarity A == .pos then
-          match c.newWitness with
-          | some w =>
-            if w.isNeutral then entries := entries.push (A, w) else pure ()
-          | none => pure ()
-      | _, _ => pure ()
-    pure ⟨entries⟩
+  ⟨(Array.range σ.types.size).filterMap (scheduleEntryAt σ)⟩
+
+/-- Consistency observations are scheduled at positive types only. -/
+theorem objectPolarity_of_mem_buildSchedule {n : Nat} {σ : ReachState n}
+    {e : Object n × Witness} (h : e ∈ (buildSchedule σ).entries) :
+    objectPolarity e.1 = .pos := by
+  rw [buildSchedule, Array.mem_filterMap] at h
+  obtain ⟨i, _, hi⟩ := h
+  rw [scheduleEntryAt] at hi
+  split at hi
+  · split at hi
+    · rename_i hpol
+      split at hi
+      · split at hi
+        · cases hi
+          simp only [Bool.and_eq_true, beq_iff_eq] at hpol
+          exact hpol.2
+        · exact absurd hi (by simp)
+      · exact absurd hi (by simp)
+    · exact absurd hi (by simp)
+  · exact absurd hi (by simp)
 
 end Equality
 end Gimbal
