@@ -288,6 +288,183 @@ def reconstructWitness (fuel : Nat) (σ : ReachState sig.nBases)
     else none
   | _ => none
 
+/-! ### Reconstructed witnesses are phase legal -/
+
+/-- Casts are invisible to phase legality. -/
+theorem wellNeg_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
+    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.castCtx h n) := by
+  cases h; exact hn
+
+theorem wellNeg_cast {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
+    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.cast h n) := by
+  cases h; exact hn
+
+theorem wellInv_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
+    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castCtx h t) := by
+  cases h; exact ht
+
+theorem wellInv_castTy {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
+    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castTy h t) := by
+  cases h; exact ht
+
+theorem wellNeg_castHyps {hyps hyps' : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (h : hyps = hyps')
+    {n : NegNeu (Ctx.ofHyps hyps) A} (hn : WellNeg n) :
+    WellNeg (NegNeu.castHyps h n) :=
+  wellNeg_castCtx _ hn
+
+theorem wellInv_castHyps {hyps hyps' : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (h : hyps = hyps')
+    {t : InvTm (Ctx.ofHyps hyps) A} (ht : WellInv t) :
+    WellInv (InvTm.castHyps h t) :=
+  wellInv_castCtx _ ht
+
+/-- A legal positive focus exposes a legal value at a positive type. -/
+theorem wellPos_of_wellInv {Γ : Ctx sig} {A : Object sig.nBases} {p : PosNeu Γ A}
+    (h : WellInv (.foc (.pos (.done p)))) : WellPos p := by
+  cases h with | foc hf => cases hf with | pos _ hp => exact hp
+
+/-- Phase legality of a reconstruction result. -/
+private def ReconstructVal.Well : ReconstructVal sig → Prop
+  | .neu _ _ n => WellNeg n
+  | .wit _ ⟨_, n⟩ => WellNeg n
+  | .inv _ _ t => WellInv t
+
+private theorem well_reconstructGo : ∀ (fuel : Nat) (σ : ReachState sig.nBases)
+    (cmd : ReconstructCmd sig) {v : ReconstructVal sig},
+    reconstructGo fuel σ cmd = some v → v.Well
+  | 0, _, _, _, h => by simp [reconstructGo] at h
+  | fuel + 1, σ, cmd, v, h => by
+      have ihNeu : ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+          {n : NegNeu (Ctx.ofHyps hyps) A} (cmd : ReconstructCmd sig),
+          reconstructGo fuel σ cmd = some (.neu hyps A n) → WellNeg n :=
+        fun cmd hc => well_reconstructGo fuel σ cmd hc
+      have ihWit : ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+          {n : NegNeu (Ctx.ofHyps hyps) A} (cmd : ReconstructCmd sig),
+          reconstructGo fuel σ cmd = some (.wit hyps ⟨A, n⟩) → WellNeg n :=
+        fun cmd hc => well_reconstructGo fuel σ cmd hc
+      have ihInv : ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+          {t : InvTm (Ctx.ofHyps hyps) A} (cmd : ReconstructCmd sig),
+          reconstructGo fuel σ cmd = some (.inv hyps A t) → WellInv t :=
+        fun cmd hc => well_reconstructGo fuel σ cmd hc
+      rw [reconstructGo.eq_def] at h
+      dsimp only at h
+      split at h
+      · -- `.neuOf`: a hypothesis variable, or the cell's own witness
+        split at h
+        · cases h; exact .var
+        · repeat' (split at h)
+          all_goals
+            first
+            | (cases h
+               exact wellNeg_cast _ (wellNeg_castHyps _ (ihWit _ (by assumption))))
+            | cases h
+            | exact absurd h (by simp)
+      · -- `.witness`: the parent pointer determines the spine head
+        split at h
+        · split at h
+          · cases h; exact .var
+          · exact absurd h (by simp)
+        · repeat' (split at h)
+          all_goals
+            first
+            | (cases h
+               exact .fst (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption)))))
+            | cases h
+            | exact absurd h (by simp)
+        · repeat' (split at h)
+          all_goals
+            first
+            | (cases h
+               exact .snd (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption)))))
+            | cases h
+            | exact absurd h (by simp)
+        · repeat' (split at h)
+          all_goals
+            first
+            | (cases h
+               exact .app (wellNeg_cast _ .var)
+                 (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption)))))
+            | cases h
+            | exact absurd h (by simp)
+        · repeat' (split at h)
+          all_goals
+            first
+            | (cases h
+               exact .app (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption))))
+                 (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption)))))
+            | cases h
+            | exact absurd h (by simp)
+        all_goals exact absurd h (by simp)
+      · -- `.invOf`: read back a neutral, or build an introduction
+        repeat' (first | split at h | split_ifs at h)
+        all_goals cases h
+        all_goals try subst_vars
+        all_goals
+          first
+          | exact .unit
+          | exact .foc (.pos (by assumption)
+              (.neu (by assumption)
+                (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption))))))
+          | exact .foc (.neg (by assumption)
+              (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption)))))
+          | exact .pair
+              (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption))))
+              (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption))))
+          | exact .foc (.pos rfl
+              (.inl (wellPos_of_wellInv (ihInv _ (by assumption)))))
+          | exact .foc (.pos rfl
+              (.inr (wellPos_of_wellInv (ihInv _ (by assumption)))))
+          | exact .lam (wellInv_castCtx _
+              (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption)))))
+          | (-- the coproduct branch hides its two candidates behind a `let`
+             rename_i h2
+             repeat' (first | split at h2 | split_ifs at h2)
+             all_goals cases h2
+             all_goals try subst_vars
+             all_goals
+               first
+               | exact .foc (.pos rfl
+                   (.inl (wellPos_of_wellInv (ihInv _ (by assumption)))))
+               | exact .foc (.pos rfl
+                   (.inr (wellPos_of_wellInv (ihInv _ (by assumption))))))
+
+/-- Reconstructed neutrals respect the phase discipline. -/
+theorem wellNeg_neuOfType (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
+    {n : NegNeu (Ctx.ofHyps hyps) A} (h : neuOfType fuel σ hyps A = some n) :
+    WellNeg n := by
+  have ihNeu : ∀ {hyps' : Array (Object sig.nBases)} {A' : Object sig.nBases}
+      {m : NegNeu (Ctx.ofHyps hyps') A'} (cmd : ReconstructCmd sig),
+      reconstructGo fuel σ cmd = some (.neu hyps' A' m) → WellNeg m :=
+    fun cmd hc => well_reconstructGo fuel σ cmd hc
+  rw [neuOfType] at h
+  repeat' (split at h)
+  all_goals
+    first
+    | (cases h
+       exact wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption))))
+    | cases h
+    | exact absurd h (by simp)
+
+/-- Reconstructed witness neutrals respect the phase discipline. -/
+theorem wellNeg_reconstructWitness (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (w : Witness)
+    {A : Object sig.nBases} {n : NegNeu (Ctx.ofHyps hyps) A}
+    (h : reconstructWitness fuel σ hyps w = some ⟨A, n⟩) : WellNeg n := by
+  have ihWit : ∀ {hyps' : Array (Object sig.nBases)} {A' : Object sig.nBases}
+      {m : NegNeu (Ctx.ofHyps hyps') A'} (cmd : ReconstructCmd sig),
+      reconstructGo fuel σ cmd = some (.wit hyps' ⟨A', m⟩) → WellNeg m :=
+    fun cmd hc => well_reconstructGo fuel σ cmd hc
+  rw [reconstructWitness] at h
+  repeat' (split at h)
+  all_goals
+    first
+    | (cases h
+       exact wellNeg_castHyps _ (ihWit _ (by assumption)))
+    | cases h
+    | exact absurd h (by simp)
+
 /-! ### Term-demanded positive types -/
 
 /-- Push `A` if positive and not already present. -/
