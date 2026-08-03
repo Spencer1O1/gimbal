@@ -43,6 +43,31 @@ theorem wellNeg_of_unweaken? {Γ : Ctx sig} {B : Object sig.nBases} :
           subst h
           cases hw with | snd hw => exact .snd (wellNeg_of_unweaken? hn hw)
 
+/-- Contracting a coproduct η-expansion preserves phase legality. -/
+theorem wellInv_tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C)
+    (hn : WellNeg n) {r : InvTm Γ C} (h : tryCoprodEta n t u = some r) :
+    WellInv r := by
+  rw [tryCoprodEta] at h
+  split at h
+  · rename_i hC
+    subst hC
+    split at h
+    · cases h
+      exact .foc (.pos rfl (.neu rfl hn))
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- Smart `case` preserves phase legality. -/
+theorem wellInv_mkCase {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C)
+    (hn : WellNeg n) (ht : WellInv t) (hu : WellInv u) :
+    WellInv (mkCase n t u) := by
+  unfold mkCase
+  split
+  · exact wellInv_tryCoprodEta n t u hn (by assumption)
+  · exact .case hn ht hu
+
 /-- Commuting a `case` outward preserves phase legality. -/
 theorem wellInv_caseCommute : ∀ {Γ : Ctx sig} {A B C : Object sig.nBases}
     (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C),
@@ -63,27 +88,13 @@ theorem wellInv_caseCommute : ∀ {Γ : Ctx sig} {A B C : Object sig.nBases}
       rename_i ih2 ih1
       cases ht with | case hm h₁ h₂ =>
       cases hu with | case _ h₃ h₄ =>
-      exact .case (wellNeg_of_unweaken? (by assumption) hm)
+      exact wellInv_mkCase _ _ _
+        (wellNeg_of_unweaken? (by assumption) hm)
         (ih2 (wellNeg_rename _ hn) (wellInv_rename _ h₁) (wellInv_rename _ h₃))
         (ih1 (wellNeg_rename _ hn) (wellInv_rename _ h₂) (wellInv_rename _ h₄))
   all_goals first
     | exact .unit
-    | exact .case hn ht hu
-
-/-- Contracting a coproduct η-expansion preserves phase legality. -/
-theorem wellInv_tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
-    (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C)
-    (hn : WellNeg n) {r : InvTm Γ C} (h : tryCoprodEta n t u = some r) :
-    WellInv r := by
-  rw [tryCoprodEta] at h
-  split at h
-  · rename_i hC
-    subst hC
-    split at h
-    · cases h
-      exact .foc (.pos rfl (.neu rfl hn))
-    · exact absurd h (by simp)
-  · exact absurd h (by simp)
+    | exact wellInv_mkCase _ _ _ hn ht hu
 
 mutual
 /-- Canonicalization preserves phase legality. -/
@@ -95,12 +106,9 @@ theorem wellInv_canonicalizeInv {Γ : Ctx sig} {A : Object sig.nBases} :
   | .lam _, .lam h => .lam (wellInv_canonicalizeInv h)
   | .abort _, .abort hn => .abort hn
   | .foc _, .foc hf => .foc (wellFoc_canonicalizeFoc hf)
-  | .case n _ _, .case hn h₁ h₂ => by
-      rw [canonicalizeInv]
-      split
-      · exact wellInv_tryCoprodEta n _ _ hn (by assumption)
-      · exact wellInv_caseCommute n _ _ hn
-          (wellInv_canonicalizeInv h₁) (wellInv_canonicalizeInv h₂)
+  | .case n _ _, .case hn h₁ h₂ =>
+      wellInv_caseCommute n _ _ hn
+        (wellInv_canonicalizeInv h₁) (wellInv_canonicalizeInv h₂)
 
 theorem wellFoc_canonicalizeFoc {Γ : Ctx sig} {A : Object sig.nBases} :
     ∀ {f : FocTm Γ A}, WellFoc f → WellFoc (canonicalizeFoc f)

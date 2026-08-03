@@ -98,61 +98,12 @@ end
 
 Fuel-free: `caseCommute` recurses on the size of its left branch (renaming
 preserves size), and the mutual canonicalizer is structural.
--/
 
-/-- Commute a fully-normalized `case` past invertible introductions. -/
-def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
-    (n : NegNeu Γ (.coprod A B))
-    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : InvTm Γ C :=
-  match t with
-  | .unit =>
-      match u with
-      | .unit => .unit
-      | u => .case n .unit u
-  | .pair t₁ u₁ =>
-      match u with
-      | .pair t₂ u₂ =>
-          .pair (caseCommute n t₁ t₂) (caseCommute n u₁ u₂)
-      | u => .case n (.pair t₁ u₁) u
-  | .lam t₁ =>
-      match u with
-      | .lam u₁ =>
-          .lam (caseCommute (NegNeu.weaken n)
-            (InvTm.rename Rename.exchange t₁)
-            (InvTm.rename Rename.exchange u₁))
-      | u => .case n (.lam t₁) u
-  | .case (A := L) (B := R) n₁ t₁ u₁ =>
-      match u with
-      | .case (A := L') (B := R') n₂ t₂ u₂ =>
-          if hL : L = L' then
-            if hR : R = R' then
-              match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
-              | some m₁, some m₂ =>
-                -- The conversion is symmetric, so it is only applied in the
-                -- direction that puts the smaller scrutinee outermost;
-                -- otherwise canonicalization would oscillate between the two
-                -- nestings instead of being idempotent.
-                if NegNeu.beq m₁ m₂ && NegNeu.blt m₁ n then
-                  let t₂' : InvTm (Γ ▻ B ▻ L) _ := hL.symm ▸ t₂
-                  let u₂' : InvTm (Γ ▻ B ▻ R) _ := hR.symm ▸ u₂
-                  .case m₁
-                    (caseCommute (NegNeu.weaken (B := L) n)
-                      (InvTm.rename Rename.exchange t₁)
-                      (InvTm.rename Rename.exchange t₂'))
-                    (caseCommute (NegNeu.weaken (B := R) n)
-                      (InvTm.rename Rename.exchange u₁)
-                      (InvTm.rename Rename.exchange u₂'))
-                else
-                  .case n (.case n₁ t₁ u₁) u
-              | _, _ => .case n (.case n₁ t₁ u₁) u
-            else .case n (.case n₁ t₁ u₁) u
-          else .case n (.case n₁ t₁ u₁) u
-      | u => .case n (.case n₁ t₁ u₁) u
-  | t => .case n t u
-termination_by InvTm.size t
-decreasing_by
-  all_goals simp only [InvTm.size, InvTm.size_rename]
-  all_goals omega
+Every `case` the rewriter emits goes through `mkCase`, which contracts a
+coprod η-expansion immediately. Without that, commuting past a `pair` can
+leave an η-redex in a component that a subsequent pass would contract, so
+canonicalization would not be idempotent.
+-/
 
 /--
 Coproduct η: `case n (x. inl x) (y. inr y) = n` when the result type is the sum.
@@ -171,6 +122,68 @@ def tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
     else none
   else none
 
+/-- Smart `case`: contract a coprod η-expansion, otherwise keep the node. -/
+def mkCase {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : InvTm Γ C :=
+  match tryCoprodEta n t u with
+  | some r => r
+  | none => .case n t u
+
+/-- Commute a fully-normalized `case` past invertible introductions. -/
+def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : InvTm Γ C :=
+  match t with
+  | .unit =>
+      match u with
+      | .unit => .unit
+      | u => mkCase n .unit u
+  | .pair t₁ u₁ =>
+      match u with
+      | .pair t₂ u₂ =>
+          .pair (caseCommute n t₁ t₂) (caseCommute n u₁ u₂)
+      | u => mkCase n (.pair t₁ u₁) u
+  | .lam t₁ =>
+      match u with
+      | .lam u₁ =>
+          .lam (caseCommute (NegNeu.weaken n)
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+      | u => mkCase n (.lam t₁) u
+  | .case (A := L) (B := R) n₁ t₁ u₁ =>
+      match u with
+      | .case (A := L') (B := R') n₂ t₂ u₂ =>
+          if hL : L = L' then
+            if hR : R = R' then
+              match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
+              | some m₁, some m₂ =>
+                -- The conversion is symmetric, so it is only applied in the
+                -- direction that puts the smaller scrutinee outermost;
+                -- otherwise canonicalization would oscillate between the two
+                -- nestings instead of being idempotent.
+                if NegNeu.beq m₁ m₂ && NegNeu.blt m₁ n then
+                  let t₂' : InvTm (Γ ▻ B ▻ L) _ := hL.symm ▸ t₂
+                  let u₂' : InvTm (Γ ▻ B ▻ R) _ := hR.symm ▸ u₂
+                  mkCase m₁
+                    (caseCommute (NegNeu.weaken (B := L) n)
+                      (InvTm.rename Rename.exchange t₁)
+                      (InvTm.rename Rename.exchange t₂'))
+                    (caseCommute (NegNeu.weaken (B := R) n)
+                      (InvTm.rename Rename.exchange u₁)
+                      (InvTm.rename Rename.exchange u₂'))
+                else
+                  mkCase n (.case n₁ t₁ u₁) u
+              | _, _ => mkCase n (.case n₁ t₁ u₁) u
+            else mkCase n (.case n₁ t₁ u₁) u
+          else mkCase n (.case n₁ t₁ u₁) u
+      | u => mkCase n (.case n₁ t₁ u₁) u
+  | t => mkCase n t u
+termination_by InvTm.size t
+decreasing_by
+  all_goals simp only [InvTm.size, InvTm.size_rename]
+  all_goals omega
+
 mutual
 /-- Push `case` outward past invertible introductions. -/
 def canonicalizeInv {Γ : Ctx sig} {A : Object sig.nBases} :
@@ -180,11 +193,9 @@ def canonicalizeInv {Γ : Ctx sig} {A : Object sig.nBases} :
   | .lam t => .lam (canonicalizeInv t)
   | .abort n => .abort n
   | .case n t u =>
-      let t' := canonicalizeInv t
-      let u' := canonicalizeInv u
-      match tryCoprodEta n t' u' with
-      | some r => r
-      | none => caseCommute n t' u'
+      -- `mkCase` (via `caseCommute`) already contracts η; no separate
+      -- `tryCoprodEta` here.
+      caseCommute n (canonicalizeInv t) (canonicalizeInv u)
   | .foc f => .foc (canonicalizeFoc f)
 
 def canonicalizeFoc {Γ : Ctx sig} {A : Object sig.nBases} :

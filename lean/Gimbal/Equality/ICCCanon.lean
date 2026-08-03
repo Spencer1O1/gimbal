@@ -47,6 +47,34 @@ theorem NegNeu.eq_weaken_of_unweaken? {Γ : Ctx sig} {B : Object sig.nBases} :
 
 /-! ### Each rewriting step is an ICC step -/
 
+/-- Contracting a coproduct η-expansion is an ICC conversion. -/
+theorem tryCoprodEta_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C)
+    {r : InvTm Γ C} (h : tryCoprodEta n t u = some r) :
+    ICCEq r (.case n t u) := by
+  unfold tryCoprodEta at h
+  split at h
+  · rename_i hC
+    subst hC
+    split at h
+    · rename_i hb
+      simp only [Bool.and_eq_true] at hb
+      rw [InvTm.eq_of_beq _ _ hb.1, InvTm.eq_of_beq _ _ hb.2]
+      cases h
+      exact .symm (.coprod_eta n)
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- Smart `case` stays in the ICC class. -/
+theorem mkCase_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (n : NegNeu Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) :
+    ICCEq (mkCase n t u) (.case n t u) := by
+  unfold mkCase
+  split
+  · exact tryCoprodEta_icc n t u (by assumption)
+  · exact .refl _
+
 /-- Commuting a `case` outward is an ICC conversion. -/
 theorem caseCommute_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
     (n : NegNeu Γ (.coprod A B))
@@ -69,26 +97,9 @@ theorem caseCommute_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
       cases eq_of_heq hm
       subst h₁
       subst h₂
-      exact .trans (.case_cong ih2 ih1) (.symm (.case_case _ _ _ _ _ _))
-  all_goals exact .refl _
-
-/-- Contracting a coproduct η-expansion is an ICC conversion. -/
-theorem tryCoprodEta_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
-    (n : NegNeu Γ (.coprod A B)) (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C)
-    {r : InvTm Γ C} (h : tryCoprodEta n t u = some r) :
-    ICCEq r (.case n t u) := by
-  unfold tryCoprodEta at h
-  split at h
-  · rename_i hC
-    subst hC
-    split at h
-    · rename_i hb
-      simp only [Bool.and_eq_true] at hb
-      rw [InvTm.eq_of_beq _ _ hb.1, InvTm.eq_of_beq _ _ hb.2]
-      cases h
-      exact .symm (.coprod_eta n)
-    · exact absurd h (by simp)
-  · exact absurd h (by simp)
+      exact .trans (mkCase_icc _ _ _)
+        (.trans (.case_cong ih2 ih1) (.symm (.case_case _ _ _ _ _ _)))
+  all_goals exact mkCase_icc _ _ _
 
 /-! ### Soundness of the canonicalizer -/
 
@@ -101,15 +112,9 @@ theorem canonicalizeInv_icc {Γ : Ctx sig} {A : Object sig.nBases} :
   | .lam t => .lam_cong (canonicalizeInv_icc t)
   | .abort _ => .refl _
   | .foc f => .foc_cong (canonicalizeFoc_icc f)
-  | .case n t u => by
-      have hcong : ICCEq (.case n (canonicalizeInv t) (canonicalizeInv u))
-          (.case n t u) :=
-        .case_cong (canonicalizeInv_icc t) (canonicalizeInv_icc u)
-      rw [canonicalizeInv]
-      split
-      · rename_i _r heq
-        exact .trans (tryCoprodEta_icc n _ _ heq) hcong
-      · exact .trans (caseCommute_icc n _ _) hcong
+  | .case n t u =>
+      .trans (caseCommute_icc n _ _)
+        (.case_cong (canonicalizeInv_icc t) (canonicalizeInv_icc u))
 
 theorem canonicalizeFoc_icc {Γ : Ctx sig} {A : Object sig.nBases} :
     (f : FocTm Γ A) → ICCFocEq (canonicalizeFoc f) f
