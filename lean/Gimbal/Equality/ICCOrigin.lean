@@ -28,12 +28,14 @@ Stable identity of a binder introduced during an invertible phase.
 
 * `hyp i` — phase-entry hypothesis at oldest-first index `i`
 * `obs i` — saturation observation at canonical schedule slot `i`
+* `dom i` — λ-domain binder at nesting depth `i` from phase entry
 * `split o side` — payload binder from casing on `o`
   (`false` = left/`inl`, `true` = right/`inr`)
 -/
 inductive Origin (sig : Signature) : Type where
   | hyp (idx : Nat)
   | obs (slot : Nat)
+  | dom (nesting : Nat)
   | split (parent : Origin sig) (side : Bool)
   deriving DecidableEq, Repr
 
@@ -43,9 +45,15 @@ def Origin.cmp : Origin sig → Origin sig → Ordering
   | .hyp _, _ => .lt
   | .obs _, .hyp _ => .gt
   | .obs i, .obs j => compare i j
+  | .obs _, .dom _ => .lt
   | .obs _, .split .. => .lt
+  | .dom _, .hyp _ => .gt
+  | .dom _, .obs _ => .gt
+  | .dom i, .dom j => compare i j
+  | .dom _, .split .. => .lt
   | .split .., .hyp _ => .gt
   | .split .., .obs _ => .gt
+  | .split .., .dom _ => .gt
   | .split p false, .split q false => Origin.cmp p q
   | .split p true, .split q true => Origin.cmp p q
   | .split p false, .split q true =>
@@ -75,6 +83,10 @@ theorem Origin.cmp_self (o : Origin sig) : Origin.cmp o o = .eq := by
       change compareOfLessAndEq i i = .eq
       simp [compareOfLessAndEq]
   | obs i =>
+      simp only [Origin.cmp]
+      change compareOfLessAndEq i i = .eq
+      simp [compareOfLessAndEq]
+  | dom i =>
       simp only [Origin.cmp]
       change compareOfLessAndEq i i = .eq
       simp [compareOfLessAndEq]

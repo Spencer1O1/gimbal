@@ -218,9 +218,10 @@ def peelCaseOuterGo {Γ : Ctx sig} {C : Object sig.nBases}
             else none
         | _, _ => none
     | .lam (A := Arg) body =>
-        -- WIP (`OriginCollisionFree`): same λ-binder placeholder as encode.
+        -- Peel only needs a non-colliding binder tag; encode assigns real `dom`
+        -- nesting. Forced origins are hyp/obs/split, never `dom`.
         let ε' : OriginEnv (Γ ▻ Arg) :=
-          OriginEnv.weaken (A := Arg) ε (.split (.hyp 0) false)
+          OriginEnv.weaken (A := Arg) ε (.dom 0)
         match peelCaseOuterGo fuel ε' o body with
         | some ⟨A, B, n, tL, tR⟩ =>
             match NegNeu.unweaken? n with
@@ -265,9 +266,14 @@ def pushPos (ws : List (PosEntry sig)) (o : Origin sig) (ty : Object sig.nBases)
 /-! ### Encoding -/
 
 mutual
-/-- Worklist-driven encode, bounded by `encodeMeasure`. -/
+/--
+Worklist-driven encode, bounded by `encodeMeasure`.
+
+* `domNest` — next λ-domain origin index (`Origin.dom`)
+* `obsSlot` — next observation origin index (`Origin.obs`)
+-/
 def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
-    (ε : OriginEnv Γ) {A : Object sig.nBases} :
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases} :
     InvTm Γ A → Option (ICCCode Γ A)
   | t =>
     match fuel with
@@ -275,7 +281,7 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
     | fuel + 1 =>
       match forcedRule ws A with
       | .moveStable _ =>
-          encodeICCGo fuel ws.tail ε t
+          encodeICCGo fuel ws.tail ε domNest obsSlot t
       | .rightUnit =>
           if h : A = (.unit : Object sig.nBases) then
             if peelUnit (h ▸ t) then some (h ▸ .unit) else none
@@ -284,13 +290,14 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
           if h : A = (.prod L R : Object sig.nBases) then
             match peelPair (h ▸ t) with
             | some (t₁, t₂) =>
-                match encodeICCGo fuel ws ε t₁, encodeICCGo fuel ws ε t₂ with
+                match encodeICCGo fuel ws ε domNest obsSlot t₁,
+                      encodeICCGo fuel ws ε domNest obsSlot t₂ with
                 | some c₁, some c₂ => some (h ▸ .pair c₁ c₂)
                 | _, _ => none
             | none =>
                 match h ▸ t with
                 | .foc f =>
-                    match encodeFocGo fuel ws ε f with
+                    match encodeFocGo fuel ws ε domNest obsSlot f with
                     | some c => some (h ▸ c)
                     | none => none
                 | _ => none
@@ -299,17 +306,17 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
           if h : A = (.exp Arg Ret : Object sig.nBases) then
             match peelLam (h ▸ t) with
             | some body =>
-                -- WIP (`OriginCollisionFree`): λ-domain binders need a dedicated
-                -- origin; `.split (.hyp 0) false` collides with a real hyp-0 split.
+                let o := Origin.dom (sig := sig) domNest
                 let ε' : OriginEnv (Γ ▻ Arg) :=
-                  OriginEnv.weaken (A := Arg) ε (.split (.hyp 0) false)
-                match encodeICCGo fuel ws ε' body with
+                  OriginEnv.weaken (A := Arg) ε o
+                let ws' := pushPos ws o Arg
+                match encodeICCGo fuel ws' ε' (domNest + 1) obsSlot body with
                 | some c => some (h ▸ .lam c)
                 | none => none
             | none =>
                 match h ▸ t with
                 | .foc f =>
-                    match encodeFocGo fuel ws ε f with
+                    match encodeFocGo fuel ws ε domNest obsSlot f with
                     | some c => some (h ▸ c)
                     | none => none
                 | _ => none
@@ -328,8 +335,8 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
                     OriginEnv.weaken (A := R) ε (.split e.origin true)
                   let wsL := pushPos ws' (.split e.origin false) L
                   let wsR := pushPos ws' (.split e.origin true) R
-                  match encodeICCGo fuel wsL εL tL',
-                        encodeICCGo fuel wsR εR tR' with
+                  match encodeICCGo fuel wsL εL domNest obsSlot tL',
+                        encodeICCGo fuel wsR εR domNest obsSlot tR' with
                   | some cL, some cR => some (.case e.origin cL cR)
                   | _, _ => none
                 else none
@@ -343,11 +350,11 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
           | _ => none
       | .focus =>
           match t with
-          | .foc f => encodeFocGo fuel ws ε f
+          | .foc f => encodeFocGo fuel ws ε domNest obsSlot f
           | _ => none
 
 def encodeFocGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
-    (ε : OriginEnv Γ) {A : Object sig.nBases} :
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases} :
     FocTm Γ A → Option (ICCCode Γ A)
   | .pos (.done p) => some (.foc (.pos p))
   | .neg (.done n) => some (.foc (.neg n))
@@ -355,19 +362,17 @@ def encodeFocGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
       match fuel with
       | 0 => none
       | fuel + 1 =>
-          -- WIP (`OriginCollisionFree`): every observation needs its canonical
-          -- schedule slot. `Origin.obs 0` collapses all `letPos` binders and
-          -- must be replaced before encode invariance / reference totality.
-          let o := Origin.obs 0
+          let o := Origin.obs (sig := sig) obsSlot
           let ε' : OriginEnv (Γ ▻ P) := OriginEnv.weaken (A := P) ε o
-          match encodeICCGo fuel ws ε' t with
+          let ws' := pushPos ws o P
+          match encodeICCGo fuel ws' ε' domNest (obsSlot + 1) t with
           | some c => some (.foc (.letPos o n c))
           | none => none
   | .sat (.mk _ t) =>
       match fuel with
       | 0 => none
       | fuel + 1 =>
-          match encodeICCGo fuel ws ε t with
+          match encodeICCGo fuel ws ε domNest obsSlot t with
           | some c => some (.foc (.body c))
           | none => none
 end
@@ -376,7 +381,7 @@ end
 def encodeICC {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (t : InvTm Γ A) : Option (ICCCode Γ A) :=
   let ws := OriginEnv.posWorklist ε
-  encodeICCGo (encodeMeasure ws A) ws ε t
+  encodeICCGo (encodeMeasure ws A) ws ε 0 0 t
 
 /-- Encode with default oldest-first hyp origins for an `ofHyps` context. -/
 def encodeICCHyps {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -398,10 +403,18 @@ def IccEqIffEncodeEqGoal : Prop :=
     (encodeICC ε t).isSome ∧ (encodeICC ε u).isSome →
       (ICCEq t u ↔ encodeICC ε t = encodeICC ε u)
 
-/-- Every ICC generator preserves codes. -/
+/--
+ICC generators preserve codes whenever both sides encode.
+
+Unguarded equality is too strong: e.g. `case_unit` relates a left-expanded
+form (encodes under a forced coprod) to bare `.unit` (fails that peel). The
+primary iff (`IccEqIffEncodeEqGoal`) already restricts to successful encodes.
+-/
 def EncodeIccInvariantGoal : Prop :=
   ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ)
-    {t u : InvTm Γ A}, ICCEq t u → encodeICC ε t = encodeICC ε u
+    {t u : InvTm Γ A}, ICCEq t u →
+      (encodeICC ε t).isSome → (encodeICC ε u).isSome →
+      encodeICC ε t = encodeICC ε u
 
 end Equality
 end Gimbal

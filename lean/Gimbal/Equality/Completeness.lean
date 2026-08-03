@@ -43,25 +43,22 @@ def CanonicalizeIffIccEq : Prop :=
   ∀ {Γ : Ctx sig} {A : Object sig.nBases} (t u : InvTm Γ A),
     ICCEq t u ↔ canonicalize t = canonicalize u
 
-/-! ### Origin collision-freedom (WIP placeholders) -/
+/-! ### Origin collision-freedom -/
 
 /--
-Every processable binder and scheduled observation must receive a stable,
+Every processable binder and scheduled observation receives a stable,
 collision-free `Origin`.
 
-Current placeholders that **violate** this and must be replaced:
+API discharge (design E):
 
-* `encodeFocGo` assigns `Origin.obs 0` to every `letPos` — distinct schedule
-  slots must not share an observation identity.
-* right-λ / peel-through-λ weaken with `.split (.hyp 0) false` — that tag is
-  reserved for a real hyp-0 split, not an unrelated λ-domain binder.
+* `encodeFocGo` assigns `Origin.obs obsSlot` and increments the slot
+* λ-domain binders use `Origin.dom domNest` (encode and peel-through-λ)
+* case payloads keep `.split parent side`
 
-Discharge by threading canonical schedule slots into `letPos` and by giving
-λ-domain binders a dedicated origin constructor (or a parent-keyed binder
-origin that cannot collide with `hyp`/`obs`/`split`).
-
-The Prop is a named obligation marker; the real injectivity statement is
-filled in when the origin assignment API is fixed.
+Remaining: a formal injectivity / non-collision theorem for a well-formed
+phase-entry environment (distinct binders ⇒ distinct origins under weaken).
+The Prop marks that obligation; do not reintroduce constant `obs 0` or
+reused `.split (.hyp 0) false` for unrelated λ binders.
 -/
 def OriginCollisionFree : Prop := True
 
@@ -154,7 +151,8 @@ Active path: collision-free `Origin` → worklist `forcedRule` → total `encode
 Blocked / WIP:
 
 1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`)
-2. `OriginCollisionFree` — replace `obs 0` and λ `.split (.hyp 0) false`
+2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
+   formal injectivity theorem still open
 3. `EncodeTotal` / measure adequacy — no proof-critical fuel exhaustion
 4. `EncodeIccInvariant` / rigidity / `ICCCompleteness` (uses peel soundness)
 5. `ReferenceCompareTotal` + iff — erase `2048` from decidability

@@ -303,7 +303,7 @@ theorem peelCaseOuterGo_icc {Γ : Ctx sig} {C : Object sig.nBases}
       | lam body =>
           simp only [peelCaseOuterGo] at h
           cases hb : peelCaseOuterGo fuel
-              (OriginEnv.weaken (A := _) ε (.split (.hyp 0) false)) o body with
+              (OriginEnv.weaken (A := _) ε (.dom 0)) o body with
           | none => simp [hb] at h
           | some r =>
               simp only [hb] at h
@@ -421,6 +421,112 @@ theorem peelCaseOuter_icc {Γ : Ctx sig} {C : Object sig.nBases}
     (h : peelCaseOuter ε o t = some ⟨A, B, n, tL, tR⟩) :
     ICCEq t (.case n tL tR) :=
   peelCaseOuterGo_icc _ ε o t h
+
+/-! ### Peel agreement for ICC `case_pair` -/
+
+theorem NegNeu.beq_var_self {Γ : Ctx sig} {A : Object sig.nBases} (x : Var Γ A) :
+    NegNeu.beq (.var x) (.var x) = true := by
+  simp [NegNeu.beq]
+
+theorem peelCaseOuterGo_case_var_hit {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (tL : InvTm (Γ ▻ A) C) (tR : InvTm (Γ ▻ B) C)
+    (hit : ε x = o) :
+    peelCaseOuterGo (fuel + 1) ε o (.case (.var x) tL tR) =
+      some ⟨A, B, .var x, tL, tR⟩ := by
+  simp [peelCaseOuterGo, hit]
+
+private theorem size_case_var_pos {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (x : Var Γ (.coprod A B)) (tL : InvTm (Γ ▻ A) C) (tR : InvTm (Γ ▻ B) C) :
+    0 < InvTm.size (.case (.var x) tL tR : InvTm Γ C) := by
+  simp only [InvTm.size]; omega
+
+theorem peelCaseOuter_case_var_hit {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (tL : InvTm (Γ ▻ A) C) (tR : InvTm (Γ ▻ B) C)
+    (hit : ε x = o) :
+    peelCaseOuter ε o (.case (.var x) tL tR) =
+      some ⟨A, B, .var x, tL, tR⟩ := by
+  unfold peelCaseOuter
+  have hpos := size_case_var_pos x tL tR
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using peelCaseOuterGo_case_var_hit fuel ε o x tL tR hit
+
+theorem peelCaseOuterGo_pair_cases {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hit : ε x = o)
+    (hLsz : InvTm.size (.case (.var x) t₁ t₂) ≤ fuel)
+    (hRsz : InvTm.size (.case (.var x) u₁ u₂) ≤ fuel) :
+    peelCaseOuterGo (fuel + 1) ε o
+        (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) =
+      some ⟨A, B, .var x, .pair t₁ u₁, .pair t₂ u₂⟩ := by
+  have hL :
+      peelCaseOuterGo fuel ε o (.case (.var x) t₁ t₂) =
+        some ⟨A, B, .var x, t₁, t₂⟩ := by
+    have hpos := size_case_var_pos x t₁ t₂
+    have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hpos hLsz
+    obtain ⟨fuel', hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+    subst hm
+    exact peelCaseOuterGo_case_var_hit fuel' ε o x t₁ t₂ hit
+  have hR :
+      peelCaseOuterGo fuel ε o (.case (.var x) u₁ u₂) =
+        some ⟨A, B, .var x, u₁, u₂⟩ := by
+    have hpos := size_case_var_pos x u₁ u₂
+    have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hpos hRsz
+    obtain ⟨fuel', hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+    subst hm
+    exact peelCaseOuterGo_case_var_hit fuel' ε o x u₁ u₂ hit
+  simp [peelCaseOuterGo, hL, hR, NegNeu.beq_var_self x]
+
+theorem peelCaseOuter_pair_cases {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hit : ε x = o) :
+    peelCaseOuter ε o
+        (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) =
+      some ⟨A, B, .var x, .pair t₁ u₁, .pair t₂ u₂⟩ := by
+  unfold peelCaseOuter
+  set t :=
+    (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂) : InvTm Γ (.prod C D))
+  have hsz :
+      InvTm.size t =
+        InvTm.size (.case (.var x) t₁ t₂) +
+          InvTm.size (.case (.var x) u₁ u₂) + 1 := by
+    simp [t, InvTm.size]
+  have hpos : 0 < InvTm.size t := by
+    have := size_case_var_pos x t₁ t₂
+    omega
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  have hLsz : InvTm.size (.case (.var x) t₁ t₂) ≤ fuel := by
+    have := size_case_var_pos x u₁ u₂
+    omega
+  have hRsz : InvTm.size (.case (.var x) u₁ u₂) ≤ fuel := by
+    have := size_case_var_pos x t₁ t₂
+    omega
+  simpa [t, hm] using
+    peelCaseOuterGo_pair_cases fuel ε o x t₁ t₂ u₁ u₂ hit hLsz hRsz
+
+/-- Both sides of `ICCEq.case_pair` peel to the same outer case. -/
+theorem peelCaseOuter_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hit : ε x = o) :
+    peelCaseOuter ε o (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
+      peelCaseOuter ε o (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) ∧
+    peelCaseOuter ε o (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
+      some ⟨A, B, .var x, .pair t₁ u₁, .pair t₂ u₂⟩ :=
+  ⟨by rw [peelCaseOuter_case_var_hit ε o x (.pair t₁ u₁) (.pair t₂ u₂) hit,
+          peelCaseOuter_pair_cases ε o x t₁ t₂ u₁ u₂ hit],
+    peelCaseOuter_case_var_hit ε o x (.pair t₁ u₁) (.pair t₂ u₂) hit⟩
 
 end Equality
 end Gimbal
