@@ -45,8 +45,10 @@ import Gimbal.Equality.SatTotal
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon
+import Gimbal.Equality.ICCWell
 import Gimbal.Equality.Compare
 import Gimbal.Equality.Reference
 import Gimbal.Equality.ReferenceSound
+import Gimbal.Equality.ReferenceWell
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures
