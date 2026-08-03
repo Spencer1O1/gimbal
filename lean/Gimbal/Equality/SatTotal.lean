@@ -12,7 +12,7 @@
   old-only check) and is not addressed here.
 -/
 
-import Gimbal.Equality.Saturation
+import Gimbal.Equality.Reference
 
 namespace Gimbal
 namespace Equality
@@ -85,6 +85,19 @@ theorem applyPairObs_ne_exhausted (fuel : Nat) (σ : ReachState sig.nBases)
   split
   · split <;> simp
   · exact (applyObs_ne_exhausted fuel).2 σ hyps entries.toList cont (by simpa using hfuel)
+
+/--
+The saturation stage of the reference comparator is exhaustion-free by
+construction: it is called with `saturationBudget`, which always covers the
+schedule it is handed.
+-/
+theorem applyPairObs_saturationBudget_ne_exhausted (fuel : Nat)
+    (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (entries : Array (PairEntry sig hyps)) {A : Object sig.nBases}
+    (cont : InvTm (Ctx.ofHyps hyps) A) :
+    applyPairObs (saturationBudget fuel entries.size) σ hyps entries cont
+      ≠ .exhausted :=
+  applyPairObs_ne_exhausted _ σ hyps entries cont (lt_saturationBudget fuel entries.size)
 
 end Equality
 end Gimbal

@@ -64,17 +64,17 @@ theorem tmEq_reference : ∀ fuel : Nat,
           | ok entries σ =>
             rw [hp] at h
             dsimp only at h
-            cases hT : applyPairObs fuel σ Γ.hyps entries t with
+            cases hT : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t with
             | exhausted => rw [hT] at h; exact absurd h (by simp)
             | invariantFailure =>
                 rw [hT] at h
-                cases hU : applyPairObs fuel σ Γ.hyps entries u with
+                cases hU : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u with
                 | exhausted => rw [hU] at h; exact absurd h (by simp)
                 | invariantFailure => rw [hU] at h; exact absurd h (by simp)
                 | ok u' => rw [hU] at h; exact absurd h (by simp)
             | ok t' =>
               rw [hT] at h
-              cases hU : applyPairObs fuel σ Γ.hyps entries u with
+              cases hU : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u with
               | exhausted => rw [hU] at h; exact absurd h (by simp)
               | invariantFailure => rw [hU] at h; exact absurd h (by simp)
               | ok u' =>

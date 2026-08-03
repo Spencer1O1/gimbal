@@ -28,6 +28,21 @@ def referenceStructEq {Γ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Γ A) : Bool :=
   InvTm.beq (canonicalize t) (canonicalize u)
 
+/--
+Budget handed to the saturation stage.
+
+Applying a schedule costs two units per entry, so `2 * entries + 1` is enough
+for the observation loop itself (`applyPairObs_ne_exhausted`); the ambient fuel
+is kept as a floor because witness reconstruction inside the loop still spends
+from the same counter.
+-/
+def saturationBudget (fuel entries : Nat) : Nat :=
+  max fuel (2 * entries + 1)
+
+theorem lt_saturationBudget (fuel entries : Nat) :
+    2 * entries < saturationBudget fuel entries :=
+  Nat.lt_of_lt_of_le (Nat.lt_succ_self _) (Nat.le_max_right _ _)
+
 mutual
 /--
 Fully saturate `t` under reflexive pair-obs (complete form, no comparison).
@@ -45,7 +60,7 @@ def completeSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
       match pairObs Γ goal t t with
       | .invariantFailure => .invariantFailure
       | .ok entries σ =>
-        match applyPairObs fuel σ Γ.hyps entries t with
+        match applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t with
         | .exhausted => .exhausted
         | .invariantFailure => .invariantFailure
         | .ok t' =>
@@ -124,8 +139,8 @@ def referenceSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
       match pairObs Γ goal t u with
       | .invariantFailure => .invariantFailure
       | .ok entries σ =>
-        match applyPairObs fuel σ Γ.hyps entries t,
-              applyPairObs fuel σ Γ.hyps entries u with
+        match applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t,
+              applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u with
         | .exhausted, _ | _, .exhausted => .exhausted .saturate
         | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
         | .ok t', .ok u' =>
