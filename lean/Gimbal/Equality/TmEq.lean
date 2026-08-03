@@ -25,20 +25,22 @@ Two terms are equal when every environment interprets them the same way.
 Stated in the quotient category `«CΣ»`, which is definitional equality of the
 underlying morphisms (`IntrinsicDefEq`, see `TmEq.intrinsicDefEq`).
 -/
-def TmEq {Γ : Ctx sig} {A : Object sig.nBases} (t u : Tm Γ A) : Prop :=
-  ∀ {X : Object sig.nBases} (ρ : Env X Γ),
+structure TmEq {Γ : Ctx sig} {A : Object sig.nBases} (t u : Tm Γ A) : Prop where
+  /-- Every environment gives the same morphism. -/
+  qm_eq : ∀ {X : Object sig.nBases} (ρ : Env X Γ),
     qm (interpret ρ t) = qm (interpret ρ u)
 
 namespace TmEq
 
 @[refl] theorem refl {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
-    TmEq t t := fun _ => rfl
+    TmEq t t := ⟨fun _ => rfl⟩
 
 theorem symm {Γ : Ctx sig} {A : Object sig.nBases} {t u : Tm Γ A}
-    (h : TmEq t u) : TmEq u t := fun ρ => (h ρ).symm
+    (h : TmEq t u) : TmEq u t := ⟨fun ρ => (h.qm_eq ρ).symm⟩
 
 theorem trans {Γ : Ctx sig} {A : Object sig.nBases} {t u v : Tm Γ A}
-    (h₁ : TmEq t u) (h₂ : TmEq u v) : TmEq t v := fun ρ => (h₁ ρ).trans (h₂ ρ)
+    (h₁ : TmEq t u) (h₂ : TmEq u v) : TmEq t v :=
+  ⟨fun ρ => (h₁.qm_eq ρ).trans (h₂.qm_eq ρ)⟩
 
 theorem of_eq {Γ : Ctx sig} {A : Object sig.nBases} {t u : Tm Γ A}
     (h : t = u) : TmEq t u := h ▸ refl t
@@ -47,51 +49,52 @@ theorem of_eq {Γ : Ctx sig} {A : Object sig.nBases} {t u : Tm Γ A}
 theorem intrinsicDefEq {Γ : Ctx sig} {A : Object sig.nBases} {t u : Tm Γ A}
     (h : TmEq t u) {X : Object sig.nBases} (ρ : Env X Γ) :
     IntrinsicDefEq (interpret ρ t) (interpret ρ u) :=
-  intrinsicDefEq_of_qm_eq (h ρ)
+  intrinsicDefEq_of_qm_eq (h.qm_eq ρ)
 
 /-! ### Congruence -/
 
 theorem pair {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ A}
     {u u' : Tm Γ B} (ht : TmEq t t') (hu : TmEq u u') :
     TmEq (.pair t u) (.pair t' u') := by
-  intro X ρ; simp only [interpret, qm_pair, ht ρ, hu ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_pair, ht.qm_eq ρ, hu.qm_eq ρ]
 
 theorem fst {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ (.prod A B)}
     (ht : TmEq t t') : TmEq (.fst t) (.fst t') := by
-  intro X ρ; simp only [interpret, qm_compose, ht ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, ht.qm_eq ρ]
 
 theorem snd {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ (.prod A B)}
     (ht : TmEq t t') : TmEq (.snd t) (.snd t') := by
-  intro X ρ; simp only [interpret, qm_compose, ht ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, ht.qm_eq ρ]
 
 theorem inl {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ A}
     (ht : TmEq t t') : TmEq (.inl (B := B) t) (.inl t') := by
-  intro X ρ; simp only [interpret, qm_compose, ht ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, ht.qm_eq ρ]
 
 theorem inr {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ B}
     (ht : TmEq t t') : TmEq (.inr (A := A) t) (.inr t') := by
-  intro X ρ; simp only [interpret, qm_compose, ht ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, ht.qm_eq ρ]
 
 theorem abort {Γ : Ctx sig} {A : Object sig.nBases} {t t' : Tm Γ .never}
     (ht : TmEq t t') : TmEq (.abort (A := A) t) (.abort t') := by
-  intro X ρ; simp only [interpret, qm_compose, ht ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, ht.qm_eq ρ]
 
 theorem lam {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm (Γ ▻ A) B}
     (ht : TmEq t t') : TmEq (.lam t) (.lam t') := by
-  intro X ρ; simp only [interpret, qm_curry, ht (Env.extend ρ)]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_curry, ht.qm_eq (Env.extend ρ)]
 
 theorem app {Γ : Ctx sig} {A B : Object sig.nBases} {t t' : Tm Γ (.exp A B)}
     {u u' : Tm Γ A} (ht : TmEq t t') (hu : TmEq u u') :
     TmEq (.app t u) (.app t' u') := by
-  intro X ρ; simp only [interpret, qm_compose, qm_pair, ht ρ, hu ρ]
+  refine ⟨?_⟩; intro X ρ; simp only [interpret, qm_compose, qm_pair, ht.qm_eq ρ, hu.qm_eq ρ]
 
 theorem «case» {Γ : Ctx sig} {A B C : Object sig.nBases}
     {s s' : Tm Γ (.coprod A B)} {t t' : Tm (Γ ▻ A) C} {u u' : Tm (Γ ▻ B) C}
     (hs : TmEq s s') (ht : TmEq t t') (hu : TmEq u u') :
     TmEq (.case s t u) (.case s' t' u') := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
-    hs ρ, ht (Env.extend ρ), hu (Env.extend ρ)]
+    hs.qm_eq ρ, ht.qm_eq (Env.extend ρ), hu.qm_eq (Env.extend ρ)]
 
 end TmEq
 
@@ -258,25 +261,28 @@ namespace TmEq
 
 theorem beta_fst {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm Γ A)
     (u : Tm Γ B) : TmEq (.fst (.pair t u)) t := by
-  intro X ρ; simp [interpret]
+  refine ⟨?_⟩; intro X ρ; simp [interpret]
 
 theorem beta_snd {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm Γ A)
     (u : Tm Γ B) : TmEq (.snd (.pair t u)) u := by
-  intro X ρ; simp [interpret]
+  refine ⟨?_⟩; intro X ρ; simp [interpret]
 
 theorem eta_prod {Γ : Ctx sig} {A B : Object sig.nBases}
     (t : Tm Γ (.prod A B)) : TmEq (.pair (.fst t) (.snd t)) t := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_pair, qm_compose, qm_first, qm_second]
   exact cpair_eta _
 
 theorem eta_unit {Γ : Ctx sig} (t : Tm Γ .unit) : TmEq t .unit := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_discard]
   exact cterminal_uniq _
 
 theorem beta_app {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm (Γ ▻ A) B)
     (u : Tm Γ A) : TmEq (.app (.lam t) u) (subst0 t u) := by
+  refine ⟨?_⟩
   intro X ρ
   rw [interpret_qm_subst0]
   simp only [interpret, qm_compose, qm_pair, qm_eval, qm_curry]
@@ -284,6 +290,7 @@ theorem beta_app {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm (Γ ▻ A) B)
 
 theorem eta_lam {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm Γ (.exp A B)) :
     TmEq (.lam (.app (weakenTerm t) (.var .here))) t := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_curry, qm_compose, qm_pair, qm_eval,
     interpret_qm_weakenTerm]
@@ -294,6 +301,7 @@ theorem eta_lam {Γ : Ctx sig} {A B : Object sig.nBases} (t : Tm Γ (.exp A B)) 
 theorem beta_case_inl {Γ : Ctx sig} {A B C : Object sig.nBases} (t : Tm Γ A)
     (l : Tm (Γ ▻ A) C) (r : Tm (Γ ▻ B) C) :
     TmEq (.case (.inl t) l r) (subst0 l t) := by
+  refine ⟨?_⟩
   intro X ρ
   rw [interpret_qm_subst0]
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib, qm_left]
@@ -302,6 +310,7 @@ theorem beta_case_inl {Γ : Ctx sig} {A B C : Object sig.nBases} (t : Tm Γ A)
 theorem beta_case_inr {Γ : Ctx sig} {A B C : Object sig.nBases} (t : Tm Γ B)
     (l : Tm (Γ ▻ A) C) (r : Tm (Γ ▻ B) C) :
     TmEq (.case (.inr t) l r) (subst0 r t) := by
+  refine ⟨?_⟩
   intro X ρ
   rw [interpret_qm_subst0]
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib, qm_right]
@@ -313,8 +322,8 @@ theorem beta_case_inr {Γ : Ctx sig} {A B C : Object sig.nBases} (t : Tm Γ B)
 -/
 
 theorem of_never {Γ : Ctx sig} {A : Object sig.nBases} (n : Tm Γ .never)
-    (t u : Tm Γ A) : TmEq t u := fun ρ =>
-  cs_hom_ext_of_initial (qm (interpret ρ n)) _ _
+    (t u : Tm Γ A) : TmEq t u :=
+  ⟨fun ρ => cs_hom_ext_of_initial (qm (interpret ρ n)) _ _⟩
 
 /-! ### Commuting conversions for `case` -/
 
@@ -322,6 +331,7 @@ theorem cc_fst_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (s : Tm Γ (.coprod A B)) (l : Tm (Γ ▻ A) (.prod C D))
     (r : Tm (Γ ▻ B) (.prod C D)) :
     TmEq (.fst (.case s l r)) (.case s (.fst l) (.fst r)) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     Category.assoc, cs_case_comp]
@@ -330,6 +340,7 @@ theorem cc_snd_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (s : Tm Γ (.coprod A B)) (l : Tm (Γ ▻ A) (.prod C D))
     (r : Tm (Γ ▻ B) (.prod C D)) :
     TmEq (.snd (.case s l r)) (.case s (.snd l) (.snd r)) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     Category.assoc, cs_case_comp]
@@ -337,6 +348,7 @@ theorem cc_snd_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
 theorem cc_inl_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (s : Tm Γ (.coprod A B)) (l : Tm (Γ ▻ A) C) (r : Tm (Γ ▻ B) C) :
     TmEq (.inl (B := D) (.case s l r)) (.case s (.inl l) (.inl r)) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     Category.assoc, cs_case_comp]
@@ -344,6 +356,7 @@ theorem cc_inl_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
 theorem cc_inr_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (s : Tm Γ (.coprod A B)) (l : Tm (Γ ▻ A) C) (r : Tm (Γ ▻ B) C) :
     TmEq (.inr (A := D) (.case s l r)) (.case s (.inr l) (.inr r)) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     Category.assoc, cs_case_comp]
@@ -353,6 +366,7 @@ theorem cc_app_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (r : Tm (Γ ▻ B) (.exp C D)) (u : Tm Γ C) :
     TmEq (.app (.case s l r) u)
       (.case s (.app l (weakenTerm u)) (.app r (weakenTerm u))) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     qm_eval, interpret_qm_weakenTerm]
@@ -370,6 +384,7 @@ theorem cc_case_case {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
       (.case s
         (.case l (rename Rename.skip1 m₁) (rename Rename.skip1 m₂))
         (.case r (rename Rename.skip1 m₁) (rename Rename.skip1 m₂))) := by
+  refine ⟨?_⟩
   intro X ρ
   simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
     interpret_qm_skip1]
@@ -384,8 +399,9 @@ theorem cc_case_case {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
 theorem subst0_congr {Γ : Ctx sig} {A C : Object sig.nBases}
     {t t' : Tm (Γ ▻ A) C} {v v' : Tm Γ A} (ht : TmEq t t') (hv : TmEq v v') :
     TmEq (subst0 t v) (subst0 t' v') := by
+  refine ⟨?_⟩
   intro X ρ
-  rw [interpret_qm_subst0, interpret_qm_subst0, hv ρ, ht (Env.extend ρ)]
+  rw [interpret_qm_subst0, interpret_qm_subst0, hv.qm_eq ρ, ht.qm_eq (Env.extend ρ)]
 
 end TmEq
 

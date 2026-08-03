@@ -8,7 +8,7 @@
   exhaustion outcome on the proof-critical path.
 -/
 
-import Gimbal.Equality.Hereditary
+import Gimbal.Equality.Preserve
 
 namespace Gimbal
 namespace Equality
@@ -38,6 +38,30 @@ theorem focus_wellInv {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
 @[simp] theorem focus_wellFocused {Γ : Ctx sig} {A : Object sig.nBases}
     (t : Tm Γ A) : (focus t).wellFocused = true :=
   InvTm.wellFocused_of_wellInv (focus_wellInv t)
+
+/-- Soundness: the focused representative is equal to the term it came from. -/
+theorem focus_tmEq {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
+    TmEq (focus t).erase t :=
+  tmEq_focusTm t
+
+/-- Focusing preserves the categorical interpretation up to `IntrinsicDefEq`. -/
+theorem interpret_focus {X : Object sig.nBases} {Γ : Ctx sig}
+    {A : Object sig.nBases} (ρ : Env X Γ) (t : Tm Γ A) :
+    IntrinsicDefEq (interpret ρ (focus t).erase) (interpret ρ t) :=
+  interpret_focusTm ρ t
+
+/--
+Focusing a translated morphism yields a legal focused representative whose
+interpretation is the morphism itself.
+-/
+theorem focus_translate {A B : Object sig.nBases}
+    (f : IntrinsicMorphism sig A B) :
+    WellInv (focus (translate f)) ∧
+      IntrinsicDefEq
+        (interpret (rootEnv A) (focus (translate f)).erase) f :=
+  ⟨focus_wellInv _,
+    ((focus_tmEq (translate f)).intrinsicDefEq (rootEnv A)).trans
+      (interpret_translate f)⟩
 
 end Equality
 end Gimbal
