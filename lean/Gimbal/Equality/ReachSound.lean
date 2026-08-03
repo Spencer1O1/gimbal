@@ -85,6 +85,11 @@ theorem ReachState.typeAt_discover (σ : ReachState n) (i : Nat) (b : Bool)
     (w : Witness) (j : Nat) : (σ.discover i b w).typeAt j = σ.typeAt j := by
   simp [ReachState.typeAt, ← (σ.le_discover i b w).types]
 
+theorem ReachState.typeAt_discoverDual (σ : ReachState n) (i : Nat)
+    (oldOk newOk : Bool) (w : Witness) (j : Nat) :
+    (σ.discoverDual i oldOk newOk w).typeAt j = σ.typeAt j := by
+  simp [ReachState.typeAt, ← (σ.le_discoverDual i oldOk newOk w).types]
+
 theorem ReachState.getCell_discover (σ : ReachState n) (i : Nat) (b : Bool)
     (w : Witness) (j : Nat) :
     (σ.discover i b w).getCell j = σ.getCell j ∨
@@ -212,6 +217,29 @@ theorem oldOf (h : ReachSound Γ σ) (i : Nat) (A : Object n)
     · exact h.old i A hA ho
   · rw [hnew] at hd; exact absurd hd (by simp)
 
+/-- Simply deducible and not uses-new implies the old slot is inhabited. -/
+theorem oldDeducible_of (h : ReachSound Γ σ) (i : Nat) (A : Object n)
+    (hA : σ.typeAt i = some A) (hd : (σ.getCell i).simplyDeducible = true)
+    (hn : (σ.getCell i).usesNew = false) :
+    (σ.getCell i).oldDeducible = true := by
+  have hnew : (σ.getCell i).newWitness.isSome = false := hn
+  unfold ReachCell.simplyDeducible ReachCell.oldDeducible at *
+  rcases Bool.or_eq_true_iff.mp hd with hd | hd
+  · rcases Bool.or_eq_true_iff.mp hd with hr | ho
+    · rcases h.witnessed i hr with ho | hn'
+      · exact ho
+      · rw [hnew] at hn'; exact absurd hn' (by simp)
+    · exact ho
+  · rw [hnew] at hd; exact absurd hd (by simp)
+
+/-- A simply deducible cell fires at least one dual-discover branch. -/
+theorem fires_of_simplyDeducible (h : ReachSound Γ σ) (i : Nat) (A : Object n)
+    (hA : σ.typeAt i = some A) (hd : (σ.getCell i).simplyDeducible = true) :
+    (σ.getCell i).oldDeducible = true ∨ (σ.getCell i).usesNew = true := by
+  cases hu : (σ.getCell i).usesNew
+  · exact Or.inl (h.oldDeducible_of i A hA hd hu)
+  · exact Or.inr rfl
+
 end ReachSound
 
 /-! ### Preservation by a single discovery -/
@@ -269,6 +297,31 @@ theorem ReachSound.discoverAt {Γ : ReachCtx n} {σ : ReachState n}
     · exact h.inconsistent hinc
     · have : A = (.never : Object n) := ReachState.typeAt_inj hA hnever
       exact this ▸ hAsimple
+
+theorem ReachSound.discoverDualAt {Γ : ReachCtx n} {σ : ReachState n}
+    (h : ReachSound Γ σ) {i : Nat} {oldOk newOk : Bool} {w : Witness} {A : Object n}
+    (hA : σ.typeAt i = some A)
+    (hold : oldOk = true → OldDeduction Γ A)
+    (hnew : newOk = true → UsesNew Γ A) :
+    ReachSound Γ (σ.discoverDual i oldOk newOk w) := by
+  unfold ReachState.discoverDual
+  cases holdOk : oldOk with
+  | false =>
+    cases hnewOk : newOk with
+    | false => simpa [holdOk, hnewOk] using h
+    | true =>
+      simp only [holdOk, hnewOk, ↓reduceIte]
+      exact h.discoverAt hA (fun hb => by cases hb) (fun _ => hnew hnewOk)
+  | true =>
+    have h1 := h.discoverAt (b := false) (w := w) hA
+      (fun _ => hold holdOk) (fun hb => by cases hb)
+    cases hnewOk : newOk with
+    | false => simpa [holdOk, hnewOk] using h1
+    | true =>
+      simp only [holdOk, hnewOk, ↓reduceIte]
+      refine h1.discoverAt ?_ (fun hb => by cases hb) (fun _ => hnew hnewOk)
+      rw [ReachState.typeAt_discover]
+      exact hA
 
 theorem ReachSound.markHypAt {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) (k : Nat)
@@ -387,20 +440,21 @@ theorem hypAppRule_sound (h : ReachSound Γ σ) (k : Nat) (Arg Ret : Object n)
     | none => simpa [ha, hr] using h
     | some rIdx =>
       dsimp only
-      split
-      · rename_i hdec
-        have hA : σ.typeAt aIdx = some Arg := ReachState.typeAt_of_findTypeIdx ha
-        have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
-        refine h.discoverAt hR ?_ ?_
-        · intro hb
-          obtain ⟨h1, h2⟩ := Bool.or_eq_false_iff.mp hb
-          exact .appHyp k hk h2 (h.oldOf aIdx Arg hA hdec h1) trivial
-        · intro hb
-          cases hu : (σ.getCell aIdx).usesNew
-          · rw [hu] at hb
-            exact .appHypFn k hk (by simpa using hb) (h.deducible aIdx Arg hA hdec)
-          · exact .appHypArg k hk (h.new aIdx Arg hA hu)
-      · exact h
+      have hA : σ.typeAt aIdx = some Arg := ReachState.typeAt_of_findTypeIdx ha
+      have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
+      refine h.discoverDualAt (w := .app k aIdx) hR ?_ ?_
+      · intro hold
+        obtain ⟨hOld, hFn⟩ := Bool.and_eq_true_iff.mp hold
+        exact .appHyp k hk (by simpa using hFn)
+          (h.old aIdx Arg hA (by simpa [ReachCell.oldDeducible] using hOld)) trivial
+      · intro hnew
+        obtain ⟨hdec, hprov⟩ := Bool.and_eq_true_iff.mp hnew
+        cases hu : (σ.getCell aIdx).usesNew
+        · have hFn : Γ.isNew k = true := by
+            simp [hu, Bool.or_eq_true_iff] at hprov
+            exact hprov
+          exact .appHypFn k hk hFn (h.deducible aIdx Arg hA hdec)
+        · exact .appHypArg k hk (h.new aIdx Arg hA hu)
 
 theorem hypRule_sound (h : ReachSound Γ σ) (k : Nat) :
     ReachSound Γ (hypRule Γ σ k) := by
@@ -423,17 +477,18 @@ theorem prodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
       | none => simpa [hl, hr] using h
       | some rIdx =>
         dsimp only
-        have hOld : (σ.getCell ti).usesNew = false → OldDeduction Γ (.prod L R) :=
-          fun hb => h.oldOf ti _ hti hdec hb
-        have hNew : (σ.getCell ti).usesNew = true → UsesNew Γ (.prod L R) :=
-          fun hb => h.new ti _ hti hb
-        have h1 := h.discoverAt (b := (σ.getCell ti).usesNew) (w := .fst ti)
-          (ReachState.typeAt_of_findTypeIdx hl)
-          (fun hb => .fst (hOld hb) trivial) (fun hb => .fst (hNew hb))
-        refine h1.discoverAt (w := .snd ti) ?_
-          (fun hb => .snd (hOld hb) trivial) (fun hb => .snd (hNew hb))
-        rw [ReachState.typeAt_discover]
-        exact ReachState.typeAt_of_findTypeIdx hr
+        have h1 := h.discoverDualAt (w := .fst ti) (ReachState.typeAt_of_findTypeIdx hl)
+          (fun hold => .fst (h.old ti _ hti (by simpa [ReachCell.oldDeducible] using hold))
+            trivial)
+          (fun hnew => .fst (h.new ti _ hti hnew))
+        have hR : (σ.discoverDual lIdx (σ.getCell ti).oldDeducible
+            (σ.getCell ti).usesNew (.fst ti)).typeAt rIdx = some R := by
+          rw [ReachState.typeAt_discoverDual]
+          exact ReachState.typeAt_of_findTypeIdx hr
+        exact h1.discoverDualAt (w := .snd ti) hR
+          (fun hold => .snd (h.old ti _ hti (by simpa [ReachCell.oldDeducible] using hold))
+            trivial)
+          (fun hnew => .snd (h.new ti _ hti hnew))
   · cases hl : σ.findTypeIdx L with
     | none => simpa [hl] using h
     | some lIdx =>
@@ -446,15 +501,18 @@ theorem prodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
           obtain ⟨hlc, hrc⟩ := Bool.and_eq_true_iff.mp hboth
           have hL : σ.typeAt lIdx = some L := ReachState.typeAt_of_findTypeIdx hl
           have hR : σ.typeAt rIdx = some R := ReachState.typeAt_of_findTypeIdx hr
-          refine h.discoverAt hti ?_ ?_
-          · intro hb
-            obtain ⟨h1, h2⟩ := Bool.or_eq_false_iff.mp hb
-            exact .pair (h.oldOf lIdx L hL hlc h1) (h.oldOf rIdx R hR hrc h2) trivial
-          · intro hb
+          refine h.discoverDualAt (w := .eta) hti ?_ ?_
+          · intro hold
+            obtain ⟨h1, h2⟩ := Bool.and_eq_true_iff.mp hold
+            exact .pair
+              (h.old lIdx L hL (by simpa [ReachCell.oldDeducible] using h1))
+              (h.old rIdx R hR (by simpa [ReachCell.oldDeducible] using h2)) trivial
+          · intro hnew
             cases hu : (σ.getCell lIdx).usesNew
-            · rw [hu] at hb
-              exact .pairR (h.deducible lIdx L hL hlc)
-                (h.new rIdx R hR (by simpa [ReachCell.usesNew] using hb))
+            · have hrn : (σ.getCell rIdx).usesNew = true := by
+                simp [hu, Bool.or_eq_true_iff] at hnew
+                exact hnew
+              exact .pairR (h.deducible lIdx L hL hlc) (h.new rIdx R hR hrn)
             · exact .pairL (h.new lIdx L hL hu) (h.deducible rIdx R hR hrc)
         · exact h
 
@@ -470,9 +528,10 @@ theorem expEtaRule_sound (h : ReachSound Γ σ) (ti : Nat) (Arg Ret : Object n)
       split
       · rename_i hdec
         have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
-        exact h.discoverAt hti
-          (fun hb => .expEta (h.oldOf rIdx Ret hR hdec hb) trivial)
-          (fun hb => .expEta (h.new rIdx Ret hR hb))
+        exact h.discoverDualAt (w := .eta) hti
+          (fun hold => .expEta
+            (h.old rIdx Ret hR (by simpa [ReachCell.oldDeducible] using hold)) trivial)
+          (fun hnew => .expEta (h.new rIdx Ret hR hnew))
       · exact h
   · exact h
 
@@ -493,16 +552,18 @@ theorem expAppRule_sound (h : ReachSound Γ σ) (ti : Nat) (Arg Ret : Object n)
         · rename_i hadec
           have hA : σ.typeAt aIdx = some Arg := ReachState.typeAt_of_findTypeIdx ha
           have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
-          refine h.discoverAt hR ?_ ?_
-          · intro hb
-            obtain ⟨h1, h2⟩ := Bool.or_eq_false_iff.mp hb
-            exact .appTy (h.oldOf ti _ hti hfdec h1) (h.oldOf aIdx Arg hA hadec h2)
-              trivial
-          · intro hb
+          refine h.discoverDualAt (w := .appTy ti aIdx) hR ?_ ?_
+          · intro hold
+            obtain ⟨h1, h2⟩ := Bool.and_eq_true_iff.mp hold
+            exact .appTy
+              (h.old ti _ hti (by simpa [ReachCell.oldDeducible] using h1))
+              (h.old aIdx Arg hA (by simpa [ReachCell.oldDeducible] using h2)) trivial
+          · intro hnew
             cases hu : (σ.getCell ti).usesNew
-            · rw [hu] at hb
-              exact .appTyArg (h.deducible ti _ hti hfdec)
-                (h.new aIdx Arg hA (by simpa [ReachCell.usesNew] using hb))
+            · have han : (σ.getCell aIdx).usesNew = true := by
+                simp [hu, Bool.or_eq_true_iff] at hnew
+                exact hnew
+              exact .appTyArg (h.deducible ti _ hti hfdec) (h.new aIdx Arg hA han)
             · exact .appTyFn (h.new ti _ hti hu) (h.deducible aIdx Arg hA hadec)
         · exact h
   · exact h
@@ -522,15 +583,17 @@ theorem coprodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
         split
         · rename_i hlc
           have hL : σ.typeAt lIdx = some L := ReachState.typeAt_of_findTypeIdx hl
-          exact h.discoverAt hti
-            (fun hb => .inl (h.oldOf lIdx L hL hlc hb) trivial)
-            (fun hb => .inl (h.new lIdx L hL hb))
+          exact h.discoverDualAt (w := .inl lIdx) hti
+            (fun hold => .inl
+              (h.old lIdx L hL (by simpa [ReachCell.oldDeducible] using hold)) trivial)
+            (fun hnew => .inl (h.new lIdx L hL hnew))
         · split
           · rename_i hrc
             have hR : σ.typeAt rIdx = some R := ReachState.typeAt_of_findTypeIdx hr
-            exact h.discoverAt hti
-              (fun hb => .inr (h.oldOf rIdx R hR hrc hb) trivial)
-              (fun hb => .inr (h.new rIdx R hR hb))
+            exact h.discoverDualAt (w := .inr rIdx) hti
+              (fun hold => .inr
+                (h.old rIdx R hR (by simpa [ReachCell.oldDeducible] using hold)) trivial)
+              (fun hnew => .inr (h.new rIdx R hR hnew))
           · exact h
   · exact h
 

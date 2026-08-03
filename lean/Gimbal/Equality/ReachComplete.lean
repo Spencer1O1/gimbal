@@ -123,6 +123,41 @@ theorem ReachState.simplyDeducible_of_discover_eq {σ : ReachState n} {i : Nat}
   rw [h] at hg
   exact ReachCell.simplyDeducible_of_record_eq hg.symm
 
+/-- Dual discovery absorbed by the state still implies the fact is present. -/
+theorem ReachState.simplyDeducible_of_discoverDual_eq {σ : ReachState n} {i : Nat}
+    {oldOk newOk : Bool} {w : Witness} {A : Object n} (hsz : ReachState.Sized σ)
+    (hty : σ.typeAt i = some A) (h : σ.discoverDual i oldOk newOk w = σ)
+    (hfire : oldOk = true ∨ newOk = true) :
+    (σ.getCell i).simplyDeducible = true := by
+  unfold ReachState.discoverDual at h
+  cases hold : oldOk with
+  | false =>
+    cases hnew : newOk with
+    | false =>
+      cases hfire with
+      | inl h' => rw [hold] at h'; cases h'
+      | inr h' => rw [hnew] at h'; cases h'
+    | true =>
+      simp only [hold, hnew, ↓reduceIte] at h
+      exact ReachState.simplyDeducible_of_discover_eq hsz hty h
+  | true =>
+    cases hnew : newOk with
+    | false =>
+      simp only [hold, hnew, ↓reduceIte] at h
+      exact ReachState.simplyDeducible_of_discover_eq hsz hty h
+    | true =>
+      simp only [hold, hnew, ↓reduceIte] at h
+      -- `discover false` then `discover true` lands at σ; the first step alone
+      -- already forces the cell inhabited, via sandwich with monotonicity.
+      have hle1 := σ.le_discover i false w
+      have hle2 := (σ.discover i false w).le_discover i true w
+      have hsandwich : ReachState.Le (σ.discover i false w) σ := by
+        have := hle2
+        rw [h] at this
+        exact this
+      have heq := ReachState.eq_of_sandwich hle1 hsandwich
+      exact ReachState.simplyDeducible_of_discover_eq hsz hty heq
+
 theorem ReachState.getCell_markHyp_self {σ : ReachState n} {Γ : ReachCtx n} {k i : Nat}
     {A : Object n} (hlt : i < σ.cells.size) (hA : Γ.hyps[k]? = some A)
     (hi : σ.findTypeIdx A = some i) :
@@ -371,14 +406,17 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold prodTypeRule at hrule
       rw [if_pos hdec, hl, hr] at hrule
       dsimp only at hrule
-      have h2 := ReachState.le_discover (σ.discover l (σ.getCell p).usesNew (.fst p)) r
-        (σ.getCell p).usesNew (.snd p)
+      have hfire := hs.fires_of_simplyDeducible p _ (ReachState.typeAt_of_findTypeIdx hp) hdec
+      have h2 := ReachState.le_discoverDual
+        (σ.discoverDual l (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.fst p)) r
+        (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.snd p)
       rw [hrule] at h2
       have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discover σ l (σ.getCell p).usesNew (.fst p)) h2
+        (ReachState.le_discoverDual σ l (σ.getCell p).oldDeducible (σ.getCell p).usesNew
+          (.fst p)) h2
       exact isSimplyDeducible_of_index hl
-        (ReachState.simplyDeducible_of_discover_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hl) h1)
+        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+          (ReachState.typeAt_of_findTypeIdx hl) h1 hfire)
   | @snd L R hd hu ih =>
       have hprod := hd.univ
       obtain ⟨p, hp⟩ := exists_findTypeIdx hprod
@@ -389,15 +427,18 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold prodTypeRule at hrule
       rw [if_pos hdec, hl, hr] at hrule
       dsimp only at hrule
-      have h2 := ReachState.le_discover (σ.discover l (σ.getCell p).usesNew (.fst p)) r
-        (σ.getCell p).usesNew (.snd p)
+      have hfire := hs.fires_of_simplyDeducible p _ (ReachState.typeAt_of_findTypeIdx hp) hdec
+      have h2 := ReachState.le_discoverDual
+        (σ.discoverDual l (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.fst p)) r
+        (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.snd p)
       rw [hrule] at h2
       have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discover σ l (σ.getCell p).usesNew (.fst p)) h2
+        (ReachState.le_discoverDual σ l (σ.getCell p).oldDeducible (σ.getCell p).usesNew
+          (.fst p)) h2
       rw [h1] at hrule
       exact isSimplyDeducible_of_index hr
-        (ReachState.simplyDeducible_of_discover_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hr) hrule)
+        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+          (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
   | @pair L R hdl hdr hu ihl ihr =>
       obtain ⟨p, hp⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell p).simplyDeducible = true
@@ -411,9 +452,21 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
         have hb : ((σ.getCell l).simplyDeducible && (σ.getCell r).simplyDeducible) = true := by
           simp [index_deducible hl ihl, index_deducible hr ihr]
         rw [if_pos hb] at hrule
+        have hfire : ((σ.getCell l).oldDeducible && (σ.getCell r).oldDeducible) = true ∨
+            ((σ.getCell l).usesNew || (σ.getCell r).usesNew) = true := by
+          cases hul : (σ.getCell l).usesNew
+          · cases hur : (σ.getCell r).usesNew
+            · left
+              exact Bool.and_eq_true_iff.mpr ⟨
+                hs.oldDeducible_of l _ (ReachState.typeAt_of_findTypeIdx hl)
+                  (index_deducible hl ihl) hul,
+                hs.oldDeducible_of r _ (ReachState.typeAt_of_findTypeIdx hr)
+                  (index_deducible hr ihr) hur⟩
+            · exact Or.inr rfl
+          · exact Or.inr rfl
         exact isSimplyDeducible_of_index hp
-          (ReachState.simplyDeducible_of_discover_eq hf.sized
-            (ReachState.typeAt_of_findTypeIdx hp) hrule)
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx hp) hrule hfire)
   | @inl L R hd hu ih =>
       obtain ⟨p, hp⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell p).simplyDeducible = true
@@ -425,10 +478,12 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
         rw [if_pos (by simp [hdec] : (!(σ.getCell p).simplyDeducible) = true), hl, hr]
           at hrule
         dsimp only at hrule
-        rw [if_pos (index_deducible hl ih)] at hrule
+        have hld := index_deducible hl ih
+        rw [if_pos hld] at hrule
         exact isSimplyDeducible_of_index hp
-          (ReachState.simplyDeducible_of_discover_eq hf.sized
-            (ReachState.typeAt_of_findTypeIdx hp) hrule)
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx hp) hrule
+            (hs.fires_of_simplyDeducible l _ (ReachState.typeAt_of_findTypeIdx hl) hld))
   | @inr L R hd hu ih =>
       obtain ⟨p, hp⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell p).simplyDeducible = true
@@ -443,12 +498,15 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
         by_cases hlft : (σ.getCell l).simplyDeducible = true
         · rw [if_pos hlft] at hrule
           exact isSimplyDeducible_of_index hp
-            (ReachState.simplyDeducible_of_discover_eq hf.sized
-              (ReachState.typeAt_of_findTypeIdx hp) hrule)
-        · rw [if_neg hlft, if_pos (index_deducible hr ih)] at hrule
+            (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+              (ReachState.typeAt_of_findTypeIdx hp) hrule
+              (hs.fires_of_simplyDeducible l _ (ReachState.typeAt_of_findTypeIdx hl) hlft))
+        · have hrd := index_deducible hr ih
+          rw [if_neg hlft, if_pos hrd] at hrule
           exact isSimplyDeducible_of_index hp
-            (ReachState.simplyDeducible_of_discover_eq hf.sized
-              (ReachState.typeAt_of_findTypeIdx hp) hrule)
+            (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+              (ReachState.typeAt_of_findTypeIdx hp) hrule
+              (hs.fires_of_simplyDeducible r _ (ReachState.typeAt_of_findTypeIdx hr) hrd))
   | @appHyp Arg Ret k hk _ hd hu ih =>
       have hexp := hf.hypsMem k _ hk
       obtain ⟨a, ha⟩ := exists_findTypeIdx (hf.memArg hexp)
@@ -457,10 +515,20 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold hypAppRule at hrule
       rw [ha, hr] at hrule
       dsimp only at hrule
-      rw [if_pos (index_deducible ha ih)] at hrule
+      have hdec := index_deducible ha ih
+      have hfire : ((σ.getCell a).oldDeducible && !Γ.isNew k) = true ∨
+          ((σ.getCell a).simplyDeducible && ((σ.getCell a).usesNew || Γ.isNew k)) = true := by
+        cases hNew : Γ.isNew k
+        · cases hu' : (σ.getCell a).usesNew
+          · left
+            exact Bool.and_eq_true_iff.mpr ⟨
+              hs.oldDeducible_of a _ (ReachState.typeAt_of_findTypeIdx ha) hdec hu',
+              by simp [hNew]⟩
+          · right; exact Bool.and_eq_true_iff.mpr ⟨hdec, by simp [hu']⟩
+        · right; exact Bool.and_eq_true_iff.mpr ⟨hdec, by simp [hNew]⟩
       exact isSimplyDeducible_of_index hr
-        (ReachState.simplyDeducible_of_discover_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hr) hrule)
+        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+          (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
   | @appTy Arg Ret hdf hda hu ihf iha =>
       have hexp := hdf.univ
       obtain ⟨t, ht⟩ := exists_findTypeIdx hexp
@@ -470,10 +538,22 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold expAppRule at hrule
       rw [if_pos (index_deducible ht ihf), ha, hr] at hrule
       dsimp only at hrule
-      rw [if_pos (index_deducible ha iha)] at hrule
+      have hadec := index_deducible ha iha
+      rw [if_pos hadec] at hrule
+      have hfire : ((σ.getCell t).oldDeducible && (σ.getCell a).oldDeducible) = true ∨
+          ((σ.getCell t).usesNew || (σ.getCell a).usesNew) = true := by
+        cases huf : (σ.getCell t).usesNew
+        · cases hua : (σ.getCell a).usesNew
+          · left
+            exact Bool.and_eq_true_iff.mpr ⟨
+              hs.oldDeducible_of t _ (ReachState.typeAt_of_findTypeIdx ht)
+                (index_deducible ht ihf) huf,
+              hs.oldDeducible_of a _ (ReachState.typeAt_of_findTypeIdx ha) hadec hua⟩
+          · exact Or.inr rfl
+        · exact Or.inr rfl
       exact isSimplyDeducible_of_index hr
-        (ReachState.simplyDeducible_of_discover_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hr) hrule)
+        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+          (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
   | @expEta Arg Ret hd hu ih =>
       obtain ⟨t, ht⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell t).simplyDeducible = true
@@ -484,10 +564,12 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
         rw [if_pos (by simp [hdec] : (!(σ.getCell t).simplyDeducible) = true), hr]
           at hrule
         dsimp only at hrule
-        rw [if_pos (index_deducible hr ih)] at hrule
+        have hrd := index_deducible hr ih
+        rw [if_pos hrd] at hrule
         exact isSimplyDeducible_of_index ht
-          (ReachState.simplyDeducible_of_discover_eq hf.sized
-            (ReachState.typeAt_of_findTypeIdx ht) hrule)
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx ht) hrule
+            (hs.fires_of_simplyDeducible r _ (ReachState.typeAt_of_findTypeIdx hr) hrd))
   | @exFalso A hd hu ih =>
       obtain ⟨j, hj⟩ := exists_findTypeIdx hd.univ
       have hbad := hs.neverFlagged j (ReachState.typeAt_of_findTypeIdx hj)

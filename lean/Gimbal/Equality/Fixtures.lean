@@ -9,6 +9,7 @@ import Gimbal.Equality.Translate
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.ICC
+import Gimbal.Equality.ICCCode
 import Gimbal.Equality.Compare
 import Gimbal.Equality.Reference
 import Gimbal.Fixtures
@@ -223,11 +224,9 @@ def provenanceDualKeepsBoth : Bool :=
 example : provenanceDualKeepsBoth = true := by native_decide
 
 /--
-Known 8D imprecision, pinned so a fix is visible as a fixture change.
-`X` carries both an old-only and a uses-new witness, so the application rule
-records `Y` only in the uses-new slot — even though `f x` uses no new
-hypothesis. Provenance stays sound (a uses-new derivation does exist); it is
-old-completeness that fails.
+Fixture #8: when `X` carries both an old-only and a uses-new witness, dual-fire
+records `Y` in *both* provenance slots — the old-only application `f x` and the
+uses-new application through `x'`.
 -/
 def provenanceOverlapCtx : ReachCtx 2 where
   hyps := #[
@@ -237,16 +236,26 @@ def provenanceOverlapCtx : ReachCtx 2 where
   ]
   newFrom := 2
 
+/-- Both provenance slots are inhabited for `Y`. -/
+def provenanceOverlapKeepsBoth : Bool :=
+  let σ := runReachability provenanceOverlapCtx (.base 1)
+  match σ.findTypeIdx (.base 1) with
+  | some i => (σ.getCell i).oldWitness.isSome && (σ.getCell i).newWitness.isSome
+  | none => false
+
+example : usesNew (runReachability provenanceOverlapCtx (.base 1)) (.base 1) = true := by
+  native_decide
+
+example : provenanceOverlapKeepsBoth = true := by native_decide
+
+/-- Legacy name: previously pinned the single-fire gap; now false after dual-fire. -/
 def provenanceOverlapOldSlotEmpty : Bool :=
   let σ := runReachability provenanceOverlapCtx (.base 1)
   match σ.findTypeIdx (.base 1) with
   | some i => !(σ.getCell i).oldWitness.isSome && (σ.getCell i).newWitness.isSome
   | none => false
 
-example : usesNew (runReachability provenanceOverlapCtx (.base 1)) (.base 1) = true := by
-  native_decide
-
-example : provenanceOverlapOldSlotEmpty = true := by native_decide
+example : provenanceOverlapOldSlotEmpty = false := by native_decide
 
 /-- Product projection: `p : X × Y` makes both components deducible. -/
 def prodCtx : ReachCtx 2 where
@@ -413,13 +422,88 @@ def iccCaseCaseOriented : Bool :=
 
 example : iccCaseCaseOriented = true := by native_decide
 
+/-! ### Ordered-phase codes (design E) -/
+
+/-- Right introductions encode under an empty positive worklist. -/
+def encodeUnitPairLam : Bool :=
+  let Sig : Signature := ⟨1, #[]⟩
+  let Γ : Ctx Sig := .empty
+  let ε : OriginEnv Γ := OriginEnv.empty
+  let u : InvTm Γ (.unit : Object 1) := .unit
+  let p : InvTm Γ (.prod (.unit) (.unit)) := .pair .unit .unit
+  let l : InvTm Γ (.exp (.unit) (.unit)) := .lam .unit
+  (encodeICC ε u).isSome &&
+    (encodeICC ε p).isSome &&
+    (encodeICC ε l).isSome
+
+example : encodeUnitPairLam = true := by native_decide
+
+/-- An already-outer case on a phase-entry hyp encodes under the worklist. -/
+def encodeOuterCase : Bool :=
+  let Sig : Signature := ⟨2, #[]⟩
+  let hyps : Array (Object 2) := #[.base 0, .coprod (.base 0) (.base 0)]
+  let n : NegNeu (Ctx.ofHyps (sig := Sig) hyps) (.coprod (.base 0) (.base 0)) :=
+    .var .here
+  let t : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.base 0) :=
+    .case n
+      (.foc (.pos (.done (.neu (.var .here)))))
+      (.foc (.pos (.done (.neu (.var .here)))))
+  (encodeICCHyps t).isSome
+
+example : encodeOuterCase = true := by native_decide
+
+/-- Disordered `case`/`case` nestings encode to the same origin-keyed code. -/
+def encodeCaseCaseAgree : Bool :=
+  let hyps : Array (Object 5) := #[
+    .base 0,
+    .coprod (.base 1) (.base 2),
+    .coprod (.base 3) (.base 4)
+  ]
+  let Sig : Signature := ⟨5, #[]⟩
+  let s : NegNeu (Ctx.ofHyps (sig := Sig) hyps) (.coprod (.base 1) (.base 2)) :=
+    .var (.there .here)
+  let t : NegNeu (Ctx.ofHyps (sig := Sig) hyps) (.coprod (.base 3) (.base 4)) :=
+    .var .here
+  let leaf : ∀ L R : Object 5,
+      InvTm (Ctx.ofHyps (sig := Sig) hyps ▻ L ▻ R) (.base 0) := fun _ _ =>
+    .foc (.pos (.done (.neu (.var (.there (.there (.there (.there .here))))))))
+  let x : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.base 0) :=
+    .case s
+      (.case (NegNeu.weaken t) (leaf _ _) (leaf _ _))
+      (.case (NegNeu.weaken t) (leaf _ _) (leaf _ _))
+  let y : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.base 0) :=
+    .case t
+      (.case (NegNeu.weaken s) (leaf _ _) (leaf _ _))
+      (.case (NegNeu.weaken s) (leaf _ _) (leaf _ _))
+  match encodeICCHyps x, encodeICCHyps y with
+  | some cx, some cy => ICCCode.beq cx cy
+  | _, _ => false
+
+example : encodeCaseCaseAgree = true := by native_decide
+
+/-- `case` distributed through `pair` encodes like the paired cases. -/
+def encodeCasePairAgree : Bool :=
+  let Sig : Signature := ⟨2, #[]⟩
+  let hyps : Array (Object 2) := #[.unit, .coprod (.base 0) (.base 0)]
+  let n : NegNeu (Ctx.ofHyps (sig := Sig) hyps) (.coprod (.base 0) (.base 0)) :=
+    .var .here
+  let leaf : InvTm (Ctx.ofHyps (sig := Sig) hyps ▻ (.base 0 : Object 2))
+      (.unit : Object 2) := .unit
+  let distributed : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.prod (.unit) (.unit)) :=
+    .pair (.case n leaf leaf) (.case n leaf leaf)
+  let cased : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.prod (.unit) (.unit)) :=
+    .case n (.pair leaf leaf) (.pair leaf leaf)
+  match encodeICCHyps distributed, encodeICCHyps cased with
+  | some c₁, some c₂ => ICCCode.beq c₁ c₂
+  | _, _ => false
+
+example : encodeCasePairAgree = true := by native_decide
+
 /--
-Known gap (8F uniqueness): after `Rename.exchange`, `caseCommute` on the
-raw exchange-images and `caseCommute` on their canonical forms can yield two
-*different* `canonicalize`-fixed points. `NegNeu.blt` flips under exchange, so
-re-orienting during `caseCommute` is not the same as canonicalizing first.
-Pins current behaviour until the rewriter re-canonicalizes after exchange (or
-gains an exchange-invariant orientation).
+Frozen counterexample for the *old* bottom-up `NegNeu.blt` canonicalizer.
+Design E abandons repairing that path: do not re-canonicalize after exchange
+and do not weaken this fixture. Unique order is obtained by `encodeICC` with
+stable `Origin`s instead.
 -/
 def iccExchangeCanonNotUnique : Bool :=
   let Sig : Signature := ⟨1, #[]⟩

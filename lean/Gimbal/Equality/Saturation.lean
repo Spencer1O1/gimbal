@@ -839,6 +839,42 @@ theorem mem_canonicalizePairObsOrder {sig : Signature}
   obtain ⟨i, hi, rfl⟩ := Array.getElem_of_mem h
   exact Array.mem_filterMap.2 ⟨i, mem_pairObsOrder hi, by simp [hi]⟩
 
+/-- Exact-entry dependency inherits the raw-spine size decrease. -/
+theorem PairEntry.lt_rawSize_of_dependsOn {sig : Signature}
+    {hyps : Array (Object sig.nBases)}
+    {later earlier : PairEntry sig hyps}
+    (h : PairEntry.dependsOn later earlier = true) :
+    ∃ (P Q : Object sig.nBases)
+      (n : NegNeu (Ctx.ofHyps hyps) P) (m : NegNeu (Ctx.ofHyps hyps) Q),
+      later = .exact P n ∧ earlier = .exact Q m ∧
+        RawNeu.size (NegNeu.toRaw m) < RawNeu.size (NegNeu.toRaw n) := by
+  cases later with
+  | consistency => simp [PairEntry.dependsOn] at h
+  | exact P n =>
+    cases earlier with
+    | consistency => simp [PairEntry.dependsOn] at h
+    | exact Q m =>
+      refine ⟨P, Q, n, m, rfl, rfl, RawNeu.lt_size_of_dependsOn ?_⟩
+      simpa [PairEntry.dependsOn] using h
+
+/--
+Intended Kahn invariant: if entry `j` depends on entry `i`, then `i` appears
+before `j` in `pairObsOrder` (when the dependency DAG is acyclic, which
+`PairEntry.lt_rawSize_of_dependsOn` guarantees for exact spines).
+
+The imperative `Id.run` implementation of `pairObsOrderIndices` is not yet
+connected to this statement; the rearrangement lemmas above already guarantee
+no observation is lost. Closing this Prop is the remaining 8D topo obligation.
+-/
+def PairObsOrderValid {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) : Prop :=
+  ∀ {i j : Nat} (hi : i < entries.size) (hj : j < entries.size),
+    PairEntry.dependsOn entries[j] entries[i] = true →
+    ∃ (pi pj : Nat),
+      (pairObsOrder σ entries)[pi]? = some i ∧
+      (pairObsOrder σ entries)[pj]? = some j ∧
+      pi < pj
+
 /--
 Union consistency witnesses with exact term-demanded neutrals, then
 canonicalize order (dependency DAG + stable key).

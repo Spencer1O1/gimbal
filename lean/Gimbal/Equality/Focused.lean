@@ -284,6 +284,197 @@ end
 def RawNeu.dependsOn (outer inner : RawNeu) : Bool :=
   outer != inner && RawNeu.hasNeu outer inner
 
+/-! ### Dependency well-foundedness (Kahn schedule foundation)
+
+`PairEntry.dependsOn` is `RawNeu.dependsOn` on exact spines. The size measure
+below shows that relation is well-founded, so a topological sort of a finite
+entry bag has no dependency cycles to blame for mis-ordering — any remaining
+gap is in relating the imperative Kahn pass to this order, not in the DAG.
+-/
+
+mutual
+def RawNeu.size : RawNeu → Nat
+  | .var _ => 1
+  | .app n a => RawNeu.size n + RawFocused.size a + 1
+  | .fst n | .snd n => RawNeu.size n + 1
+
+def RawPos.size : RawPos → Nat
+  | .neu n => RawNeu.size n + 1
+  | .inl p | .inr p => RawPos.size p + 1
+  | .val t => RawFocused.size t + 1
+
+def RawFocused.size : RawFocused → Nat
+  | .unit => 1
+  | .pair t u => RawFocused.size t + RawFocused.size u + 1
+  | .lam t => RawFocused.size t + 1
+  | .case s t u => RawNeu.size s + RawFocused.size t + RawFocused.size u + 1
+  | .abort n => RawNeu.size n + 1
+  | .pos p => RawPos.size p + 1
+  | .neg n => RawNeu.size n + 1
+  | .letPos n t => RawNeu.size n + RawFocused.size t + 1
+  | .sat _ t => RawFocused.size t + 1
+end
+
+theorem RawNeu.dependsOn_irrefl (n : RawNeu) : RawNeu.dependsOn n n = false := by
+  simp [RawNeu.dependsOn]
+
+theorem RawNeu.size_pos (n : RawNeu) : 0 < RawNeu.size n := by
+  cases n <;> simp [RawNeu.size] <;> exact Nat.succ_pos _
+
+theorem RawPos.size_pos (p : RawPos) : 0 < RawPos.size p := by
+  cases p <;> simp [RawPos.size] <;> exact Nat.succ_pos _
+
+theorem RawFocused.size_pos (t : RawFocused) : 0 < RawFocused.size t := by
+  cases t <;> simp [RawFocused.size] <;> exact Nat.succ_pos _
+
+mutual
+theorem RawNeu.le_size_of_hasNeu : ∀ (hay needle : RawNeu),
+    RawNeu.hasNeu hay needle = true → RawNeu.size needle ≤ RawNeu.size hay
+  | .var i, needle, h => by
+      simp [RawNeu.hasNeu, beq_iff_eq] at h
+      subst h; exact Nat.le_refl _
+  | .app n a, needle, h => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn | ha
+      · exact Nat.le_refl _
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+      · have := RawFocused.le_size_of_hasNeu a needle ha
+        have := RawNeu.size_pos n
+        simp [RawNeu.size]; omega
+  | .fst n, needle, h => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn
+      · exact Nat.le_refl _
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+  | .snd n, needle, h => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn
+      · exact Nat.le_refl _
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+
+theorem RawPos.le_size_of_hasNeu : ∀ (hay : RawPos) (needle : RawNeu),
+    RawPos.hasNeu hay needle = true → RawNeu.size needle ≤ RawPos.size hay
+  | .neu n, needle, h => by
+      simp [RawPos.hasNeu] at h
+      have := RawNeu.le_size_of_hasNeu n needle h
+      simp [RawPos.size]; omega
+  | .inl p, needle, h => by
+      simp [RawPos.hasNeu] at h
+      have := RawPos.le_size_of_hasNeu p needle h
+      simp [RawPos.size]; omega
+  | .inr p, needle, h => by
+      simp [RawPos.hasNeu] at h
+      have := RawPos.le_size_of_hasNeu p needle h
+      simp [RawPos.size]; omega
+  | .val t, needle, h => by
+      simp [RawPos.hasNeu] at h
+      have := RawFocused.le_size_of_hasNeu t needle h
+      simp [RawPos.size]; omega
+
+theorem RawFocused.le_size_of_hasNeu : ∀ (hay : RawFocused) (needle : RawNeu),
+    RawFocused.hasNeu hay needle = true → RawNeu.size needle ≤ RawFocused.size hay
+  | .unit, _, h => by simp [RawFocused.hasNeu] at h
+  | .pair t u, needle, h => by
+      simp [RawFocused.hasNeu, Bool.or_eq_true_iff] at h
+      rcases h with ht | hu
+      · have := RawFocused.le_size_of_hasNeu t needle ht
+        have := RawFocused.size_pos u
+        simp [RawFocused.size]; omega
+      · have := RawFocused.le_size_of_hasNeu u needle hu
+        have := RawFocused.size_pos t
+        simp [RawFocused.size]; omega
+  | .lam t, needle, h => by
+      simp [RawFocused.hasNeu] at h
+      have := RawFocused.le_size_of_hasNeu t needle h
+      simp [RawFocused.size]; omega
+  | .case s t u, needle, h => by
+      simp only [RawFocused.hasNeu] at h
+      cases hs : RawNeu.hasNeu s needle with
+      | true =>
+          have := RawNeu.le_size_of_hasNeu s needle hs
+          have := RawFocused.size_pos t
+          have := RawFocused.size_pos u
+          simp [RawFocused.size]; omega
+      | false =>
+          cases ht : RawFocused.hasNeu t needle with
+          | true =>
+              have := RawFocused.le_size_of_hasNeu t needle ht
+              have := RawNeu.size_pos s
+              have := RawFocused.size_pos u
+              simp [RawFocused.size]; omega
+          | false =>
+              simp [hs, ht, Bool.or_eq_true_iff] at h
+              have := RawFocused.le_size_of_hasNeu u needle h
+              have := RawNeu.size_pos s
+              have := RawFocused.size_pos t
+              simp [RawFocused.size]; omega
+  | .abort n, needle, h => by
+      simp [RawFocused.hasNeu] at h
+      have := RawNeu.le_size_of_hasNeu n needle h
+      simp [RawFocused.size]; omega
+  | .pos p, needle, h => by
+      simp [RawFocused.hasNeu] at h
+      have := RawPos.le_size_of_hasNeu p needle h
+      simp [RawFocused.size]; omega
+  | .neg n, needle, h => by
+      simp [RawFocused.hasNeu] at h
+      have := RawNeu.le_size_of_hasNeu n needle h
+      simp [RawFocused.size]; omega
+  | .letPos n t, needle, h => by
+      simp [RawFocused.hasNeu, Bool.or_eq_true_iff] at h
+      rcases h with hn | ht
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        have := RawFocused.size_pos t
+        simp [RawFocused.size]; omega
+      · have := RawFocused.le_size_of_hasNeu t needle ht
+        have := RawNeu.size_pos n
+        simp [RawFocused.size]; omega
+  | .sat _ t, needle, h => by
+      simp [RawFocused.hasNeu] at h
+      have := RawFocused.le_size_of_hasNeu t needle h
+      simp [RawFocused.size]; omega
+end
+
+mutual
+theorem RawNeu.lt_size_of_hasNeu_ne : ∀ (hay needle : RawNeu),
+    RawNeu.hasNeu hay needle = true → hay ≠ needle →
+    RawNeu.size needle < RawNeu.size hay
+  | .var i, needle, h, hne => by
+      simp [RawNeu.hasNeu, beq_iff_eq] at h
+      exact absurd h hne
+  | .app n a, needle, h, hne => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn | ha
+      · exact absurd rfl hne
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+      · have := RawFocused.le_size_of_hasNeu a needle ha
+        have := RawNeu.size_pos n
+        simp [RawNeu.size]; omega
+  | .fst n, needle, h, hne => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn
+      · exact absurd rfl hne
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+  | .snd n, needle, h, hne => by
+      simp [RawNeu.hasNeu, Bool.or_eq_true_iff, beq_iff_eq] at h
+      rcases h with rfl | hn
+      · exact absurd rfl hne
+      · have := RawNeu.le_size_of_hasNeu n needle hn
+        simp [RawNeu.size]; omega
+end
+
+/-- Strict dependency strictly decreases size, so the schedule DAG is acyclic. -/
+theorem RawNeu.lt_size_of_dependsOn {outer inner : RawNeu}
+    (h : RawNeu.dependsOn outer inner = true) :
+    RawNeu.size inner < RawNeu.size outer := by
+  simp [RawNeu.dependsOn, Bool.and_eq_true, bne_iff_ne] at h
+  exact RawNeu.lt_size_of_hasNeu_ne outer inner h.2 h.1
+
 mutual
 def NegNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → RawNeu
   | .var x => .var x.toRawIdx

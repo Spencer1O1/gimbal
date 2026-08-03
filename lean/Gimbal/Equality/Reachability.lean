@@ -64,6 +64,10 @@ def ReachCell.simplyDeducible (c : ReachCell) : Bool :=
 def ReachCell.usesNew (c : ReachCell) : Bool :=
   c.newWitness.isSome
 
+/-- Has a recorded old-only derivation (independent of the uses-new slot). -/
+def ReachCell.oldDeducible (c : ReachCell) : Bool :=
+  c.oldWitness.isSome
+
 /-- Preferred witness: uses-new if present, otherwise old-only. -/
 def ReachCell.witness (c : ReachCell) : Option Witness :=
   match c.newWitness with
@@ -312,6 +316,16 @@ def ReachState.discover {n : Nat} (σ : ReachState n) (i : Nat) (usesNew : Bool)
   | none => σ
   | some A => (σ.setCell i ((σ.getCell i).record usesNew w)).markInconsistentIf A
 
+/--
+Fire a rule into both provenance slots when warranted: once under an old-only
+premise bundle, and once when a uses-new premise participates. Recording one
+slot never clears the other, so overlap keeps both facts.
+-/
+def ReachState.discoverDual {n : Nat} (σ : ReachState n) (i : Nat)
+    (oldOk newOk : Bool) (w : Witness) : ReachState n :=
+  let σ₁ := if oldOk then σ.discover i false w else σ
+  if newOk then σ₁.discover i true w else σ₁
+
 /-- Mark a context hypothesis as retrievable (and deducible) at its provenance. -/
 def ReachState.markHyp {n : Nat} (σ : ReachState n) (Γ : ReachCtx n) (hypIdx : Nat) :
     ReachState n :=
@@ -355,9 +369,11 @@ def hypAppRule (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) (Arg Ret : Object
     ReachState n :=
   match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
   | some aIdx, some rIdx =>
-      if (σ.getCell aIdx).simplyDeducible then
-        σ.discover rIdx ((σ.getCell aIdx).usesNew || Γ.isNew i) (.app i aIdx)
-      else σ
+      σ.discoverDual rIdx
+        ((σ.getCell aIdx).oldDeducible && !Γ.isNew i)
+        ((σ.getCell aIdx).simplyDeducible &&
+          ((σ.getCell aIdx).usesNew || Γ.isNew i))
+        (.app i aIdx)
   | _, _ => σ
 
 /-- Close under the hypothesis at index `i`. -/
@@ -372,14 +388,18 @@ def prodTypeRule (σ : ReachState n) (ti : Nat) (L R : Object n) : ReachState n 
   if (σ.getCell ti).simplyDeducible then
     match σ.findTypeIdx L, σ.findTypeIdx R with
     | some lIdx, some rIdx =>
-        (σ.discover lIdx (σ.getCell ti).usesNew (.fst ti)).discover rIdx
-          (σ.getCell ti).usesNew (.snd ti)
+        (σ.discoverDual lIdx (σ.getCell ti).oldDeducible (σ.getCell ti).usesNew
+          (.fst ti)).discoverDual rIdx
+          (σ.getCell ti).oldDeducible (σ.getCell ti).usesNew (.snd ti)
     | _, _ => σ
   else
     match σ.findTypeIdx L, σ.findTypeIdx R with
     | some lIdx, some rIdx =>
         if (σ.getCell lIdx).simplyDeducible && (σ.getCell rIdx).simplyDeducible then
-          σ.discover ti ((σ.getCell lIdx).usesNew || (σ.getCell rIdx).usesNew) .eta
+          σ.discoverDual ti
+            ((σ.getCell lIdx).oldDeducible && (σ.getCell rIdx).oldDeducible)
+            ((σ.getCell lIdx).usesNew || (σ.getCell rIdx).usesNew)
+            .eta
         else σ
     | _, _ => σ
 
@@ -389,7 +409,7 @@ def expEtaRule (σ : ReachState n) (ti : Nat) (Ret : Object n) : ReachState n :=
     match σ.findTypeIdx Ret with
     | some rIdx =>
         if (σ.getCell rIdx).simplyDeducible then
-          σ.discover ti (σ.getCell rIdx).usesNew .eta
+          σ.discoverDual ti (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew .eta
         else σ
     | none => σ
   else σ
@@ -400,7 +420,9 @@ def expAppRule (σ : ReachState n) (ti : Nat) (Arg Ret : Object n) : ReachState 
     match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
     | some aIdx, some rIdx =>
         if (σ.getCell aIdx).simplyDeducible then
-          σ.discover rIdx ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+          σ.discoverDual rIdx
+            ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+            ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
             (.appTy ti aIdx)
         else σ
     | _, _ => σ
@@ -412,9 +434,11 @@ def coprodTypeRule (σ : ReachState n) (ti : Nat) (L R : Object n) : ReachState 
     match σ.findTypeIdx L, σ.findTypeIdx R with
     | some lIdx, some rIdx =>
         if (σ.getCell lIdx).simplyDeducible then
-          σ.discover ti (σ.getCell lIdx).usesNew (.inl lIdx)
+          σ.discoverDual ti (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+            (.inl lIdx)
         else if (σ.getCell rIdx).simplyDeducible then
-          σ.discover ti (σ.getCell rIdx).usesNew (.inr rIdx)
+          σ.discoverDual ti (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+            (.inr rIdx)
         else σ
     | _, _ => σ
   else σ
@@ -477,11 +501,24 @@ theorem seedHypRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) :
     · exact ReachState.Le.refl σ
   · exact ReachState.Le.refl σ
 
+theorem ReachState.le_discoverDual (σ : ReachState n) (i : Nat) (oldOk newOk : Bool)
+    (w : Witness) : ReachState.Le σ (σ.discoverDual i oldOk newOk w) := by
+  unfold ReachState.discoverDual
+  split
+  · split
+    · exact (ReachState.le_discover _ _ _ _).trans (ReachState.le_discover _ _ _ _)
+    · exact ReachState.le_discover _ _ _ _
+  · split
+    · exact ReachState.le_discover _ _ _ _
+    · exact ReachState.Le.refl _
+
 local macro "reach_mono" : tactic =>
   `(tactic| repeat' first
       | exact ReachState.Le.refl _
+      | exact ReachState.le_discoverDual _ _ _ _ _
+      | refine (ReachState.le_discoverDual _ _ _ _ _).trans ?_
       | exact ReachState.le_discover _ _ _ _
-      | exact (ReachState.le_discover _ _ _ _).trans (ReachState.le_discover _ _ _ _)
+      | refine (ReachState.le_discover _ _ _ _).trans ?_
       | split)
 
 theorem unitEtaRule_le (σ : ReachState n) : ReachState.Le σ (unitEtaRule σ) := by
@@ -489,11 +526,17 @@ theorem unitEtaRule_le (σ : ReachState n) : ReachState.Le σ (unitEtaRule σ) :
 
 theorem hypProdRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) (L R : Object n) :
     ReachState.Le σ (hypProdRule Γ σ i L R) := by
-  unfold hypProdRule; reach_mono
+  unfold hypProdRule
+  split
+  · exact (ReachState.le_discover _ _ _ _).trans (ReachState.le_discover _ _ _ _)
+  · exact ReachState.Le.refl _
 
 theorem hypAppRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) (Arg Ret : Object n) :
     ReachState.Le σ (hypAppRule Γ σ i Arg Ret) := by
-  unfold hypAppRule; reach_mono
+  unfold hypAppRule
+  split
+  · exact ReachState.le_discoverDual _ _ _ _ _
+  · exact ReachState.Le.refl _
 
 theorem hypRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) :
     ReachState.Le σ (hypRule Γ σ i) := by
@@ -505,19 +548,52 @@ theorem hypRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) :
 
 theorem prodTypeRule_le (σ : ReachState n) (ti : Nat) (L R : Object n) :
     ReachState.Le σ (prodTypeRule σ ti L R) := by
-  unfold prodTypeRule; reach_mono
+  unfold prodTypeRule
+  split
+  · split
+    · exact (ReachState.le_discoverDual _ _ _ _ _).trans
+        (ReachState.le_discoverDual _ _ _ _ _)
+    · exact ReachState.Le.refl _
+  · split
+    · split
+      · exact ReachState.le_discoverDual _ _ _ _ _
+      · exact ReachState.Le.refl _
+    · exact ReachState.Le.refl _
 
 theorem expEtaRule_le (σ : ReachState n) (ti : Nat) (Ret : Object n) :
     ReachState.Le σ (expEtaRule σ ti Ret) := by
-  unfold expEtaRule; reach_mono
+  unfold expEtaRule
+  split
+  · split
+    · split
+      · exact ReachState.le_discoverDual _ _ _ _ _
+      · exact ReachState.Le.refl _
+    · exact ReachState.Le.refl _
+  · exact ReachState.Le.refl _
 
 theorem expAppRule_le (σ : ReachState n) (ti : Nat) (Arg Ret : Object n) :
     ReachState.Le σ (expAppRule σ ti Arg Ret) := by
-  unfold expAppRule; reach_mono
+  unfold expAppRule
+  split
+  · split
+    · split
+      · exact ReachState.le_discoverDual _ _ _ _ _
+      · exact ReachState.Le.refl _
+    · exact ReachState.Le.refl _
+  · exact ReachState.Le.refl _
 
 theorem coprodTypeRule_le (σ : ReachState n) (ti : Nat) (L R : Object n) :
     ReachState.Le σ (coprodTypeRule σ ti L R) := by
-  unfold coprodTypeRule; reach_mono
+  unfold coprodTypeRule
+  split
+  · split
+    · split
+      · exact ReachState.le_discoverDual _ _ _ _ _
+      · split
+        · exact ReachState.le_discoverDual _ _ _ _ _
+        · exact ReachState.Le.refl _
+    · exact ReachState.Le.refl _
+  · exact ReachState.Le.refl _
 
 theorem typeRule_le (σ : ReachState n) (ti : Nat) :
     ReachState.Le σ (typeRule σ ti) := by

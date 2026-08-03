@@ -48,9 +48,14 @@ import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon
 import Gimbal.Equality.ICCWell
 import Gimbal.Equality.ICCIdem
+import Gimbal.Equality.ICCOrigin
+import Gimbal.Equality.ICCCode
+import Gimbal.Equality.ICCEncode
+import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.Compare
 import Gimbal.Equality.Reference
 import Gimbal.Equality.ReferenceSound
 import Gimbal.Equality.ReferenceWell
+import Gimbal.Equality.Completeness
 import Gimbal.Equality.Fixtures
 import Gimbal.Fixtures
