@@ -84,6 +84,71 @@ theorem encodeICCGo_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
   have hpeel := peelCaseOuter_case_lam ε e.origin x t u hit
   simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
 
+private theorem List.foldl_add_nat {α : Type _} (ws : List α) (f : α → Nat) (a : Nat) :
+    ws.foldl (fun acc x => acc + f x) a =
+      a + ws.foldl (fun acc x => acc + f x) 0 := by
+  induction ws generalizing a with
+  | nil => rfl
+  | cons x xs ih =>
+      have hx :
+          (x :: xs).foldl (fun acc y => acc + f y) 0 =
+            f x + xs.foldl (fun acc y => acc + f y) 0 := by
+        simpa [List.foldl, Nat.zero_add] using ih (f x)
+      change xs.foldl (fun acc y => acc + f y) (a + f x) =
+        a + (x :: xs).foldl (fun acc y => acc + f y) 0
+      rw [ih (a + f x), hx]
+      omega
+
+private theorem worklistWeight_cons (e : PosEntry sig) (ws : List (PosEntry sig)) :
+    worklistWeight (e :: ws) = objectWeight e.ty + worklistWeight ws := by
+  simp only [worklistWeight, List.foldl]
+  have h := List.foldl_add_nat ws (fun e => objectWeight e.ty) (objectWeight e.ty)
+  simpa [Nat.zero_add] using h
+
+private theorem encodeMeasure_cons_pos (e : PosEntry sig) (ws : List (PosEntry sig))
+    (goal : Object sig.nBases) :
+    0 < encodeMeasure (e :: ws) goal := by
+  have he : 0 < objectWeight e.ty := objectWeight_pos _
+  have hg : 0 < objectWeight goal := objectWeight_pos _
+  rw [encodeMeasure, worklistWeight_cons]
+  omega
+
+/-- `ICCEq.case_pair` preserves `encodeICC` when the worklist head is that coprod. -/
+theorem encodeICC_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICC ε (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
+      encodeICC ε (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) := by
+  unfold encodeICC
+  rw [hws]
+  have hpos := encodeMeasure_cons_pos e ws (.prod C D)
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using
+    encodeICCGo_case_pair fuel e ws ε 0 0 x t₁ t₂ u₁ u₂ hty hit
+
+/-- `ICCEq.case_lam` preserves `encodeICC` when the worklist head is that coprod. -/
+theorem encodeICC_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICC ε (.case (.var x) (.lam t) (.lam u)) =
+      encodeICC ε
+        (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+          (InvTm.rename Rename.exchange t)
+          (InvTm.rename Rename.exchange u))) := by
+  unfold encodeICC
+  rw [hws]
+  have hpos := encodeMeasure_cons_pos e ws (.exp Arg Ret)
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using
+    encodeICCGo_case_lam fuel e ws ε 0 0 x t u hty hit
+
 /-! ### Open obligations (design E remaining work)
 
 Tracked as goal Props in `Completeness.lean`:
