@@ -18,10 +18,15 @@ namespace Equality
 
 variable {sig : Signature}
 
-/-- Structural equality of ICC-canonical spines (sat metadata already erased). -/
+/--
+Structural equality of ICC-canonical spines (sat metadata already erased).
+
+Typed rather than raw: `InvTm.eq_of_beq` turns a successful comparison into an
+equality of terms, which is what the soundness proof consumes.
+-/
 def referenceStructEq {Γ : Ctx sig} {A : Object sig.nBases}
     (t u : InvTm Γ A) : Bool :=
-  structurallyEqual (canonicalize t) (canonicalize u)
+  InvTm.beq (canonicalize t) (canonicalize u)
 
 mutual
 /--
@@ -137,9 +142,9 @@ def referenceInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
   | fuel + 1 =>
     match t, u with
     | .unit, .unit => .equal
-    | .abort n, .abort m =>
-        -- Prefer ICC abort collapse; still require matching proofs for now.
-        if NegNeu.toRaw n == NegNeu.toRaw m then .equal else .different
+    | .abort _, .abort _ =>
+        -- `never` is initial: any two terms under a proof of it are equal.
+        .equal
     | .pair t₁ t₂, .pair u₁ u₂ =>
         (referenceInvRec fuel hyps goal t₁ u₁).and
           (referenceInvRec fuel hyps goal t₂ u₂)
@@ -152,7 +157,7 @@ def referenceInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
           (InvTm.castCtx hctx.symm t₁)
           (InvTm.castCtx hctx.symm u₁)
     | .case (A := L) (B := R) n t₁ t₂, .case (A := L') (B := R') m u₁ u₂ =>
-        if NegNeu.toRaw n != NegNeu.toRaw m then .different
+        if !NegNeu.beq n m then .different
         else if hL : L = L' then
           if hR : R = R' then
             let hypsL := hyps.push L
@@ -174,7 +179,7 @@ def referenceInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
           else .different
         else .different
     | .foc (.letPos (P := P) n t₁), .foc (.letPos (P := P') m u₁) =>
-        if NegNeu.toRaw n != NegNeu.toRaw m then .different
+        if !NegNeu.beq n m then .different
         else if hP : P = P' then
           let hyps' := hyps.push P
           have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P :=
@@ -186,9 +191,9 @@ def referenceInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
             (InvTm.castCtx hctx.symm u₁')
         else .different
     | .foc (.pos (.done p)), .foc (.pos (.done q)) =>
-        if PosNeu.toRaw p == PosNeu.toRaw q then .equal else .different
+        if PosNeu.beq p q then .equal else .different
     | .foc (.neg (.done n)), .foc (.neg (.done m)) =>
-        if NegNeu.toRaw n == NegNeu.toRaw m then .equal else .different
+        if NegNeu.beq n m then .equal else .different
     | .foc (.sat (.mk _ t₁)), .foc (.sat (.mk _ u₁)) =>
         referenceInvRec fuel hyps goal t₁ u₁
     | _, _ =>
