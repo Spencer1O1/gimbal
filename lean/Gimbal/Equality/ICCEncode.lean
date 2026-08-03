@@ -149,6 +149,58 @@ theorem encodeICC_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
   simpa [hm] using
     encodeICCGo_case_lam fuel e ws ε 0 0 x t u hty hit
 
+/-- `ICCEq.case_case` preserves codes when the forced head origin is `xs`. -/
+theorem encodeICCGo_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
+    (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
+    (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
+    (hty : e.ty = .coprod A B) (hit : ε xs = e.origin)
+    (miss : (ε xt == e.origin) = false) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.case (.var xs)
+          (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+          (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂)) =
+      encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.case (.var xt)
+          (.case (NegNeu.weaken (B := C) (.var xs))
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+          (.case (NegNeu.weaken (B := D) (.var xs))
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂))) := by
+  have hforce := forcedRule_cons_coprod e ws hty E
+  have hpeel := peelCaseOuter_case_case ε e.origin xs xt t₁ t₂ u₁ u₂ hit miss
+  simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
+
+theorem encodeICC_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
+    (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
+    (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε xs = e.origin)
+    (miss : (ε xt == e.origin) = false) :
+    encodeICC ε
+        (.case (.var xs)
+          (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+          (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂)) =
+      encodeICC ε
+        (.case (.var xt)
+          (.case (NegNeu.weaken (B := C) (.var xs))
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+          (.case (NegNeu.weaken (B := D) (.var xs))
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂))) := by
+  unfold encodeICC
+  rw [hws]
+  have hpos := encodeMeasure_cons_pos e ws E
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using
+    encodeICCGo_case_case fuel e ws ε 0 0 xs xt t₁ t₂ u₁ u₂ hty hit miss
+
 /-! ### Open obligations (design E remaining work)
 
 Tracked as goal Props in `Completeness.lean`:

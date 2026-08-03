@@ -644,5 +644,177 @@ theorem peelCaseOuter_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
           peelCaseOuter_lam_cases ε o x t u hit],
     peelCaseOuter_case_var_hit ε o x (.lam t) (.lam u) hit⟩
 
+/-! ### Peel agreement for ICC `case_case` -/
+
+theorem NegNeu.beq_weaken_var_self {Γ : Ctx sig} {A B : Object sig.nBases}
+    (x : Var Γ A) :
+    NegNeu.beq (NegNeu.weaken (B := B) (.var x))
+      (NegNeu.weaken (B := B) (.var x)) = true := by
+  simp [NegNeu.beq, NegNeu.weaken, NegNeu.rename, Rename.weaken]
+
+/-- Weakening the same variable under different binders preserves raw-index equality. -/
+theorem NegNeu.beq_weaken_var_cross {Γ : Ctx sig} {P L R : Object sig.nBases}
+    (x : Var Γ P) :
+    NegNeu.beq (NegNeu.weaken (B := L) (.var x))
+      (NegNeu.weaken (B := R) (.var x)) = true := by
+  simp [NegNeu.beq, NegNeu.weaken, NegNeu.rename, Rename.weaken, Var.toRawIdx]
+
+theorem originOfVar_var {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (x : Var Γ A) :
+    originOfVar ε (.var x) = some (ε x) := rfl
+
+/--
+When the outer scrutinee misses the forced origin but both branches expose the
+same weakened variable of that origin, peel reconstructs the exchanged outer case.
+-/
+theorem peelCaseOuterGo_case_miss_var {Γ : Ctx sig}
+    {A B C D E : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (xt : Var Γ (.coprod C D)) (xs : Var Γ (.coprod A B))
+    (a₁ : InvTm (Γ ▻ C ▻ A) E) (b₁ : InvTm (Γ ▻ C ▻ B) E)
+    (a₂ : InvTm (Γ ▻ D ▻ A) E) (b₂ : InvTm (Γ ▻ D ▻ B) E)
+    (miss : (ε xt == o) = false) (hit : ε xs = o)
+    (hL :
+      peelCaseOuterGo fuel
+          (OriginEnv.weaken (A := C) ε (.split (ε xt) false)) o
+          (.case (NegNeu.weaken (B := C) (.var xs)) a₁ b₁) =
+        some ⟨A, B, NegNeu.weaken (B := C) (.var xs), a₁, b₁⟩)
+    (hR :
+      peelCaseOuterGo fuel
+          (OriginEnv.weaken (A := D) ε (.split (ε xt) true)) o
+          (.case (NegNeu.weaken (B := D) (.var xs)) a₂ b₂) =
+        some ⟨A, B, NegNeu.weaken (B := D) (.var xs), a₂, b₂⟩) :
+    peelCaseOuterGo (fuel + 1) ε o
+        (.case (.var xt)
+          (.case (NegNeu.weaken (B := C) (.var xs)) a₁ b₁)
+          (.case (NegNeu.weaken (B := D) (.var xs)) a₂ b₂)) =
+      some ⟨A, B, .var xs,
+        .case (NegNeu.weaken (B := A) (.var xt))
+          (InvTm.rename Rename.exchange a₁)
+          (InvTm.rename Rename.exchange a₂),
+        .case (NegNeu.weaken (B := B) (.var xt))
+          (InvTm.rename Rename.exchange b₁)
+          (InvTm.rename Rename.exchange b₂)⟩ := by
+  simp only [peelCaseOuterGo, miss, Bool.false_eq_true, ↓reduceIte, hL, hR]
+  simp [NegNeu.beq_weaken_var_cross (L := C) (R := D) xs,
+    NegNeu.unweaken_weaken_var (Arg := C) xs, originOfVar_var, hit]
+
+/-- Both sides of `ICCEq.case_case` peel to the same outer case on `xs`. -/
+theorem peelCaseOuter_case_case {Γ : Ctx sig}
+    {A B C D E : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
+    (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
+    (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
+    (hit : ε xs = o) (miss : (ε xt == o) = false) :
+    peelCaseOuter ε o
+        (.case (.var xs)
+          (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+          (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂)) =
+      peelCaseOuter ε o
+        (.case (.var xt)
+          (.case (NegNeu.weaken (B := C) (.var xs))
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+          (.case (NegNeu.weaken (B := D) (.var xs))
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂))) ∧
+    peelCaseOuter ε o
+        (.case (.var xs)
+          (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+          (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂)) =
+      some ⟨A, B, .var xs,
+        .case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂,
+        .case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂⟩ := by
+  have hX := peelCaseOuter_case_var_hit ε o xs
+    (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+    (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂) hit
+  refine ⟨?agree, hX⟩
+  rw [hX]
+  unfold peelCaseOuter
+  set tY :=
+    (.case (.var xt)
+      (.case (NegNeu.weaken (B := C) (.var xs))
+        (InvTm.rename Rename.exchange t₁)
+        (InvTm.rename Rename.exchange u₁))
+      (.case (NegNeu.weaken (B := D) (.var xs))
+        (InvTm.rename Rename.exchange t₂)
+        (InvTm.rename Rename.exchange u₂)) : InvTm Γ E)
+  have hsz :
+      InvTm.size tY =
+        NegNeu.size (.var xt) +
+          InvTm.size (.case (NegNeu.weaken (B := C) (.var xs))
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁)) +
+          InvTm.size (.case (NegNeu.weaken (B := D) (.var xs))
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂)) + 1 := by
+    simp [tY, InvTm.size]
+  have hpos : 0 < InvTm.size tY := by simp only [hsz, NegNeu.size]; omega
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  have hLsz :
+      InvTm.size (.case (NegNeu.weaken (B := C) (.var xs))
+        (InvTm.rename Rename.exchange t₁)
+        (InvTm.rename Rename.exchange u₁)) ≤ fuel := by
+    simp only [hsz, NegNeu.size] at hm; omega
+  have hRsz :
+      InvTm.size (.case (NegNeu.weaken (B := D) (.var xs))
+        (InvTm.rename Rename.exchange t₂)
+        (InvTm.rename Rename.exchange u₂)) ≤ fuel := by
+    simp only [hsz, NegNeu.size] at hm; omega
+  have hitL :
+      OriginEnv.weaken (A := C) ε (.split (ε xt) false) (.there xs) = o := by
+    simpa [OriginEnv.weaken, OriginEnv.snoc] using hit
+  have hitR :
+      OriginEnv.weaken (A := D) ε (.split (ε xt) true) (.there xs) = o := by
+    simpa [OriginEnv.weaken, OriginEnv.snoc] using hit
+  have hLpos := size_case_var_pos (Γ := Γ ▻ C) (.there xs)
+    (InvTm.rename Rename.exchange t₁) (InvTm.rename Rename.exchange u₁)
+  have hRpos := size_case_var_pos (Γ := Γ ▻ D) (.there xs)
+    (InvTm.rename Rename.exchange t₂) (InvTm.rename Rename.exchange u₂)
+  have hL :
+      peelCaseOuterGo fuel
+          (OriginEnv.weaken (A := C) ε (.split (ε xt) false)) o
+          (.case (NegNeu.weaken (B := C) (.var xs))
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁)) =
+        some ⟨A, B, NegNeu.weaken (B := C) (.var xs),
+          InvTm.rename Rename.exchange t₁,
+          InvTm.rename Rename.exchange u₁⟩ := by
+    have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hLpos hLsz
+    obtain ⟨fuel', rfl⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+    simpa [NegNeu.weaken, NegNeu.rename, Rename.weaken] using
+      peelCaseOuterGo_case_var_hit fuel'
+        (OriginEnv.weaken (A := C) ε (.split (ε xt) false)) o (.there xs)
+        (InvTm.rename Rename.exchange t₁) (InvTm.rename Rename.exchange u₁) hitL
+  have hR :
+      peelCaseOuterGo fuel
+          (OriginEnv.weaken (A := D) ε (.split (ε xt) true)) o
+          (.case (NegNeu.weaken (B := D) (.var xs))
+            (InvTm.rename Rename.exchange t₂)
+            (InvTm.rename Rename.exchange u₂)) =
+        some ⟨A, B, NegNeu.weaken (B := D) (.var xs),
+          InvTm.rename Rename.exchange t₂,
+          InvTm.rename Rename.exchange u₂⟩ := by
+    have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hRpos hRsz
+    obtain ⟨fuel', rfl⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+    simpa [NegNeu.weaken, NegNeu.rename, Rename.weaken] using
+      peelCaseOuterGo_case_var_hit fuel'
+        (OriginEnv.weaken (A := D) ε (.split (ε xt) true)) o (.there xs)
+        (InvTm.rename Rename.exchange t₂) (InvTm.rename Rename.exchange u₂) hitR
+  have hgo :=
+    peelCaseOuterGo_case_miss_var fuel ε o xt xs
+      (InvTm.rename Rename.exchange t₁) (InvTm.rename Rename.exchange u₁)
+      (InvTm.rename Rename.exchange t₂) (InvTm.rename Rename.exchange u₂)
+      miss hit hL hR
+  -- Exchange involution recovers the original leaves.
+  have hgo' :
+      peelCaseOuterGo (fuel + 1) ε o tY =
+        some ⟨A, B, .var xs,
+          .case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂,
+          .case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂⟩ := by
+    simpa [tY, InvTm.rename_exchange_exchange] using hgo
+  simpa [tY, hm] using hgo'.symm
+
 end Equality
 end Gimbal
