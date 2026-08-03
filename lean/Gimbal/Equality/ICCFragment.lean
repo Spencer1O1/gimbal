@@ -3,15 +3,22 @@
 
   Encoding is not required on arbitrary `InvTm`. The reference comparator only
   feeds encode terms that have completed a shared-schedule saturation phase
-  under a phase-entry origin environment. This module names that fragment and
-  records that the reference pipeline produces it.
+  under a phase-entry origin environment.
 
-  `ReferenceScheduleOk` / `ReferenceProduced` are operational
-  (`pairObs` / `applyPairObs` on the **raw** saturate result) plus phase-entry
-  `EncodeReady` of the pre-schedule continuations. Successful schedule
-  application preserves readiness (`encodeReady_applyPairObs` in `ICCTotal`).
-  `canonicalize` remains in `referenceCompare` wiring; it is not part of the
-  encode characterization.
+  Two production notions are kept visibly separate:
+
+  * `RawReferenceProduced` — only operational evidence (`pairObs` /
+    `applyPairObs`, with well-focused continuations and the old-invariant
+    check). No `EncodeReady`.
+  * `CertifiedReferenceProduced` — raw production plus `PhaseEncodeReady`.
+
+  The required bridge is `RawReferenceProduced → PhaseEncodeReady` (equivalently
+  raw → certified). Until that lands, `ValidEncodeFragment` may still stash
+  readiness; `EncodeTotal_holds` that projects the stash is **provisional** and
+  must not drive `referenceCompare` / characterization.
+
+  `canonicalize` remains on the compare path only; it is not part of encode
+  characterization.
 -/
 
 import Gimbal.Equality.ICCCode
@@ -44,11 +51,11 @@ def PhaseEncodeReady {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (OriginEnv.ofHyps hyps) 0 0 t
 
 /--
-Operational shared-schedule saturation: `pairObs` built a schedule,
-`applyPairObs` returned `t'`, and both pre-schedule continuations are
-phase-entry encode-ready (so schedule preservation can lift readiness to `t'`).
+Operational shared-schedule saturation only: `pairObs` built a schedule and
+`applyPairObs` returned `t'`. Continuations are well-focused; **no**
+`EncodeReady` is stored here.
 -/
-def ReferenceScheduleOk {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+def RawReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t' : InvTm (Ctx.ofHyps hyps) A) : Prop :=
   ∃ (newFrom : Nat) (goal : Object sig.nBases) (fuel : Nat)
       (entries : Array (PairEntry sig hyps)) (σ : ReachState sig.nBases)
@@ -56,38 +63,59 @@ def ReferenceScheduleOk {hyps : Array (Object sig.nBases)} {A : Object sig.nBase
     checkOldInvariant (ReachCtx.oldPrefix ⟨hyps, newFrom⟩) goal = true ∧
       WellInv t₀ ∧
       WellInv u₀ ∧
-      PhaseEncodeReady t₀ ∧
-      PhaseEncodeReady u₀ ∧
       pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries σ ∧
       (applyPairObs (saturationBudget fuel entries.size) σ hyps entries t₀ = .ok t' ∨
         applyPairObs (saturationBudget fuel entries.size) σ hyps entries u₀ = .ok t')
 
 /--
-Ready-to-encode production certificate: schedule success with ready
-continuations. Prefer raw `applyPairObs` over a canonicalize image.
+Raw production plus encode alignment of the schedule result.
+Inhabited from `RawReferenceProduced` once the readiness loop closes.
 -/
-def ReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+def CertifiedReferenceProduced {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  RawReferenceProduced t ∧ PhaseEncodeReady t
+
+/--
+Historical name for the operational schedule certificate (raw only).
+Prefer `RawReferenceProduced` in new proofs.
+-/
+abbrev ReferenceScheduleOk {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t' : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  RawReferenceProduced t'
+
+/-- Alias used by older notes: raw schedule production. -/
+abbrev ReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
-  ReferenceScheduleOk t
+  RawReferenceProduced t
 
 /-- Historical alias. -/
 abbrev ReferenceSaturated {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
-  ReferenceProduced t
+  RawReferenceProduced t
 
 /--
-Concrete valid fragment for `encodeICC` / `EncodeTotal`.
+Concrete valid fragment for `encodeICC` / provisional `EncodeTotal`.
 
 * **phase** — `Ctx.ofHyps` (in the type)
 * **scoping** — `WellInv`
-* **saturation** — `ReferenceProduced` (schedule + ready conts)
-* **readiness** — `PhaseEncodeReady` on the schedule result (encode alignment)
+* **raw production** — `RawReferenceProduced`
+* **readiness** — `PhaseEncodeReady` (**provisional stash**; must be derived by
+  `RawReferenceProduced → PhaseEncodeReady` before final totality)
+
+Final fragment should be `well` + `CertifiedReferenceProduced` with no separate
+`ready` field.
 -/
 structure ValidEncodeFragment {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} (t : InvTm (Ctx.ofHyps hyps) A) : Prop where
   well : WellInv t
-  produced : ReferenceProduced t
+  raw : RawReferenceProduced t
   ready : PhaseEncodeReady t
+
+/-- Certified view of a (provisional) valid fragment. -/
+theorem ValidEncodeFragment.certified {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
+    (h : ValidEncodeFragment t) : CertifiedReferenceProduced t :=
+  ⟨h.raw, h.ready⟩
 
 /-- Phase-entry environment used to encode a valid-fragment term. -/
 def ValidEncodeFragment.originEnv {hyps : Array (Object sig.nBases)}
@@ -104,23 +132,42 @@ theorem ValidEncodeFragment.adequate {hyps : Array (Object sig.nBases)}
 theorem ValidEncodeFragment.saturated {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
     (h : ValidEncodeFragment t) : ReferenceSaturated t :=
-  h.produced
+  h.raw
 
-/-! ### Reference pipeline produces the fragment -/
-
-/--
-Package a schedule result once readiness of `t'` is known (from
-`encodeReady_applyPairObs` once conts are phase-ready).
--/
+/-- Package once readiness of `t'` is known (provisional; prefer certify). -/
 theorem validEncodeFragment_mk {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {t' : InvTm (Ctx.ofHyps hyps) A}
-    (hw : WellInv t') (hs : ReferenceScheduleOk t') (hr : PhaseEncodeReady t') :
+    (hw : WellInv t') (hr : RawReferenceProduced t') (hready : PhaseEncodeReady t') :
     ValidEncodeFragment t' :=
-  ⟨hw, hs, hr⟩
+  ⟨hw, hr, hready⟩
+
+/-- From a certified production witness. -/
+theorem validEncodeFragment_of_certified {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
+    (hw : WellInv t) (hc : CertifiedReferenceProduced t) :
+    ValidEncodeFragment t :=
+  ⟨hw, hc.1, hc.2⟩
+
+/-! ### Reference pipeline produces raw / provisional certified fragments -/
 
 /--
-One reference phase saturating the left subject, given phase-ready inputs and
-a proved-ready saturate result.
+Raw certificate for one left-saturating reference phase (no readiness).
+-/
+theorem rawReferenceProduced_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
+    {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
+    (hinv : checkOldInvariant Γ.oldPrefix goal = true)
+    (ht : WellInv t) (hu : WellInv u)
+    (hobs : pairObs Γ goal t u = .ok entries σ)
+    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
+      .ok t') :
+    RawReferenceProduced t' :=
+  ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hobs, Or.inl h⟩
+
+/--
+Provisional: left phase with an explicit readiness proof of `t'`.
+Replace `hready'` by `encodeReady_of_rawReferenceProduced` once the loop closes.
 -/
 theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
@@ -128,7 +175,6 @@ theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBase
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hreadyt : PhaseEncodeReady t) (hreadyu : PhaseEncodeReady u)
     (hobs : pairObs Γ goal t u = .ok entries σ)
     (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
       .ok t')
@@ -136,21 +182,33 @@ theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBase
     ValidEncodeFragment t' :=
   validEncodeFragment_mk
     (wellInv_saturate_pairObs (saturationBudget fuel entries.size) ht hu hobs ht h)
-    ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hreadyt, hreadyu, hobs,
-      Or.inl h⟩
+    (rawReferenceProduced_referencePhase fuel hinv ht hu hobs h)
     hready'
 
-/-- Raw saturate result with readiness is a valid fragment. -/
+/-- Raw saturate result packaged with an explicit readiness proof. -/
 theorem validEncodeFragment_scheduleOk {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {t' : InvTm (Ctx.ofHyps hyps) A}
-    (hw : WellInv t') (hs : ReferenceScheduleOk t') (hr : PhaseEncodeReady t') :
+    (hw : WellInv t') (hr : RawReferenceProduced t') (hready : PhaseEncodeReady t') :
     ValidEncodeFragment t' :=
-  validEncodeFragment_mk hw hs hr
+  validEncodeFragment_mk hw hr hready
 
 /--
-One reference phase saturating the right subject, given phase-ready inputs and
-a proved-ready saturate result.
+Raw certificate for one right-saturating reference phase.
 -/
+theorem rawReferenceProduced_referencePhase_right (fuel : Nat)
+    {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
+    {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {u' : InvTm (Ctx.ofHyps Γ.hyps) A}
+    (hinv : checkOldInvariant Γ.oldPrefix goal = true)
+    (ht : WellInv t) (hu : WellInv u)
+    (hobs : pairObs Γ goal t u = .ok entries σ)
+    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u =
+      .ok u') :
+    RawReferenceProduced u' :=
+  ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hobs, Or.inr h⟩
+
+/-- Provisional right-phase packaging with stashed readiness of `u'`. -/
 theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
     {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
@@ -158,7 +216,6 @@ theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     {u' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hreadyt : PhaseEncodeReady t) (hreadyu : PhaseEncodeReady u)
     (hobs : pairObs Γ goal t u = .ok entries σ)
     (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u =
       .ok u')
@@ -166,8 +223,7 @@ theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     ValidEncodeFragment u' :=
   validEncodeFragment_mk
     (wellInv_saturate_pairObs (saturationBudget fuel entries.size) ht hu hobs hu h)
-    ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hreadyt, hreadyu, hobs,
-      Or.inr h⟩
+    (rawReferenceProduced_referencePhase_right fuel hinv ht hu hobs h)
     hready'
 
 /-- Canonicalize image of a schedule result remains well-focused (compare path). -/

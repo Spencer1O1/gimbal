@@ -119,11 +119,17 @@ theorem EncodeTotal_of_ready
     (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) rfl (hready t hv)
 
 /--
-`EncodeTotal` holds: every `ValidEncodeFragment` term carries `PhaseEncodeReady`,
-and `encodeReady_go_some` supplies a code.
+**Provisional** `EncodeTotal`: projects the stashed `ValidEncodeFragment.ready`
+field. Logically valid, but not semantic totality — readiness must still be
+derived by `RawReferenceProduced → PhaseEncodeReady` /
+`certifyReferenceProduced`. Do **not** use this to switch `referenceCompare`,
+prove characterization, or drop failure cases.
 -/
-theorem EncodeTotal_holds : EncodeTotal (sig := sig) :=
+theorem EncodeTotal_holds_provisional : EncodeTotal (sig := sig) :=
   EncodeTotal_of_ready fun {_hyps} {_A} _t hv => encodeReady_of_validEncodeFragment hv
+
+/-- Historical name for the provisional theorem; prefer `EncodeTotal_holds_provisional`. -/
+abbrev EncodeTotal_holds : EncodeTotal (sig := sig) := EncodeTotal_holds_provisional
 
 /-- Reflection / common-code soundness (design-E rigidity). -/
 abbrev EncodeIccReflect : Prop := EncodeIccReflectGoal (sig := sig)
@@ -229,10 +235,12 @@ Blocked / WIP:
    `Origin.cmp` ordering hyp < obs while `applyPairObs` nests atom obs outer
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
-3. ~~`EncodeTotal`~~ **Done** (`EncodeTotal_holds` via `encodeReady_of_validEncodeFragment`).
-   Fragment carries `PhaseEncodeReady`. Remaining to *inhabit* the fragment from
-   schedule alone: full `encodeReady_applyPairObs` (preservation from ready
-   conts) and phase-entry cont readiness from focus/translate
+3. `EncodeTotal` — **provisional only** (`EncodeTotal_holds_provisional` projects
+   stashed `ValidEncodeFragment.ready`). Required bridge:
+   `RawReferenceProduced → PhaseEncodeReady` (equivalently raw →
+   `CertifiedReferenceProduced`). Do not switch `referenceCompare` or claim
+   characterization until the stash is eliminated. WIP: `encodeReady_applyPairObs`
+   (ofHyps_push cast, peel/find? rekey, leftCoprod under letPos, coprod obs)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;

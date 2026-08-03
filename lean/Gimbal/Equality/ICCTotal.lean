@@ -1387,7 +1387,7 @@ theorem encodeIccStep_lam_cong {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
 
 /-! ### ValidEncodeFragment → EncodeReady → EncodeTotal -/
 
-/-- Projection: the fragment certificate stores phase-entry readiness. -/
+/-- Projection: provisional fragment still stashes phase-entry readiness. -/
 theorem encodeReady_of_validEncodeFragment {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
     (h : ValidEncodeFragment t) :
@@ -2260,23 +2260,29 @@ theorem encodeReady_applyPairObs_emptyEntries {hyps : Array (Object sig.nBases)}
       simp only [hempty] at hok
       exact encodeReady_applyPairObsGo_nil fuel σ cont hcont hok
 
-/-! ### Gaps (peel / full produced)
+/-! ### Gaps (RawReferenceProduced → PhaseEncodeReady)
+
+Required: `encodeReady_of_rawReferenceProduced` /
+`certifyReferenceProduced : RawReferenceProduced t → CertifiedReferenceProduced t`.
+Until then `ValidEncodeFragment.ready` is a provisional stash and
+`EncodeTotal_holds_provisional` is not semantic totality.
 
 * `leftCoprod_peel` / `leftCoprod_unitEta` rekey needs `find?` / `peelCaseOuter`
   under `rekeyHypToObs` (temp dig `.obs 0` ≠ shifted obs slots).
-* Closing `applyObsNeu` still needs `EncodeReady` cast along `Ctx.ofHyps_push`
+* Closing `applyObsNeu` needs `EncodeReady` cast along `Ctx.ofHyps_push`
   so `encodeReady_newest_hyp_to_obs_noPeel` + `encodeReadyNoPeel_of_base_prefix`
   feed `encodeReady_applyObsNeu_atom_basesOnly` (body under `pushPos [] (.obs 0)`).
-* Full `phaseEncodeReady_of_produced` still open beyond empty schedule and
-  inconsistent abort-with-never.
-* Fragment still stores `ready` — not derived for all `ReferenceProduced`.
+* Coprod observation → outer `case` + ready branches.
+* Empty-schedule case needs cont readiness from `WellInv` (raw has no stash).
 -/
 
-/-- Partial: empty schedule or inconsistent abort with never-on-worklist. -/
-theorem phaseEncodeReady_of_produced_partial
+/--
+Partial readiness from **extra** case data (not from raw alone): empty schedule
+with a ready continuation, or inconsistent abort with never-on-worklist.
+-/
+theorem phaseEncodeReady_of_applyPairObs_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     {t : InvTm (Ctx.ofHyps hyps) A}
-    (_h : ReferenceProduced t)
     (hcase :
       (∃ (fuel : Nat) (σ : ReachState sig.nBases)
           (entries : Array (PairEntry sig hyps))
@@ -2306,6 +2312,21 @@ theorem phaseEncodeReady_of_produced_partial
       exact encodeReady_applyPairObs_inconsistent fuel σ entries cont hincons hok
         hws hpref hty
 
+/-- Goal Prop: raw operational production implies phase encode readiness. -/
+def EncodeReadyOfRawGoal : Prop :=
+  ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A),
+    RawReferenceProduced t → PhaseEncodeReady t
+
+/-- Goal Prop: raw → certified. -/
+def CertifyReferenceProducedGoal : Prop :=
+  ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A),
+    RawReferenceProduced t → CertifiedReferenceProduced t
+
+theorem CertifyReferenceProducedGoal_of_ready (h : EncodeReadyOfRawGoal (sig := sig)) :
+    CertifyReferenceProducedGoal (sig := sig) :=
+  fun {_hyps} {_A} t hr => ⟨hr, h t hr⟩
 
 end Equality
 end Gimbal
