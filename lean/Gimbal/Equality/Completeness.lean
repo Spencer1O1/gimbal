@@ -99,6 +99,32 @@ def EncodeTotal : Prop :=
     ValidEncodeFragment t →
       ∃ c, encodeICC (OriginEnv.ofHyps hyps) t = some c
 
+/--
+`EncodeTotal` from readiness of every valid-fragment term under `ofHyps`.
+
+`EncodableICC.of_encodeReady` / `encodeReady_go_some` discharge the
+computational half. The remaining obligation is inhabiting `EncodeReady`
+from `ValidEncodeFragment` (peel/left-η alignment for every positive
+worklist head under `OriginEnv.ofHyps`).
+-/
+theorem EncodeTotal_of_ready
+    (hready : ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+      (t : InvTm (Ctx.ofHyps hyps) A),
+      ValidEncodeFragment t →
+        EncodeReady (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+          (OriginEnv.ofHyps hyps) 0 0 t) :
+    EncodeTotal (sig := sig) := by
+  intro hyps A t hv
+  exact encode_of_encodeReady (OriginEnv.ofHyps hyps)
+    (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) rfl (hready t hv)
+
+/--
+`EncodeTotal` holds: every `ValidEncodeFragment` term carries `PhaseEncodeReady`,
+and `encodeReady_go_some` supplies a code.
+-/
+theorem EncodeTotal_holds : EncodeTotal (sig := sig) :=
+  EncodeTotal_of_ready fun {_hyps} {_A} _t hv => encodeReady_of_validEncodeFragment hv
+
 /-- Reflection / common-code soundness (design-E rigidity). -/
 abbrev EncodeIccReflect : Prop := EncodeIccReflectGoal (sig := sig)
 
@@ -198,17 +224,24 @@ Active path: collision-free `Origin` → worklist `forcedRule` → total `encode
 
 Blocked / WIP:
 
-1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`)
+1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`); peel digs under
+   `.foc (.sat …)` / `.foc (.letPos …)` so hyp left-coprod can surface despite
+   `Origin.cmp` ordering hyp < obs while `applyPairObs` nests atom obs outer
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
-3. `EncodeTotal` on `ValidEncodeFragment` — measure adequacy + fuel mono;
-   witness form `∃ c, encodeICC … = some c`. `ValidEncodeFragment` supplies
-   initial encodability only; ICCEq intermediates use `EncodeIccStep` alone.
+3. ~~`EncodeTotal`~~ **Done** (`EncodeTotal_holds` via `encodeReady_of_validEncodeFragment`).
+   Fragment carries `PhaseEncodeReady`. Remaining to *inhabit* the fragment from
+   schedule alone: full `encodeReady_applyPairObs` (preservation from ready
+   conts) and phase-entry cont readiness from focus/translate
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
+   Commute gens packaged under forced-head hyps; cong Go lifts landed;
+   full `ofHyps` induction and reflection beyond unit/abort remain.
    `ICCCompleteness` needs both + encodability — never `none = none` as ICC.
+   New gens `case_letPos` / `sat_body` need packaging when invariance runs.
 5. Switch `referenceStructEq` / `referenceCompare` to `ICCCode` equality
-   (`beq_iff_eq`); erase public `2048` / fuel from the total API
+   (`beq_iff_eq`) only after EncodeTotal + both characterization directions;
+   erase public `2048` / fuel from the total API
 6. 8G packaging (`DefEqDecidable` from total comparator)
 
 Fallback if ordered-phase reification proves infeasible: `decideICCEq`, not a

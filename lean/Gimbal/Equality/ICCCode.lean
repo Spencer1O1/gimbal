@@ -345,6 +345,43 @@ def FocTm.posPushBudget {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → 
   | .sat (.mk _ t) => InvTm.posPushBudget t
 end
 
+mutual
+theorem InvTm.posPushBudget_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (t : InvTm Γ A) :
+    (InvTm.rename ρ t).posPushBudget = t.posPushBudget :=
+  match t with
+  | .unit => rfl
+  | .pair t u => by
+      simp [InvTm.rename, InvTm.posPushBudget, InvTm.posPushBudget_rename ρ t,
+        InvTm.posPushBudget_rename ρ u]
+  | .lam t => by
+      simp [InvTm.rename, InvTm.posPushBudget,
+        InvTm.posPushBudget_rename (Rename.ext ρ) t]
+  | .case n t u => by
+      simp [InvTm.rename, InvTm.posPushBudget,
+        InvTm.posPushBudget_rename (Rename.ext ρ) t,
+        InvTm.posPushBudget_rename (Rename.ext ρ) u]
+  | .abort _ => rfl
+  | .foc f => by
+      simp [InvTm.rename, InvTm.posPushBudget, FocTm.posPushBudget_rename ρ f]
+termination_by t.size
+decreasing_by all_goals decreasing_trivial
+
+theorem FocTm.posPushBudget_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (f : FocTm Γ A) :
+    (FocTm.rename ρ f).posPushBudget = f.posPushBudget :=
+  match f with
+  | .pos _ | .neg _ => rfl
+  | .letPos n t => by
+      simp [FocTm.rename, FocTm.posPushBudget,
+        InvTm.posPushBudget_rename (Rename.ext ρ) t]
+  | .sat (.mk s t) => by
+      simp [FocTm.rename, SatTm.rename, FocTm.posPushBudget,
+        InvTm.posPushBudget_rename ρ t]
+termination_by f.size
+decreasing_by all_goals decreasing_trivial
+end
+
 /--
 Derived adequate fuel (design target for `encodeICC`).
 
@@ -522,7 +559,31 @@ def peelCaseOuterGo {Γ : Ctx sig} {C : Object sig.nBases}
         | none => none
     | .unit => none
     | .abort _ => none
-    | .foc _ => none
+    | .foc f =>
+        -- Dig under observation structure so a forced hyp left-coprod can be
+        -- exposed despite `Origin.cmp` ordering hyp < obs while `applyPairObs`
+        -- nests atom observations as outer `letPos`.
+        match f with
+        | .sat (.mk _ body) =>
+            peelCaseOuterGo fuel ε o body
+        | .letPos (P := P) n body =>
+            -- Peel only needs a non-colliding binder tag; encode assigns real
+            -- `obsSlot` later. Forced origins are hyp/obs/split, and temporary
+            -- `.obs 0` is fine for unweaken / origin checks on older vars.
+            let ε' : OriginEnv (Γ ▻ P) :=
+              OriginEnv.weaken (A := P) ε (.obs (sig := sig) 0)
+            match peelCaseOuterGo fuel ε' o body with
+            | some ⟨A, B, m, tL, tR⟩ =>
+                match NegNeu.unweaken? m with
+                | some m0 =>
+                    some ⟨A, B, m0,
+                      .foc (.letPos (NegNeu.weaken (B := A) n)
+                        (InvTm.rename Rename.exchange tL)),
+                      .foc (.letPos (NegNeu.weaken (B := B) n)
+                        (InvTm.rename Rename.exchange tR))⟩
+                | none => none
+            | none => none
+        | .pos _ | .neg _ => none
     | .case _ _ _ => none
 
 def peelCaseOuter {Γ : Ctx sig} {C : Object sig.nBases}
@@ -748,6 +809,14 @@ theorem encodeFuel_focus_eq {Γ : Ctx sig} {A : Object sig.nBases}
     encodeFuel ws (.foc f) = encodeFuelFoc ws f + 2 :=
   encodeFuel_foc ws f
 
+/-- Adequate bound for a left-coprod continuation (max of the two branches). -/
+def encodeFuelBranches {Γ : Ctx sig} {L R A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (e : PosEntry sig)
+    (tL : InvTm (Γ ▻ L) A) (tR : InvTm (Γ ▻ R) A) : Nat :=
+  let ws' := ws.tail
+  max (encodeFuel (pushPos ws' (.split e.origin false) L) tL)
+      (encodeFuel (pushPos ws' (.split e.origin true) R) tR)
+
 /--
 Left-coprod branch: after consuming `.coprod L R`, each peeled branch under
 `pushPos` has strictly smaller fuel than the parent case.
@@ -924,16 +993,17 @@ end
 
 /-- Encode under a phase-entry origin environment.
 
-Currently fueled by `encodeMeasure` (shared across ICC commute pairs at a fixed
-goal/worklist). The adequate bound `encodeFuel` (measure + letPos budget +
-`2 * size`) is the switch target once `EncodeFuelMonoGoal` lifts Go-level
-commute agreement across unequal term sizes. Positive `letPos` is why
-measure alone is not the final story (`encodeMeasure_lt_pushPos_of_pos`).
+Fueled by the derived adequate bound `encodeFuel` (measure + letPos budget +
+`2 * size`). Commute pairs may have unequal fuels; lift Go-level agreement to
+`encodeICC` via `max` and successful-result monotonicity. Positive `letPos` is
+why measure alone is not enough (`encodeMeasure_lt_pushPos_of_pos`).
+
+No fixed public constant (e.g. 2048).
 -/
 def encodeICC {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (t : InvTm Γ A) : Option (ICCCode Γ A) :=
   let ws := OriginEnv.posWorklist ε
-  encodeICCGo (encodeMeasure ws A) ws ε 0 0 t
+  encodeICCGo (encodeFuel ws t) ws ε 0 0 t
 
 /-- Encode with default oldest-first hyp origins for an `ofHyps` context. -/
 def encodeICCHyps {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -1067,6 +1137,238 @@ Rigidity for design E = reflection/common-code soundness (`EncodeIccReflectGoal`
 Determinism of `encodeICC` alone is not rigidity.
 -/
 abbrev EncodeIccRigidityGoal : Prop := EncodeIccReflectGoal (sig := sig)
+
+
+/-! ### EncodeReady: syntactic totality precondition
+
+`WellInv` alone is not enough: unique-order encode can return structural `none`
+when the term is not aligned with `forcedRule`. `EncodeReady` is the stronger
+alignment predicate used by `ValidEncodeFragment` / `EncodeTotal`.
+-/
+
+mutual
+/-- Term is ready for unique-order encode under worklist `ws`. -/
+inductive EncodeReady : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases},
+    InvTm Γ A → Prop where
+  | moveStable {Γ A} {e : PosEntry sig} {ws : List (PosEntry sig)}
+      {ε : OriginEnv Γ} {domNest obsSlot : Nat} {t : InvTm Γ A}
+      (hfr : forcedRule (e :: ws) A = .moveStable e)
+      (h : EncodeReady ws ε domNest obsSlot t) :
+      EncodeReady (e :: ws) ε domNest obsSlot t
+  | leftNever {Γ A} {e : PosEntry sig} {_ws : List (PosEntry sig)}
+      {_ε : OriginEnv Γ} {_domNest _obsSlot : Nat} {n : NegNeu Γ .never}
+      (hty : e.ty = .never) :
+      EncodeReady (e :: _ws) _ε _domNest _obsSlot (.abort (A := A) n)
+  | rightUnit {Γ} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat}
+      (hfr : forcedRule ws (.unit : Object sig.nBases) = .rightUnit) :
+      EncodeReady ws ε domNest obsSlot (.unit (Γ := Γ))
+  | rightProd_pair {Γ L R} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {t : InvTm Γ L} {u : InvTm Γ R}
+      (hfr : forcedRule ws (.prod L R) = .rightProd L R)
+      (ht : EncodeReady ws ε domNest obsSlot t)
+      (hu : EncodeReady ws ε domNest obsSlot u) :
+      EncodeReady ws ε domNest obsSlot (.pair t u)
+  | rightProd_foc {Γ L R} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ (.prod L R)}
+      (hfr : forcedRule ws (.prod L R) = .rightProd L R)
+      (hf : EncodeReadyFoc ws ε domNest obsSlot f) :
+      EncodeReady ws ε domNest obsSlot (.foc f)
+  | rightExp_lam {Γ Arg Ret} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {body : InvTm (Γ ▻ Arg) Ret}
+      (hfr : forcedRule ws (.exp Arg Ret) = .rightExp Arg Ret)
+      (hb : EncodeReady
+        (pushPos ws (.dom (sig := sig) domNest) Arg)
+        (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) domNest))
+        (domNest + 1) obsSlot body) :
+      EncodeReady ws ε domNest obsSlot (.lam body)
+  | rightExp_foc {Γ Arg Ret} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ (.exp Arg Ret)}
+      (hfr : forcedRule ws (.exp Arg Ret) = .rightExp Arg Ret)
+      (hf : EncodeReadyFoc ws ε domNest obsSlot f) :
+      EncodeReady ws ε domNest obsSlot (.foc f)
+  | leftCoprod_peel {Γ A L R} {e : PosEntry sig} {ws : List (PosEntry sig)}
+      {ε : OriginEnv Γ} {domNest obsSlot : Nat}
+      {n : NegNeu Γ (.coprod L R)}
+      {tL : InvTm (Γ ▻ L) A} {tR : InvTm (Γ ▻ R) A} {t : InvTm Γ A}
+      (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+      (hpeel : peelCaseOuter ε e.origin t = some ⟨L, R, n, tL, tR⟩)
+      (hL : EncodeReady
+        (pushPos ws (.split e.origin false) L)
+        (OriginEnv.weaken (A := L) ε (.split e.origin false))
+        domNest obsSlot tL)
+      (hR : EncodeReady
+        (pushPos ws (.split e.origin true) R)
+        (OriginEnv.weaken (A := R) ε (.split e.origin true))
+        domNest obsSlot tR) :
+      EncodeReady (e :: ws) ε domNest obsSlot t
+  | leftCoprod_unitEta {Γ L R} {e : PosEntry sig} {ws : List (PosEntry sig)}
+      {ε : OriginEnv Γ} {domNest obsSlot : Nat}
+      {x : Var Γ (.coprod L R)}
+      (hfr : forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R)
+      (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod L R, x⟩)
+      (hit : (ε x == e.origin) = true)
+      (hL : EncodeReady
+        (pushPos ws (.split e.origin false) L)
+        (OriginEnv.weaken (A := L) ε (.split e.origin false))
+        domNest obsSlot (.unit : InvTm (Γ ▻ L) .unit))
+      (hR : EncodeReady
+        (pushPos ws (.split e.origin true) R)
+        (OriginEnv.weaken (A := R) ε (.split e.origin true))
+        domNest obsSlot (.unit : InvTm (Γ ▻ R) .unit)) :
+      EncodeReady (e :: ws) ε domNest obsSlot (.unit (Γ := Γ))
+  | focus {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ A}
+      (hfr : forcedRule ws A = .focus)
+      (hf : EncodeReadyFoc ws ε domNest obsSlot f) :
+      EncodeReady ws ε domNest obsSlot (.foc f)
+
+/-- Focused counterpart of `EncodeReady`. -/
+inductive EncodeReadyFoc : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases},
+    FocTm Γ A → Prop where
+  | pos {Γ A} {_ws : List (PosEntry sig)} {_ε : OriginEnv Γ}
+      {_domNest _obsSlot : Nat} {p : PosNeu Γ A} :
+      EncodeReadyFoc _ws _ε _domNest _obsSlot (.pos (.done p))
+  | neg {Γ A} {_ws : List (PosEntry sig)} {_ε : OriginEnv Γ}
+      {_domNest _obsSlot : Nat} {n : NegNeu Γ A} :
+      EncodeReadyFoc _ws _ε _domNest _obsSlot (.neg (.done n))
+  | letPos {Γ P A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {n : NegNeu Γ P} {t : InvTm (Γ ▻ P) A}
+      (ht : EncodeReady
+        (pushPos ws (.obs (sig := sig) obsSlot) P)
+        (OriginEnv.weaken (A := P) ε (.obs (sig := sig) obsSlot))
+        domNest (obsSlot + 1) t) :
+      EncodeReadyFoc ws ε domNest obsSlot (.letPos n t)
+  | sat {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {s : Schedule sig.nBases} {t : InvTm Γ A}
+      (ht : EncodeReady ws ε domNest obsSlot t) :
+      EncodeReadyFoc ws ε domNest obsSlot (.sat (.mk s t))
+end
+
+/-! ### Peel-free fragment of `EncodeReady`
+
+Omits `leftCoprod_peel` / `leftCoprod_unitEta`. Enough to rekey newest-hyp → obs
+and wrap atom `letPos` when the phase worklist is base-only (`moveStable`).
+-/
+
+mutual
+/-- `EncodeReady` without left-coprod peel / unit-η. -/
+inductive EncodeReadyNoPeel : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases},
+    InvTm Γ A → Prop where
+  | moveStable {Γ A} {e : PosEntry sig} {ws : List (PosEntry sig)}
+      {ε : OriginEnv Γ} {domNest obsSlot : Nat} {t : InvTm Γ A}
+      (hfr : forcedRule (e :: ws) A = .moveStable e)
+      (h : EncodeReadyNoPeel ws ε domNest obsSlot t) :
+      EncodeReadyNoPeel (e :: ws) ε domNest obsSlot t
+  | leftNever {Γ A} {e : PosEntry sig} {_ws : List (PosEntry sig)}
+      {_ε : OriginEnv Γ} {_domNest _obsSlot : Nat} {n : NegNeu Γ .never}
+      (hty : e.ty = .never) :
+      EncodeReadyNoPeel (e :: _ws) _ε _domNest _obsSlot (.abort (A := A) n)
+  | rightUnit {Γ} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat}
+      (hfr : forcedRule ws (.unit : Object sig.nBases) = .rightUnit) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.unit (Γ := Γ))
+  | rightProd_pair {Γ L R} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {t : InvTm Γ L} {u : InvTm Γ R}
+      (hfr : forcedRule ws (.prod L R) = .rightProd L R)
+      (ht : EncodeReadyNoPeel ws ε domNest obsSlot t)
+      (hu : EncodeReadyNoPeel ws ε domNest obsSlot u) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.pair t u)
+  | rightProd_foc {Γ L R} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ (.prod L R)}
+      (hfr : forcedRule ws (.prod L R) = .rightProd L R)
+      (hf : EncodeReadyFocNoPeel ws ε domNest obsSlot f) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.foc f)
+  | rightExp_lam {Γ Arg Ret} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {body : InvTm (Γ ▻ Arg) Ret}
+      (hfr : forcedRule ws (.exp Arg Ret) = .rightExp Arg Ret)
+      (hb : EncodeReadyNoPeel
+        (pushPos ws (.dom (sig := sig) domNest) Arg)
+        (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) domNest))
+        (domNest + 1) obsSlot body) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.lam body)
+  | rightExp_foc {Γ Arg Ret} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ (.exp Arg Ret)}
+      (hfr : forcedRule ws (.exp Arg Ret) = .rightExp Arg Ret)
+      (hf : EncodeReadyFocNoPeel ws ε domNest obsSlot f) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.foc f)
+  | focus {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {f : FocTm Γ A}
+      (hfr : forcedRule ws A = .focus)
+      (hf : EncodeReadyFocNoPeel ws ε domNest obsSlot f) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.foc f)
+
+/-- Focused counterpart of `EncodeReadyNoPeel`. -/
+inductive EncodeReadyFocNoPeel : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat) {A : Object sig.nBases},
+    FocTm Γ A → Prop where
+  | pos {Γ A} {_ws : List (PosEntry sig)} {_ε : OriginEnv Γ}
+      {_domNest _obsSlot : Nat} {p : PosNeu Γ A} :
+      EncodeReadyFocNoPeel _ws _ε _domNest _obsSlot (.pos (.done p))
+  | neg {Γ A} {_ws : List (PosEntry sig)} {_ε : OriginEnv Γ}
+      {_domNest _obsSlot : Nat} {n : NegNeu Γ A} :
+      EncodeReadyFocNoPeel _ws _ε _domNest _obsSlot (.neg (.done n))
+  | letPos {Γ P A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {n : NegNeu Γ P} {t : InvTm (Γ ▻ P) A}
+      (ht : EncodeReadyNoPeel
+        (pushPos ws (.obs (sig := sig) obsSlot) P)
+        (OriginEnv.weaken (A := P) ε (.obs (sig := sig) obsSlot))
+        domNest (obsSlot + 1) t) :
+      EncodeReadyFocNoPeel ws ε domNest obsSlot (.letPos n t)
+  | sat {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {s : Schedule sig.nBases} {t : InvTm Γ A}
+      (ht : EncodeReadyNoPeel ws ε domNest obsSlot t) :
+      EncodeReadyFocNoPeel ws ε domNest obsSlot (.sat (.mk s t))
+end
+
+theorem encodeReady_of_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (h : EncodeReadyNoPeel ws ε domNest obsSlot t) :
+    EncodeReady ws ε domNest obsSlot t := by
+  revert A ws ε domNest obsSlot t
+  refine EncodeReadyNoPeel.rec
+    (motive_1 := fun {Γ} ws ε d o {A} t _ => EncodeReady ws ε d o t)
+    (motive_2 := fun {Γ} ws ε d o {A} f _ => EncodeReadyFoc ws ε d o f)
+    ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
+  case ms => intros; exact .moveStable ‹_› ‹_›
+  case ln => intros; exact .leftNever ‹_›
+  case ru => intros; exact .rightUnit ‹_›
+  case rp => intros; exact .rightProd_pair ‹_› ‹_› ‹_›
+  case rpf => intros; exact .rightProd_foc ‹_› ‹_›
+  case re => intros; exact .rightExp_lam ‹_› ‹_›
+  case ref => intros; exact .rightExp_foc ‹_› ‹_›
+  case fo => intros; exact .focus ‹_› ‹_›
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case lp => intros; exact .letPos ‹_›
+  case sat => intros; exact .sat ‹_›
+
+theorem encodeReadyFoc_of_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {f : FocTm Γ A}
+    (h : EncodeReadyFocNoPeel ws ε domNest obsSlot f) :
+    EncodeReadyFoc ws ε domNest obsSlot f := by
+  revert A ws ε domNest obsSlot f
+  refine EncodeReadyFocNoPeel.rec
+    (motive_1 := fun {Γ} ws ε d o {A} t _ => EncodeReady ws ε d o t)
+    (motive_2 := fun {Γ} ws ε d o {A} f _ => EncodeReadyFoc ws ε d o f)
+    ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
+  case ms => intros; exact .moveStable ‹_› ‹_›
+  case ln => intros; exact .leftNever ‹_›
+  case ru => intros; exact .rightUnit ‹_›
+  case rp => intros; exact .rightProd_pair ‹_› ‹_› ‹_›
+  case rpf => intros; exact .rightProd_foc ‹_› ‹_›
+  case re => intros; exact .rightExp_lam ‹_› ‹_›
+  case ref => intros; exact .rightExp_foc ‹_› ‹_›
+  case fo => intros; exact .focus ‹_› ‹_›
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case lp => intros; exact .letPos ‹_›
+  case sat => intros; exact .sat ‹_›
 
 end Equality
 end Gimbal

@@ -40,6 +40,12 @@ theorem ICCEq.tmEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
       simp only [InvTm.erase]
       exact (TmEq.case (.refl _) (tmEq_etaInl _ _) (tmEq_etaInr _ _)).trans
         (TmEq.eta_coprod _)
+  | _, _, _, _, .case_letPos m n tL tR => by
+      simp only [InvTm.erase, FocTm.erase, NegNeu.erase_weaken, InvTm.erase_rename]
+      exact cc_case_letPos m.erase n.erase tL.erase tR.erase
+  | _, _, _, _, .sat_body _ _ => by
+      simp only [InvTm.erase, FocTm.erase, SatTm.erase]
+      exact .refl _
 
 /-- ICC-equal focus terms erase to equal terms. -/
 theorem ICCFocEq.tmEq : {Γ : Ctx sig} → {A : Object sig.nBases} →

@@ -67,11 +67,14 @@ theorem encode_reflect_abort_leftNever {Γ : Ctx sig} {A : Object sig.nBases}
     ICCEq t u := by
   unfold encodeICC at ht hu
   rw [hws] at ht hu
-  have hpos := encodeMeasure_cons_pos e ws A
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simp only [hm] at ht hu
-  obtain ⟨n, rfl, _⟩ := encodeICCGo_leftNever_eq_abort fuel e ws ε 0 0 t hty ht
-  obtain ⟨m, rfl, _⟩ := encodeICCGo_leftNever_eq_abort fuel e ws ε 0 0 u hty hu
+  have hpos_t := encodeFuel_pos (e :: ws) t
+  have hpos_u := encodeFuel_pos (e :: ws) u
+  obtain ⟨fuelt, hmt⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos_t)
+  obtain ⟨fuelu, hmu⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos_u)
+  simp only [hmt] at ht
+  simp only [hmu] at hu
+  obtain ⟨n, rfl, _⟩ := encodeICCGo_leftNever_eq_abort fuelt e ws ε 0 0 t hty ht
+  obtain ⟨m, rfl, _⟩ := encodeICCGo_leftNever_eq_abort fuelu e ws ε 0 0 u hty hu
   exact ICCEq.abort_eq n m
 
 /-- Nil-worklist unit: successful encode forces `.unit`. -/
@@ -99,13 +102,14 @@ theorem encode_reflect_unit_nil {Γ : Ctx sig} (ε : OriginEnv Γ)
     ICCEq t u := by
   unfold encodeICC at ht hu
   rw [hws] at ht hu
-  have hpos : 0 < encodeMeasure ([] : List (PosEntry sig)) (.unit : Object sig.nBases) := by
-    have := objectWeight_pos (.unit : Object sig.nBases)
-    simpa [encodeMeasure, worklistWeight] using this
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simp only [hm] at ht hu
-  obtain ⟨rfl, rfl⟩ := encodeICCGo_rightUnit_eq_unit fuel ε 0 0 t ht
-  obtain ⟨rfl, _⟩ := encodeICCGo_rightUnit_eq_unit fuel ε 0 0 u hu
+  have hpos_t := encodeFuel_pos ([] : List (PosEntry sig)) t
+  have hpos_u := encodeFuel_pos ([] : List (PosEntry sig)) u
+  obtain ⟨fuelt, hmt⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos_t)
+  obtain ⟨fuelu, hmu⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos_u)
+  simp only [hmt] at ht
+  simp only [hmu] at hu
+  obtain ⟨rfl, rfl⟩ := encodeICCGo_rightUnit_eq_unit fuelt ε 0 0 t ht
+  obtain ⟨rfl, _⟩ := encodeICCGo_rightUnit_eq_unit fuelu ε 0 0 u hu
   exact ICCEq.refl _
 
 /-! ### Packaging toward `EncodeIccReflectGoal` -/

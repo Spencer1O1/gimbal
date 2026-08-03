@@ -6,10 +6,12 @@
   under a phase-entry origin environment. This module names that fragment and
   records that the reference pipeline produces it.
 
-  `ReferenceScheduleOk` is purely operational (`pairObs` / `applyPairObs`).
-  `canonicalize` may wrap the result as proved-sound ICC preprocessing; it is
-  not part of the encode characterization and must not be assumed complete or
-  idempotent when proving `EncodeTotal` or code uniqueness.
+  `ReferenceScheduleOk` / `ReferenceProduced` are operational
+  (`pairObs` / `applyPairObs` on the **raw** saturate result) plus phase-entry
+  `EncodeReady` of the pre-schedule continuations. Successful schedule
+  application preserves readiness (`encodeReady_applyPairObs` in `ICCTotal`).
+  `canonicalize` remains in `referenceCompare` wiring; it is not part of the
+  encode characterization.
 -/
 
 import Gimbal.Equality.ICCCode
@@ -35,10 +37,16 @@ def AdequateOriginEnv (hyps : Array (Object sig.nBases))
   ∀ {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A),
     ε x = OriginEnv.ofHyps hyps x
 
+/-- Phase-entry `EncodeReady` under `ofHyps`. -/
+def PhaseEncodeReady {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  EncodeReady (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+    (OriginEnv.ofHyps hyps) 0 0 t
+
 /--
-Operational shared-schedule saturation: `pairObs` built a schedule and
-`applyPairObs` returned `t'`. No appeal to code equality, canonicalize
-completeness, or unique NF.
+Operational shared-schedule saturation: `pairObs` built a schedule,
+`applyPairObs` returned `t'`, and both pre-schedule continuations are
+phase-entry encode-ready (so schedule preservation can lift readiness to `t'`).
 -/
 def ReferenceScheduleOk {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t' : InvTm (Ctx.ofHyps hyps) A) : Prop :=
@@ -48,37 +56,38 @@ def ReferenceScheduleOk {hyps : Array (Object sig.nBases)} {A : Object sig.nBase
     checkOldInvariant (ReachCtx.oldPrefix ⟨hyps, newFrom⟩) goal = true ∧
       WellInv t₀ ∧
       WellInv u₀ ∧
+      PhaseEncodeReady t₀ ∧
+      PhaseEncodeReady u₀ ∧
       pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries σ ∧
       (applyPairObs (saturationBudget fuel entries.size) σ hyps entries t₀ = .ok t' ∨
         applyPairObs (saturationBudget fuel entries.size) σ hyps entries u₀ = .ok t')
 
 /--
-Reference-produced term ready for encode/compare.
-
-`t` is either the raw `applyPairObs` result or its `canonicalize` image.
-Canonicalize is allowed only as proved-sound preprocessing
-(`wellInv_canonicalize`, `tmEq_canonicalize`); `EncodeTotal` and code
-uniqueness must not assume its completeness or idempotence.
+Ready-to-encode production certificate: schedule success with ready
+continuations. Prefer raw `applyPairObs` over a canonicalize image.
 -/
-def ReferenceSaturated {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+def ReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
-  ∃ t' : InvTm (Ctx.ofHyps hyps) A,
-    ReferenceScheduleOk t' ∧ (t = t' ∨ t = canonicalize t')
+  ReferenceScheduleOk t
+
+/-- Historical alias. -/
+abbrev ReferenceSaturated {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  ReferenceProduced t
 
 /--
 Concrete valid fragment for `encodeICC` / `EncodeTotal`.
 
-Exactly the invariants encoding needs on reference-produced terms:
-
-* **phase** — lives in a `Ctx.ofHyps` phase context (in the type)
-* **scoping** — `WellInv` (focused invertible fragment)
-* **saturation** — `ReferenceSaturated` (operational schedule success ± sound canonicalize)
-* **origin environment** — phase-entry `OriginEnv.ofHyps`
+* **phase** — `Ctx.ofHyps` (in the type)
+* **scoping** — `WellInv`
+* **saturation** — `ReferenceProduced` (schedule + ready conts)
+* **readiness** — `PhaseEncodeReady` on the schedule result (encode alignment)
 -/
 structure ValidEncodeFragment {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} (t : InvTm (Ctx.ofHyps hyps) A) : Prop where
   well : WellInv t
-  saturated : ReferenceSaturated t
+  produced : ReferenceProduced t
+  ready : PhaseEncodeReady t
 
 /-- Phase-entry environment used to encode a valid-fragment term. -/
 def ValidEncodeFragment.originEnv {hyps : Array (Object sig.nBases)}
@@ -92,11 +101,26 @@ theorem ValidEncodeFragment.adequate {hyps : Array (Object sig.nBases)}
     AdequateOriginEnv hyps h.originEnv := by
   intro _ _; rfl
 
+theorem ValidEncodeFragment.saturated {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
+    (h : ValidEncodeFragment t) : ReferenceSaturated t :=
+  h.produced
+
 /-! ### Reference pipeline produces the fragment -/
 
 /--
-One reference phase saturating the left subject yields a `ValidEncodeFragment`
-(after sound canonicalize preprocessing, as in `referenceSatRec`).
+Package a schedule result once readiness of `t'` is known (from
+`encodeReady_applyPairObs` once conts are phase-ready).
+-/
+theorem validEncodeFragment_mk {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hw : WellInv t') (hs : ReferenceScheduleOk t') (hr : PhaseEncodeReady t') :
+    ValidEncodeFragment t' :=
+  ⟨hw, hs, hr⟩
+
+/--
+One reference phase saturating the left subject, given phase-ready inputs and
+a proved-ready saturate result.
 -/
 theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
@@ -104,24 +128,28 @@ theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBase
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
+    (hreadyt : PhaseEncodeReady t) (hreadyu : PhaseEncodeReady u)
     (hobs : pairObs Γ goal t u = .ok entries σ)
     (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
-      .ok t') :
-    ValidEncodeFragment (canonicalize t') := by
-  refine ⟨wellInv_referencePhase (saturationBudget fuel entries.size) ht hu hobs h, ?_⟩
-  refine ⟨t', ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, ?_, ht, hu, ?_, Or.inl h⟩, Or.inr rfl⟩
-  · cases Γ; exact hinv
-  · cases Γ; exact hobs
+      .ok t')
+    (hready' : PhaseEncodeReady t') :
+    ValidEncodeFragment t' :=
+  validEncodeFragment_mk
+    (wellInv_saturate_pairObs (saturationBudget fuel entries.size) ht hu hobs ht h)
+    ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hreadyt, hreadyu, hobs,
+      Or.inl h⟩
+    hready'
 
-/-- Raw saturate result (no canonicalize) is also a valid fragment. -/
+/-- Raw saturate result with readiness is a valid fragment. -/
 theorem validEncodeFragment_scheduleOk {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {t' : InvTm (Ctx.ofHyps hyps) A}
-    (hw : WellInv t') (hs : ReferenceScheduleOk t') :
+    (hw : WellInv t') (hs : ReferenceScheduleOk t') (hr : PhaseEncodeReady t') :
     ValidEncodeFragment t' :=
-  ⟨hw, ⟨t', hs, Or.inl rfl⟩⟩
+  validEncodeFragment_mk hw hs hr
 
 /--
-One reference phase saturating the right subject yields a `ValidEncodeFragment`.
+One reference phase saturating the right subject, given phase-ready inputs and
+a proved-ready saturate result.
 -/
 theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
@@ -130,12 +158,29 @@ theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     {u' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
+    (hreadyt : PhaseEncodeReady t) (hreadyu : PhaseEncodeReady u)
     (hobs : pairObs Γ goal t u = .ok entries σ)
     (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u =
-      .ok u') :
-    ValidEncodeFragment (canonicalize u') := by
-  refine ⟨wellInv_canonicalize
-      (wellInv_saturate_pairObs (saturationBudget fuel entries.size) ht hu hobs hu h), ?_⟩
-  refine ⟨u', ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, ?_, ht, hu, ?_, Or.inr h⟩, Or.inr rfl⟩
-  · cases Γ; exact hinv
-  · cases Γ; exact hobs
+      .ok u')
+    (hready' : PhaseEncodeReady u') :
+    ValidEncodeFragment u' :=
+  validEncodeFragment_mk
+    (wellInv_saturate_pairObs (saturationBudget fuel entries.size) ht hu hobs hu h)
+    ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hreadyt, hreadyu, hobs,
+      Or.inr h⟩
+    hready'
+
+/-- Canonicalize image of a schedule result remains well-focused (compare path). -/
+theorem wellInv_canonicalize_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
+    {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
+    (ht : WellInv t) (hu : WellInv u)
+    (hobs : pairObs Γ goal t u = .ok entries σ)
+    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
+      .ok t') :
+    WellInv (canonicalize t') :=
+  wellInv_referencePhase (saturationBudget fuel entries.size) ht hu hobs h
+
+end Equality
+end Gimbal

@@ -200,8 +200,8 @@ structure PosEntry (sig : Signature) where
   ty : Object sig.nBases
   deriving DecidableEq, Repr
 
-/-- Collect positively polarized variables as a worklist ordered by `Origin.cmp`. -/
-def OriginEnv.posWorklist {Γ : Ctx sig} (ε : OriginEnv Γ) : List (PosEntry sig) :=
+/-- Positive entries collected newest-first (before `Origin.ble` sort). -/
+def OriginEnv.posCollect {Γ : Ctx sig} (ε : OriginEnv Γ) : List (PosEntry sig) :=
   let rec collect : (Δ : Ctx sig) → OriginEnv Δ → List (PosEntry sig)
     | .empty, _ => []
     | .snoc Δ A, ε' =>
@@ -210,7 +210,33 @@ def OriginEnv.posWorklist {Γ : Ctx sig} (ε : OriginEnv Γ) : List (PosEntry si
           { origin := ε' .here, ty := A } :: rest
         else
           rest
-  (collect Γ ε).mergeSort fun e₁ e₂ => Origin.ble e₁.origin e₂.origin
+  collect Γ ε
+
+/-- Collect positively polarized variables as a worklist ordered by `Origin.cmp`. -/
+def OriginEnv.posWorklist {Γ : Ctx sig} (ε : OriginEnv Γ) : List (PosEntry sig) :=
+  (OriginEnv.posCollect ε).mergeSort fun e₁ e₂ => Origin.ble e₁.origin e₂.origin
+
+theorem OriginEnv.posWorklist_eq_mergeSort {Γ : Ctx sig} (ε : OriginEnv Γ) :
+    OriginEnv.posWorklist ε =
+      (OriginEnv.posCollect ε).mergeSort fun e₁ e₂ =>
+        Origin.ble e₁.origin e₂.origin :=
+  rfl
+
+/-- Hyp origins compare by oldest-first index. -/
+theorem Origin.ble_hyp_hyp (i j : Nat) :
+    Origin.ble (.hyp (sig := sig) i) (.hyp j) = true ↔ i ≤ j := by
+  simp only [Origin.ble, Origin.cmp_hyp_hyp, Bool.or_eq_true, beq_iff_eq]
+  constructor
+  · intro h
+    cases h with
+    | inl hlt =>
+        exact Nat.le_of_lt (Nat.compare_eq_lt.mp hlt)
+    | inr heq =>
+        exact Nat.le_of_eq (Nat.compare_eq_eq.mp heq)
+  · intro hle
+    rcases Nat.lt_or_eq_of_le hle with hlt | heq
+    · exact Or.inl (Nat.compare_eq_lt.mpr hlt)
+    · exact Or.inr (Nat.compare_eq_eq.mpr heq)
 
 /-- Resolve an origin to the unique variable currently carrying it, if any. -/
 def OriginEnv.find? {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin sig) :
@@ -224,6 +250,756 @@ def OriginEnv.find? {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin sig) :
           (go Δ (fun {B} x => ε' (Var.there x))).map fun ⟨B, x⟩ =>
             ⟨B, .there x⟩
   go Γ ε
+
+/-! ### `ofHyps` under `push` -/
+
+theorem Var.toRawIdx_cast {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (x : Var Γ A) :
+    Var.toRawIdx (h ▸ x) = Var.toRawIdx x := by
+  induction h
+  rfl
+
+theorem Var.toRawIdx_here {Γ : Ctx sig} {A : Object sig.nBases} :
+    Var.toRawIdx (.here : Var (Γ ▻ A) A) = 0 := rfl
+
+theorem Var.toRawIdx_there {Γ : Ctx sig} {A B : Object sig.nBases}
+    (x : Var Γ A) :
+    Var.toRawIdx (.there (B := B) x) = Var.toRawIdx x + 1 := rfl
+
+/-- The newest variable of `ofHyps (hyps.push P)`. -/
+def OriginEnv.herePush (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) : Var (Ctx.ofHyps (hyps.push P)) P :=
+  (Ctx.ofHyps_push hyps P).symm ▸ .here
+
+/-- Newest binder under `ofHyps (hyps.push P)` carries `hyp hyps.size`. -/
+theorem OriginEnv.ofHyps_here_push (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) :
+    OriginEnv.ofHyps (hyps.push P) (OriginEnv.herePush hyps P) =
+      Origin.hyp (sig := sig) hyps.size := by
+  unfold OriginEnv.herePush OriginEnv.ofHyps
+  apply congrArg Origin.hyp
+  have hraw :=
+    Var.toRawIdx_cast (Ctx.ofHyps_push hyps P).symm
+      (.here : Var (Ctx.ofHyps hyps ▻ P) P)
+  rw [hraw, Var.toRawIdx_here, Array.size_push]
+  exact Nat.sub_zero _
+
+/--
+`ofHyps (hyps.push P)` agrees with `weaken (ofHyps hyps) (.hyp hyps.size)`
+on the pushed context (via `Ctx.ofHyps_push`).
+-/
+theorem OriginEnv.ofHyps_push_eq_weaken_hyp (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) {A : Object sig.nBases}
+    (x : Var (Ctx.ofHyps hyps ▻ P) A) :
+    OriginEnv.ofHyps (hyps.push P)
+        ((Ctx.ofHyps_push hyps P).symm ▸ x) =
+      OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size) x := by
+  cases x with
+  | here =>
+      simpa [OriginEnv.weaken, OriginEnv.herePush] using
+        OriginEnv.ofHyps_here_push hyps P
+  | there y =>
+      unfold OriginEnv.ofHyps OriginEnv.weaken OriginEnv.snoc
+      apply congrArg Origin.hyp
+      have hraw :=
+        Var.toRawIdx_cast (Ctx.ofHyps_push hyps P).symm
+          (.there y : Var (Ctx.ofHyps hyps ▻ P) A)
+      rw [hraw, Var.toRawIdx_there, Array.size_push]
+      omega
+
+/-! ### Origin order facts for hyp↔obs rename -/
+
+@[simp] theorem Origin.cmp_hyp_obs (i k : Nat) :
+    Origin.cmp (.hyp (sig := sig) i) (.obs k) = .lt := rfl
+
+@[simp] theorem Origin.cmp_obs_hyp (k i : Nat) :
+    Origin.cmp (.obs (sig := sig) k) (.hyp i) = .gt := rfl
+
+theorem Origin.ble_hyp_obs (i k : Nat) :
+    Origin.ble (.hyp (sig := sig) i) (.obs k) = true := by
+  simp [Origin.ble, Origin.cmp_hyp_obs]
+
+theorem Origin.ble_obs_hyp (k i : Nat) :
+    Origin.ble (.obs (sig := sig) k) (.hyp i) = false := by
+  simp [Origin.ble, Origin.cmp_obs_hyp]
+
+/--
+Rename newest-hyp tag `hyp hypIdx` to `obs k`, and shift existing obs indices
+`≥ k` up by one so the new observation sorts after all hyps and before later obs.
+-/
+def Origin.rekeyHypToObs (hypIdx k : Nat) : Origin sig → Origin sig
+  | .hyp i => if i == hypIdx then .obs k else .hyp i
+  | .obs j => .obs (if j < k then j else j + 1)
+  | .dom n => .dom n
+  | .split p s => .split (Origin.rekeyHypToObs hypIdx k p) s
+
+def PosEntry.rekeyHypToObs (hypIdx k : Nat) (e : PosEntry sig) : PosEntry sig :=
+  { origin := Origin.rekeyHypToObs hypIdx k e.origin, ty := e.ty }
+
+@[simp] theorem Origin.rekeyHypToObs_hyp_exact (hypIdx k : Nat) :
+    Origin.rekeyHypToObs (sig := sig) hypIdx k (.hyp hypIdx) = .obs k := by
+  simp [Origin.rekeyHypToObs]
+
+@[simp] theorem Origin.rekeyHypToObs_hyp_ne (hypIdx k i : Nat) (hne : i ≠ hypIdx) :
+    Origin.rekeyHypToObs (sig := sig) hypIdx k (.hyp i) = .hyp i := by
+  simp [Origin.rekeyHypToObs, hne]
+
+theorem Var.toRawIdx_lt_length {Γ : Ctx sig} {A : Object sig.nBases}
+    (x : Var Γ A) : Var.toRawIdx x < Γ.length := by
+  induction x with
+  | here => simp [Var.toRawIdx, Ctx.length]
+  | there _ ih =>
+      simp only [Var.toRawIdx, Ctx.length]
+      omega
+
+theorem Ctx.length_foldl_snoc (xs : List (Object sig.nBases)) (Γ : Ctx sig) :
+    (xs.foldl Ctx.snoc Γ).length = Γ.length + xs.length := by
+  induction xs generalizing Γ with
+  | nil => simp [List.foldl]
+  | cons a as ih =>
+      simp only [List.foldl, List.length_cons, Ctx.length, ih]
+      omega
+
+theorem Ctx.length_ofHyps (hyps : Array (Object sig.nBases)) :
+    (Ctx.ofHyps hyps).length = hyps.size := by
+  simp only [Ctx.ofHyps, Ctx.ofList, Ctx.length_foldl_snoc, Ctx.length,
+    Array.length_toList]
+  omega
+
+/-- `ofHyps` never mentions `hyp hyps.size` (that index appears only after push). -/
+theorem OriginEnv.ofHyps_ne_size (hyps : Array (Object sig.nBases))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) :
+    OriginEnv.ofHyps hyps x ≠ Origin.hyp (sig := sig) hyps.size := by
+  intro heq
+  have hidx : hyps.size - 1 - Var.toRawIdx x = hyps.size := by
+    simp only [OriginEnv.ofHyps] at heq
+    injection heq
+  have hlt : Var.toRawIdx x < hyps.size := by
+    have := Var.toRawIdx_lt_length x
+    simpa [Ctx.length_ofHyps] using this
+  omega
+
+/-- Rekey is identity on `ofHyps` (no `hyp hyps.size`, no obs). -/
+theorem OriginEnv.ofHyps_rekey_id (hyps : Array (Object sig.nBases)) (k : Nat)
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) :
+    Origin.rekeyHypToObs hyps.size k (OriginEnv.ofHyps hyps x) =
+      OriginEnv.ofHyps hyps x := by
+  have hne : OriginEnv.ofHyps hyps x ≠ .hyp (sig := sig) hyps.size :=
+    OriginEnv.ofHyps_ne_size hyps x
+  dsimp only [OriginEnv.ofHyps] at hne ⊢
+  -- Goal: rekey (hyp (size-1-raw)) = hyp (size-1-raw)
+  have hne' : hyps.size - 1 - Var.toRawIdx x ≠ hyps.size := by
+    intro hi; exact hne (by rw [hi])
+  simp [Origin.rekeyHypToObs, hne']
+
+/-- Rekey turns `weaken (ofHyps) (.hyp size)` into `weaken (ofHyps) (.obs k)`. -/
+theorem OriginEnv.rekey_ofHyps_weaken_to_obs (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) (k : Nat) {A : Object sig.nBases}
+    (x : Var (Ctx.ofHyps hyps ▻ P) A) :
+    Origin.rekeyHypToObs hyps.size k
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size) x) =
+      OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.obs (sig := sig) k) x := by
+  cases x with
+  | here => simp [OriginEnv.weaken, Origin.rekeyHypToObs]
+  | there y =>
+      simp only [OriginEnv.weaken, OriginEnv.snoc]
+      exact OriginEnv.ofHyps_rekey_id hyps k y
+
+private theorem Origin.rekey_obs_idx_inj (k i j : Nat)
+    (h : (if i < k then i else i + 1) = (if j < k then j else j + 1)) : i = j := by
+  split at h <;> split at h <;> omega
+
+/-- `rekeyHypToObs` is injective (needed so miss-tests `ε x == o` survive rekey). -/
+theorem Origin.rekeyHypToObs_inj {hypIdx k : Nat} {o₁ o₂ : Origin sig}
+    (h : Origin.rekeyHypToObs hypIdx k o₁ = Origin.rekeyHypToObs hypIdx k o₂) :
+    o₁ = o₂ := by
+  induction o₁ generalizing o₂ with
+  | hyp i =>
+      cases o₂ with
+      | hyp j =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hi : i = hypIdx <;> by_cases hj : j = hypIdx
+          · subst hi; subst hj; rfl
+          · simp [hi, hj] at h
+          · simp [hi, hj] at h
+          · simp [hi, hj] at h; exact congrArg _ h
+      | obs j =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hi : i = hypIdx
+          · subst hi
+            simp only [beq_self_eq_true, ↓reduceIte] at h
+            have hk : k = (if j < k then j else j + 1) := by
+              injection h
+            split at hk <;> omega
+          · simp [hi] at h
+      | dom _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hi : i = hypIdx <;> simp [hi] at h
+      | split _ _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hi : i = hypIdx <;> simp [hi] at h
+  | obs i =>
+      cases o₂ with
+      | hyp j =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hj : j = hypIdx
+          · subst hj
+            simp only [beq_self_eq_true, ↓reduceIte] at h
+            have hk : (if i < k then i else i + 1) = k := by
+              injection h
+            split at hk <;> omega
+          · simp [hj] at h
+      | obs j =>
+          simp only [Origin.rekeyHypToObs] at h
+          exact congrArg _ (Origin.rekey_obs_idx_inj k i j (by injection h))
+      | dom _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          split at h <;> cases h
+      | split _ _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          split at h <;> cases h
+  | dom n =>
+      cases o₂ with
+      | hyp j =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hj : j = hypIdx <;> simp [hj] at h
+      | obs _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          split at h <;> cases h
+      | dom m =>
+          simp only [Origin.rekeyHypToObs] at h
+          injection h with hn
+          subst hn
+          rfl
+      | split _ _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          cases h
+  | split p side ih =>
+      cases o₂ with
+      | hyp j =>
+          simp only [Origin.rekeyHypToObs] at h
+          by_cases hj : j = hypIdx <;> simp [hj] at h
+      | obs _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          split at h <;> cases h
+      | dom _ =>
+          simp only [Origin.rekeyHypToObs] at h
+          cases h
+      | split q side' =>
+          simp only [Origin.rekeyHypToObs] at h
+          injection h with hp hs
+          have := ih hp
+          subst this
+          subst hs
+          rfl
+
+theorem Origin.beq_rekeyHypToObs (hypIdx k : Nat) (o₁ o₂ : Origin sig) :
+    (Origin.rekeyHypToObs hypIdx k o₁ == Origin.rekeyHypToObs hypIdx k o₂) =
+      (o₁ == o₂) := by
+  by_cases heq : o₁ = o₂
+  · subst heq; simp
+  · have hne : Origin.rekeyHypToObs hypIdx k o₁ ≠
+        Origin.rekeyHypToObs hypIdx k o₂ := fun hr =>
+      heq (Origin.rekeyHypToObs_inj hr)
+    rw [beq_eq_false_iff_ne.mpr heq, beq_eq_false_iff_ne.mpr hne]
+
+/-- Next observation slot after rekeying `hypIdx ↦ obs k` (obs indices `≥ k` shift). -/
+def Origin.obsSlotAfterRekey (k obsSlot : Nat) : Nat :=
+  if obsSlot < k then obsSlot else obsSlot + 1
+
+@[simp] theorem Origin.obsSlotAfterRekey_zero (obsSlot : Nat) :
+    Origin.obsSlotAfterRekey 0 obsSlot = obsSlot + 1 := by
+  simp [Origin.obsSlotAfterRekey]
+
+@[simp] theorem Origin.rekeyHypToObs_obs (hypIdx k j : Nat) :
+    Origin.rekeyHypToObs (sig := sig) hypIdx k (.obs j) =
+      .obs (if j < k then j else j + 1) := rfl
+
+@[simp] theorem Origin.rekeyHypToObs_dom (hypIdx k n : Nat) :
+    Origin.rekeyHypToObs (sig := sig) hypIdx k (.dom n) = .dom n := rfl
+
+@[simp] theorem Origin.rekeyHypToObs_split (hypIdx k : Nat) (p : Origin sig) (s : Bool) :
+    Origin.rekeyHypToObs hypIdx k (.split p s) =
+      .split (Origin.rekeyHypToObs hypIdx k p) s := rfl
+
+/-- All `hyp` indices in `o` are `≤ bound` (true for `ofHyps` / newest-hyp rekey). -/
+def Origin.hypIdxLe (o : Origin sig) (bound : Nat) : Prop :=
+  match o with
+  | .hyp i => i ≤ bound
+  | .obs _ | .dom _ => True
+  | .split p _ => Origin.hypIdxLe p bound
+
+theorem Origin.hypIdxLe_ofHyps (hyps : Array (Object sig.nBases))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) :
+    Origin.hypIdxLe (OriginEnv.ofHyps hyps x) (hyps.size - 1) ∨
+      hyps.size = 0 := by
+  by_cases hsz : hyps.size = 0
+  · exact Or.inr hsz
+  · refine Or.inl ?_
+    simp only [OriginEnv.ofHyps, Origin.hypIdxLe]
+    have hraw : Var.toRawIdx x < hyps.size := by
+      have := Var.toRawIdx_lt_length x
+      simpa [Ctx.length_ofHyps] using this
+    omega
+
+theorem Origin.hypIdxLe_ofHyps_le_size (hyps : Array (Object sig.nBases))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) :
+    Origin.hypIdxLe (OriginEnv.ofHyps hyps x) hyps.size := by
+  simp only [OriginEnv.ofHyps, Origin.hypIdxLe]
+  have hraw : Var.toRawIdx x < hyps.size := by
+    have := Var.toRawIdx_lt_length x
+    simpa [Ctx.length_ofHyps] using this
+  omega
+
+theorem Origin.hypIdxLe_ofHyps_push (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) {A : Object sig.nBases}
+    (x : Var (Ctx.ofHyps hyps ▻ P) A) :
+    Origin.hypIdxLe
+      (OriginEnv.ofHyps (hyps.push P) ((Ctx.ofHyps_push hyps P).symm ▸ x))
+      hyps.size := by
+  have h := OriginEnv.ofHyps_push_eq_weaken_hyp hyps P x
+  rw [h]
+  cases x with
+  | here => simp [OriginEnv.weaken, Origin.hypIdxLe]
+  | there y =>
+      simp only [OriginEnv.weaken, OriginEnv.snoc, OriginEnv.ofHyps, Origin.hypIdxLe]
+      have hraw : Var.toRawIdx y < hyps.size := by
+        have := Var.toRawIdx_lt_length y
+        simpa [Ctx.length_ofHyps] using this
+      omega
+
+theorem Origin.cmp_rekeyHypToObs_zero_of_hypIdxLe (hypIdx : Nat)
+    {o₁ o₂ : Origin sig}
+    (h₁ : Origin.hypIdxLe o₁ hypIdx) (h₂ : Origin.hypIdxLe o₂ hypIdx) :
+    Origin.cmp (Origin.rekeyHypToObs hypIdx 0 o₁)
+      (Origin.rekeyHypToObs hypIdx 0 o₂) =
+      Origin.cmp o₁ o₂ := by
+  induction o₁ generalizing o₂ with
+  | hyp i =>
+      cases o₂ with
+      | hyp j =>
+          have hi : i ≤ hypIdx := h₁
+          have hj : j ≤ hypIdx := h₂
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_i : i = hypIdx <;> by_cases h_j : j = hypIdx
+          · -- both renamed
+            simp [h_i, h_j, Origin.cmp_self]
+          · -- i renamed, j not: obs 0 vs hyp j, and compare hypIdx j = gt
+            have hjlt : j < hypIdx := Nat.lt_of_le_of_ne hj h_j
+            simp only [h_i, h_j, beq_iff_eq, ↓reduceIte, Origin.cmp, Origin.cmp_hyp_hyp]
+            exact (Nat.compare_eq_gt.mpr hjlt).symm
+          · have hilt : i < hypIdx := Nat.lt_of_le_of_ne hi h_i
+            simp only [h_i, h_j, beq_iff_eq, ↓reduceIte, Origin.cmp, Origin.cmp_hyp_hyp]
+            exact (Nat.compare_eq_lt.mpr hilt).symm
+          · simp [h_i, h_j]
+      | obs j =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_i : i = hypIdx
+          · simp only [h_i, beq_iff_eq, ↓reduceIte, Origin.cmp_hyp_obs, Origin.cmp]
+            exact Nat.compare_eq_lt.mpr (Nat.zero_lt_succ j)
+          · simp [h_i, Origin.cmp]
+      | dom _ =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_i : i = hypIdx <;> simp [h_i, Origin.cmp]
+      | split _ _ =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_i : i = hypIdx <;> simp [h_i, Origin.cmp]
+  | obs i =>
+      cases o₂ with
+      | hyp j =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_j : j = hypIdx
+          · simp only [h_j, beq_iff_eq, ↓reduceIte, Origin.cmp_obs_hyp, Origin.cmp]
+            exact (Nat.compare_eq_gt.mpr (Nat.zero_lt_succ i)).symm
+          · simp [h_j, Origin.cmp]
+      | obs j =>
+          dsimp only [Origin.rekeyHypToObs, Origin.cmp]
+          have hi0 : ¬ i < 0 := Nat.not_lt_zero i
+          have hj0 : ¬ j < 0 := Nat.not_lt_zero j
+          simp only [hi0, hj0, ↓reduceIte]
+          rcases Nat.lt_trichotomy i j with hlt | heq | hgt
+          · have hlt' : i + 1 < j + 1 := Nat.add_lt_add_right hlt 1
+            rw [Nat.compare_eq_lt.mpr hlt', Nat.compare_eq_lt.mpr hlt]
+          · subst heq
+            rw [Nat.compare_eq_eq.mpr rfl, Nat.compare_eq_eq.mpr rfl]
+          · have hgt' : j + 1 < i + 1 := Nat.add_lt_add_right hgt 1
+            rw [Nat.compare_eq_gt.mpr hgt', Nat.compare_eq_gt.mpr hgt]
+      | dom _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+      | split _ _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+  | dom n =>
+      cases o₂ with
+      | hyp j =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_j : j = hypIdx <;> simp [h_j, Origin.cmp]
+      | obs _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+      | dom m => simp [Origin.rekeyHypToObs, Origin.cmp]
+      | split _ _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+  | split p side ih =>
+      cases o₂ with
+      | hyp j =>
+          dsimp only [Origin.rekeyHypToObs]
+          by_cases h_j : j = hypIdx <;> simp [h_j, Origin.cmp]
+      | obs _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+      | dom _ => simp [Origin.rekeyHypToObs, Origin.cmp]
+      | split q side' =>
+          have hp : Origin.hypIdxLe p hypIdx := h₁
+          have hq : Origin.hypIdxLe q hypIdx := h₂
+          cases side <;> cases side' <;>
+            simp [Origin.rekeyHypToObs, Origin.cmp, ih hp hq]
+
+theorem Origin.ble_rekeyHypToObs_zero_of_hypIdxLe (hypIdx : Nat)
+    {o₁ o₂ : Origin sig}
+    (h₁ : Origin.hypIdxLe o₁ hypIdx) (h₂ : Origin.hypIdxLe o₂ hypIdx) :
+    Origin.ble (Origin.rekeyHypToObs hypIdx 0 o₁)
+      (Origin.rekeyHypToObs hypIdx 0 o₂) =
+      Origin.ble o₁ o₂ := by
+  simp only [Origin.ble, Origin.cmp_rekeyHypToObs_zero_of_hypIdxLe hypIdx h₁ h₂]
+
+
+/-! ### Origin.ble total / transitive (for mergeSort) -/
+
+theorem Origin.cmp_swap (o₁ o₂ : Origin sig) :
+    Origin.cmp o₂ o₁ = (Origin.cmp o₁ o₂).swap := by
+  induction o₁ generalizing o₂ with
+  | hyp i =>
+      cases o₂ with
+      | hyp j => simp only [Origin.cmp]; exact (Nat.compare_swap i j).symm
+      | obs _ | dom _ | split _ _ => rfl
+  | obs i =>
+      cases o₂ with
+      | hyp _ => rfl
+      | obs j => simp only [Origin.cmp]; exact (Nat.compare_swap i j).symm
+      | dom _ | split _ _ => rfl
+  | dom i =>
+      cases o₂ with
+      | hyp _ | obs _ => rfl
+      | dom j => simp only [Origin.cmp]; exact (Nat.compare_swap i j).symm
+      | split _ _ => rfl
+  | split p s ih =>
+      cases o₂ with
+      | hyp _ | obs _ | dom _ => rfl
+      | split q t =>
+          cases s <;> cases t
+          · simpa [Origin.cmp] using ih q
+          · simp only [Origin.cmp]; have h := ih q; cases hc : Origin.cmp p q <;> simp [hc, h]
+          · simp only [Origin.cmp]; have h := ih q; cases hc : Origin.cmp p q <;> simp [hc, h]
+          · simpa [Origin.cmp] using ih q
+
+theorem Origin.eq_of_cmp_eq {o₁ o₂ : Origin sig}
+    (h : Origin.cmp o₁ o₂ = .eq) : o₁ = o₂ := by
+  induction o₁ generalizing o₂ with
+  | hyp i =>
+      cases o₂ with
+      | hyp j =>
+          simp only [Origin.cmp] at h
+          exact congrArg Origin.hyp (Nat.compare_eq_eq.mp h)
+      | obs _ | dom _ | split _ _ => cases h
+  | obs i =>
+      cases o₂ with
+      | hyp _ => cases h
+      | obs j =>
+          simp only [Origin.cmp] at h
+          exact congrArg Origin.obs (Nat.compare_eq_eq.mp h)
+      | dom _ | split _ _ => cases h
+  | dom i =>
+      cases o₂ with
+      | hyp _ | obs _ => cases h
+      | dom j =>
+          simp only [Origin.cmp] at h
+          exact congrArg Origin.dom (Nat.compare_eq_eq.mp h)
+      | split _ _ => cases h
+  | split p s ih =>
+      cases o₂ with
+      | hyp _ | obs _ | dom _ => cases h
+      | split q t =>
+          cases s <;> cases t
+          · simp only [Origin.cmp] at h; have := ih h; subst this; rfl
+          · simp only [Origin.cmp] at h; cases hc : Origin.cmp p q <;> simp [hc] at h
+          · simp only [Origin.cmp] at h; cases hc : Origin.cmp p q <;> simp [hc] at h
+          · simp only [Origin.cmp] at h; have := ih h; subst this; rfl
+
+/-- Canonical form of split/split comparison. -/
+def Origin.splitCmp (p : Origin sig) (s : Bool) (q : Origin sig) (t : Bool) : Ordering :=
+  match s, t with
+  | false, false | true, true => Origin.cmp p q
+  | false, true => match Origin.cmp p q with | .eq => .lt | o => o
+  | true, false => match Origin.cmp p q with | .eq => .gt | o => o
+
+theorem Origin.cmp_split_eq (p q : Origin sig) (s t : Bool) :
+    Origin.cmp (.split p s) (.split q t) = Origin.splitCmp p s q t := by
+  cases s <;> cases t <;> rfl
+
+theorem Origin.splitCmp_lt_trans (p q r : Origin sig) (s t u : Bool)
+    (h₁₂ : Origin.splitCmp p s q t = .lt) (h₂₃ : Origin.splitCmp q t r u = .lt)
+    (ih : ∀ {q r : Origin sig}, Origin.cmp p q = .lt → Origin.cmp q r = .lt → Origin.cmp p r = .lt) :
+    Origin.splitCmp p s r u = .lt := by
+  cases s <;> cases t <;> cases u <;> simp only [Origin.splitCmp] at h₁₂ h₂₃ ⊢
+  · exact ih h₁₂ h₂₃
+  · -- f f t
+    cases hr : Origin.cmp q r with
+    | lt =>
+        have := ih h₁₂ hr
+        simp [this]
+    | eq =>
+        simp [hr] at h₂₃
+        have := Origin.eq_of_cmp_eq hr; subst this
+        simp [h₁₂]
+    | gt => simp [hr] at h₂₃
+  · -- f t f
+    cases hpq : Origin.cmp p q with
+    | lt =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            simp [hqr] at h₂₃
+            have := ih hpq hqr
+            simp [this]
+        | eq => simp [hqr] at h₂₃
+        | gt => simp [hqr] at h₂₃
+    | eq =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            simp [hqr] at h₂₃
+            have := Origin.eq_of_cmp_eq hpq; subst this
+            simp [hqr]
+        | eq => simp [hqr] at h₂₃
+        | gt => simp [hqr] at h₂₃
+    | gt => simp [hpq] at h₁₂
+  · -- f t t
+    cases hpq : Origin.cmp p q with
+    | lt =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            have := ih hpq hqr
+            simp [this]
+        | eq =>
+            have := Origin.eq_of_cmp_eq hqr; subst this
+            simp [hpq]
+        | gt => simp [hqr] at h₂₃
+    | eq =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            have := Origin.eq_of_cmp_eq hpq; subst this
+            simp [hqr]
+        | eq =>
+            have hp := Origin.eq_of_cmp_eq hpq
+            have hq := Origin.eq_of_cmp_eq hqr
+            subst hp; subst hq
+            simp [Origin.cmp_self]
+        | gt => simp [hqr] at h₂₃
+    | gt => simp [hpq] at h₁₂
+  · -- t f f
+    cases hpq : Origin.cmp p q with
+    | lt =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            have := ih hpq hqr
+            simp [this]
+        | eq =>
+            have := Origin.eq_of_cmp_eq hqr; subst this
+            simp [hpq]
+        | gt => simp [hqr] at h₂₃
+    | eq => simp [hpq] at h₁₂
+    | gt => simp [hpq] at h₁₂
+  · -- t f t
+    cases hpq : Origin.cmp p q with
+    | lt =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt => exact ih hpq hqr
+        | eq =>
+            simp [hqr] at h₂₃
+            have := Origin.eq_of_cmp_eq hqr; subst this
+            exact hpq
+        | gt => simp [hqr] at h₂₃
+    | eq => simp [hpq] at h₁₂
+    | gt => simp [hpq] at h₁₂
+  · -- t t f
+    cases hpq : Origin.cmp p q with
+    | lt =>
+        simp [hpq] at h₁₂
+        cases hqr : Origin.cmp q r with
+        | lt =>
+            simp [hqr] at h₂₃
+            have := ih hpq hqr
+            simp [this]
+        | eq => simp [hqr] at h₂₃
+        | gt => simp [hqr] at h₂₃
+    | eq => simp [hpq] at h₁₂
+    | gt => simp [hpq] at h₁₂
+  · exact ih h₁₂ h₂₃
+
+theorem Origin.cmp_lt_trans {o₁ o₂ o₃ : Origin sig}
+    (h₁₂ : Origin.cmp o₁ o₂ = .lt) (h₂₃ : Origin.cmp o₂ o₃ = .lt) :
+    Origin.cmp o₁ o₃ = .lt := by
+  induction o₁ generalizing o₂ o₃ with
+  | hyp i =>
+      cases o₂ with
+      | hyp j =>
+          cases o₃ with
+          | hyp k =>
+              simp only [Origin.cmp, Nat.compare_eq_lt] at h₁₂ h₂₃ ⊢; omega
+          | obs _ | dom _ | split _ _ => rfl
+      | obs j =>
+          cases o₃ with
+          | hyp _ => cases h₂₃
+          | obs _ | dom _ | split _ _ => rfl
+      | dom j =>
+          cases o₃ with
+          | hyp _ | obs _ => cases h₂₃
+          | dom _ | split _ _ => rfl
+      | split _ _ =>
+          cases o₃ with
+          | hyp _ | obs _ | dom _ => cases h₂₃
+          | split _ _ => rfl
+  | obs i =>
+      cases o₂ with
+      | hyp _ => cases h₁₂
+      | obs j =>
+          cases o₃ with
+          | hyp _ => cases h₂₃
+          | obs k =>
+              simp only [Origin.cmp, Nat.compare_eq_lt] at h₁₂ h₂₃ ⊢; omega
+          | dom _ | split _ _ => rfl
+      | dom _ =>
+          cases o₃ with
+          | hyp _ | obs _ => cases h₂₃
+          | dom _ | split _ _ => rfl
+      | split _ _ =>
+          cases o₃ with
+          | hyp _ | obs _ | dom _ => cases h₂₃
+          | split _ _ => rfl
+  | dom i =>
+      cases o₂ with
+      | hyp _ | obs _ => cases h₁₂
+      | dom j =>
+          cases o₃ with
+          | hyp _ | obs _ => cases h₂₃
+          | dom k =>
+              simp only [Origin.cmp, Nat.compare_eq_lt] at h₁₂ h₂₃ ⊢; omega
+          | split _ _ => rfl
+      | split _ _ =>
+          cases o₃ with
+          | hyp _ | obs _ | dom _ => cases h₂₃
+          | split _ _ => rfl
+  | split p s ih =>
+      cases o₂ with
+      | hyp _ | obs _ | dom _ => cases h₁₂
+      | split q t =>
+          cases o₃ with
+          | hyp _ | obs _ | dom _ => cases h₂₃
+          | split r u =>
+              rw [Origin.cmp_split_eq] at h₁₂ h₂₃ ⊢
+              exact Origin.splitCmp_lt_trans p q r s t u h₁₂ h₂₃ ih
+
+theorem Origin.ble_total (o₁ o₂ : Origin sig) :
+    (Origin.ble o₁ o₂ || Origin.ble o₂ o₁) = true := by
+  cases hc : Origin.cmp o₁ o₂ with
+  | lt =>
+      have : Origin.cmp o₂ o₁ = .gt := by rw [Origin.cmp_swap, hc]; rfl
+      simp [Origin.ble, hc, this]
+  | eq =>
+      have : Origin.cmp o₂ o₁ = .eq := by rw [Origin.cmp_swap, hc]; rfl
+      simp [Origin.ble, hc, this]
+  | gt =>
+      have : Origin.cmp o₂ o₁ = .lt := by rw [Origin.cmp_swap, hc]; rfl
+      simp [Origin.ble, hc, this]
+
+theorem Origin.ble_trans (a b c : Origin sig)
+    (hab : Origin.ble a b = true) (hbc : Origin.ble b c = true) :
+    Origin.ble a c = true := by
+  simp only [Origin.ble, Bool.or_eq_true, beq_iff_eq] at hab hbc ⊢
+  cases hab with
+  | inl hab =>
+      cases hbc with
+      | inl hbc => exact Or.inl (Origin.cmp_lt_trans hab hbc)
+      | inr hbc => exact Or.inl (Origin.eq_of_cmp_eq hbc ▸ hab)
+  | inr hab =>
+      cases hbc with
+      | inl hbc => exact Or.inl (Origin.eq_of_cmp_eq hab ▸ hbc)
+      | inr hbc =>
+          rw [Origin.eq_of_cmp_eq hab, Origin.eq_of_cmp_eq hbc]
+          exact Or.inr (Origin.cmp_self _)
+
+
+/-! ### posCollect structural lemmas -/
+
+theorem posCollect_snoc {Δ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv (Δ ▻ A)) :
+    OriginEnv.posCollect ε =
+      let rest := OriginEnv.posCollect (fun {B} x => ε (.there x))
+      if objectPolarity A == .pos then
+        ({ origin := ε (.here : Var (Δ ▻ A) A), ty := A } : PosEntry sig) :: rest
+      else rest := by
+  rfl
+
+theorem posCollect_empty (ε : OriginEnv (Ctx.empty : Ctx sig)) :
+    OriginEnv.posCollect ε = [] := rfl
+
+theorem posCollect_env_eq {Γ : Ctx sig} {ε ε' : OriginEnv Γ}
+    (hε : ∀ {A} (x : Var Γ A), ε x = ε' x) :
+    OriginEnv.posCollect ε = OriginEnv.posCollect ε' := by
+  induction Γ with
+  | empty => rw [posCollect_empty, posCollect_empty]
+  | snoc Δ A ih =>
+      rw [posCollect_snoc, posCollect_snoc]
+      have hrest := ih (fun {B} x => hε (.there x))
+      split <;> simp [hε, hrest]
+
+theorem posCollect_origin_of_env {Γ : Ctx sig} (ε : OriginEnv Γ)
+    (hε : ∀ {A} (x : Var Γ A), ∃ i, ε x = .hyp (sig := sig) i)
+    {e : PosEntry sig} (he : e ∈ OriginEnv.posCollect ε) :
+    ∃ i, e.origin = .hyp (sig := sig) i := by
+  induction Γ with
+  | empty =>
+      rw [posCollect_empty] at he; cases he
+  | snoc Δ A ih =>
+      rw [posCollect_snoc] at he
+      split at he
+      · cases he with
+        | head =>
+            have ⟨i, hi⟩ := hε (.here : Var (Δ ▻ A) A)
+            exact ⟨i, hi⟩
+        | tail _ hmem =>
+            exact ih (fun {B} x => ε (.there x))
+              (fun {B} x => hε (.there x)) hmem
+      · exact ih (fun {B} x => ε (.there x))
+          (fun {B} x => hε (.there x)) he
+
+theorem posCollect_ofHyps_origin_hyp (hyps : Array (Object sig.nBases))
+    {e : PosEntry sig} (he : e ∈ OriginEnv.posCollect (OriginEnv.ofHyps hyps)) :
+    ∃ i, e.origin = .hyp (sig := sig) i := by
+  refine posCollect_origin_of_env (OriginEnv.ofHyps hyps) ?_ he
+  intro A x
+  exact ⟨hyps.size - 1 - Var.toRawIdx x, rfl⟩
+
+theorem posCollect_weaken_hyp (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) :
+    OriginEnv.posCollect
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) =
+      if objectPolarity P == .pos then
+        ({ origin := .hyp (sig := sig) hyps.size, ty := P } : PosEntry sig) ::
+          OriginEnv.posCollect (OriginEnv.ofHyps hyps)
+      else
+        OriginEnv.posCollect (OriginEnv.ofHyps hyps) := by
+  rw [posCollect_snoc]
+  have hrest :=
+    posCollect_env_eq
+      (ε := fun {B} x =>
+        OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size) (.there x))
+      (ε' := OriginEnv.ofHyps hyps)
+      (fun {B} x => rfl)
+  cases hpol : objectPolarity P == Polarity.pos <;>
+    simp [hpol, OriginEnv.weaken, OriginEnv.snoc, hrest]
 
 end Equality
 end Gimbal

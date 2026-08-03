@@ -73,6 +73,25 @@ inductive ICCEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
   | coprod_eta {Γ A B} (n : NegNeu Γ (.coprod A B)) :
       ICCEq (.case n (InvTm.etaInl A B) (InvTm.etaInr A B))
         (.foc (.pos (.done (.neu n))))
+  /--
+  Float `letPos` past an independent `case` (observation binder after hyp
+  left-coprod). Mirrors `case_lam`: exchange the two newest binders in each
+  branch. Needed so peel can expose a forced hyp under outer schedule `letPos`.
+  -/
+  | case_letPos {Γ A B P C}
+      (m : NegNeu Γ (.coprod A B))
+      (n : NegNeu Γ P)
+      (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C) :
+      ICCEq
+        (.foc (.letPos n (.case (NegNeu.weaken m) tL tR)))
+        (.case m
+          (.foc (.letPos (NegNeu.weaken (B := A) n)
+            (InvTm.rename Rename.exchange tL)))
+          (.foc (.letPos (NegNeu.weaken (B := B) n)
+            (InvTm.rename Rename.exchange tR))))
+  /-- Saturation metadata is erasable: the focused sat wrapper is its body. -/
+  | sat_body {Γ A} (s : Schedule sig.nBases) (t : InvTm Γ A) :
+      ICCEq (.foc (.sat (.mk s t))) t
 
 inductive ICCFocEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
     FocTm Γ A → FocTm Γ A → Prop where

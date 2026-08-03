@@ -268,7 +268,37 @@ theorem peelCaseOuterGo_icc {Γ : Ctx sig} {C : Object sig.nBases}
   | succ fuel ih =>
       intro t A B n tL tR h
       cases t with
-      | unit | abort _ | foc _ => simp [peelCaseOuterGo] at h
+      | unit | abort _ => simp [peelCaseOuterGo] at h
+      | foc f =>
+          cases f with
+          | pos _ | neg _ => simp [peelCaseOuterGo] at h
+          | sat s =>
+              cases s with
+              | mk _sched body =>
+                  simp only [peelCaseOuterGo] at h
+                  exact .trans (.sat_body _sched body) (ih ε body h)
+          | letPos n body =>
+              simp only [peelCaseOuterGo] at h
+              cases hb : peelCaseOuterGo fuel
+                  (OriginEnv.weaken (A := _) ε (.obs (sig := sig) 0)) o body with
+              | none => simp [hb] at h
+              | some r =>
+                  simp only [hb] at h
+                  rcases r with ⟨A₁, B₁, n₁, tL₁, tR₁⟩
+                  split at h
+                  · rename_i m0 hunw
+                    simp only [Option.some.injEq] at h
+                    obtain ⟨rfl, rfl, hn, hl, hr⟩ := peel_result_eq h
+                    cases eq_of_heq hn; cases eq_of_heq hl; cases eq_of_heq hr
+                    have hn₁ : n₁ = NegNeu.weaken (B := _) m0 :=
+                      NegNeu.eq_weaken_of_unweaken? n₁ m0 hunw
+                    have ihb := ih _ body hb
+                    have ihb' :
+                        ICCEq body (.case (NegNeu.weaken (B := _) m0) tL₁ tR₁) := by
+                      convert ihb; exact hn₁.symm
+                    exact .trans (.foc_cong (.letPos_cong ihb'))
+                      (.case_letPos m0 n tL₁ tR₁)
+                  · nomatch h
       | pair t₁ t₂ =>
           simp only [peelCaseOuterGo] at h
           cases h1 : peelCaseOuterGo fuel ε o t₁ with
@@ -421,6 +451,380 @@ theorem peelCaseOuter_icc {Γ : Ctx sig} {C : Object sig.nBases}
     (h : peelCaseOuter ε o t = some ⟨A, B, n, tL, tR⟩) :
     ICCEq t (.case n tL tR) :=
   peelCaseOuterGo_icc _ ε o t h
+
+/-! ### Peel size / budget accounts (for encode fuel adequacy) -/
+
+private theorem InvTm.size_cast_eq {Γ : Ctx sig} {A B : Object sig.nBases}
+    (h : A = B) (t : InvTm Γ A) :
+    InvTm.size (h ▸ t) = InvTm.size t := by
+  cases h; rfl
+
+private theorem InvTm.posPushBudget_cast_eq {Γ : Ctx sig} {A B : Object sig.nBases}
+    (h : A = B) (t : InvTm Γ A) :
+    InvTm.posPushBudget (h ▸ t) = InvTm.posPushBudget t := by
+  cases h; rfl
+
+/--
+Successful peel produces branches strictly smaller than the source, with budgets
+bounded by the source. Used to show left-coprod branch fuel is below the parent
+`encodeFuel`, including redistribution / exchange paths.
+-/
+theorem peelCaseOuterGo_size_budget {Γ : Ctx sig} {C : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig) :
+    ∀ (t : InvTm Γ C) {A B : Object sig.nBases} {n : NegNeu Γ (.coprod A B)}
+      {tL : InvTm (Γ ▻ A) C} {tR : InvTm (Γ ▻ B) C},
+      peelCaseOuterGo fuel ε o t = some ⟨A, B, n, tL, tR⟩ →
+        InvTm.size tL < InvTm.size t ∧
+        InvTm.size tR < InvTm.size t ∧
+        InvTm.posPushBudget tL ≤ InvTm.posPushBudget t ∧
+        InvTm.posPushBudget tR ≤ InvTm.posPushBudget t := by
+  induction fuel using Nat.strongRecOn generalizing Γ C ε with
+  | ind fuel ih =>
+      intro t A B n tL tR h
+      cases fuel with
+      | zero => simp [peelCaseOuterGo] at h
+      | succ fuel =>
+          cases t with
+          | unit | abort _ => simp [peelCaseOuterGo] at h
+          | foc f =>
+              cases f with
+              | pos _ | neg _ => simp [peelCaseOuterGo] at h
+              | sat s =>
+                  cases s with
+                  | mk _sched body =>
+                      simp only [peelCaseOuterGo] at h
+                      have ihb := ih fuel (Nat.lt_succ_self _) ε body h
+                      simp only [InvTm.size, FocTm.size, InvTm.posPushBudget,
+                        FocTm.posPushBudget] at ihb ⊢
+                      omega
+              | letPos n body =>
+                  simp only [peelCaseOuterGo] at h
+                  cases hb : peelCaseOuterGo fuel
+                      (OriginEnv.weaken (A := _) ε (.obs (sig := sig) 0)) o body with
+                  | none => simp [hb] at h
+                  | some r =>
+                      simp only [hb] at h
+                      rcases r with ⟨A₁, B₁, n₁, tL₁, tR₁⟩
+                      split at h
+                      · rename_i m0 hunw
+                        simp only [Option.some.injEq] at h
+                        obtain ⟨rfl, rfl, hn, hl, hr⟩ := peel_result_eq h
+                        cases eq_of_heq hn; cases eq_of_heq hl; cases eq_of_heq hr
+                        have ihb := ih fuel (Nat.lt_succ_self _) _ body hb
+                        have hnsz : NegNeu.size (NegNeu.weaken (B := A₁) n) =
+                            NegNeu.size n :=
+                          NegNeu.size_rename _ n
+                        have hnsz' : NegNeu.size (NegNeu.weaken (B := B₁) n) =
+                            NegNeu.size n :=
+                          NegNeu.size_rename _ n
+                        simp only [InvTm.size, FocTm.size, InvTm.size_rename,
+                          InvTm.posPushBudget, FocTm.posPushBudget,
+                          InvTm.posPushBudget_rename, hnsz, hnsz'] at ihb ⊢
+                        omega
+                      · nomatch h
+          | pair t₁ t₂ =>
+              simp only [peelCaseOuterGo] at h
+              cases h1 : peelCaseOuterGo fuel ε o t₁ with
+              | none => simp [h1] at h
+              | some r1 =>
+                  cases h2 : peelCaseOuterGo fuel ε o t₂ with
+                  | none => simp [h1, h2] at h
+                  | some r2 =>
+                      simp only [h1, h2] at h
+                      rcases r1 with ⟨A₁, B₁, n₁, l₁, r₁⟩
+                      rcases r2 with ⟨A₂, B₂, n₂, l₂, r₂⟩
+                      split at h
+                      · rename_i hA
+                        split at h
+                        · rename_i hB
+                          split at h
+                          · rename_i hbeq
+                            simp only [Option.some.injEq] at h
+                            obtain ⟨rfl, rfl, hn, hl, hr⟩ := peel_result_eq h
+                            cases eq_of_heq hn
+                            cases eq_of_heq hl
+                            cases eq_of_heq hr
+                            cases hA; cases hB
+                            obtain ⟨_, hneq⟩ := NegNeu.eq_of_beq n₁ n₂ hbeq
+                            cases eq_of_heq hneq
+                            have ih1 := ih fuel (Nat.lt_succ_self _) ε t₁ h1
+                            have ih2 := ih fuel (Nat.lt_succ_self _) ε t₂ h2
+                            simp only [InvTm.size, InvTm.posPushBudget] at ih1 ih2 ⊢
+                            omega
+                          · nomatch h
+                        · nomatch h
+                      · nomatch h
+          | lam body =>
+              simp only [peelCaseOuterGo] at h
+              cases hb : peelCaseOuterGo fuel
+                  (OriginEnv.weaken (A := _) ε (.dom 0)) o body with
+              | none => simp [hb] at h
+              | some r =>
+                  simp only [hb] at h
+                  rcases r with ⟨A₁, B₁, n₁, tL₁, tR₁⟩
+                  split at h
+                  · rename_i n0 hunw
+                    simp only [Option.some.injEq] at h
+                    obtain ⟨rfl, rfl, hn, hl, hr⟩ := peel_result_eq h
+                    cases eq_of_heq hn; cases eq_of_heq hl; cases eq_of_heq hr
+                    have ihb := ih fuel (Nat.lt_succ_self _) _ body hb
+                    simp only [InvTm.size, InvTm.size_rename, InvTm.posPushBudget,
+                      InvTm.posPushBudget_rename] at ihb ⊢
+                    omega
+                  · nomatch h
+          | case scr tL₀ tR₀ =>
+              cases scr with
+              | app _ _ | fst _ | snd _ => simp [peelCaseOuterGo] at h
+              | var x =>
+                  simp only [peelCaseOuterGo] at h
+                  split at h
+                  · simp only [Option.some.injEq] at h
+                    obtain ⟨rfl, rfl, hn, hl, hr⟩ := peel_result_eq h
+                    cases eq_of_heq hn; cases eq_of_heq hl; cases eq_of_heq hr
+                    simp only [InvTm.size, NegNeu.size, InvTm.posPushBudget]
+                    omega
+                  · cases hL : peelCaseOuterGo fuel
+                        (OriginEnv.weaken (A := _) ε (.split (ε x) false)) o tL₀ with
+                    | none =>
+                        simp only [hL] at h
+                        cases hD : distCaseOut (.var x) tL₀ tR₀ with
+                        | none => simp [hD] at h
+                        | some t' =>
+                            simp only [hD] at h
+                            cases tL₀ with
+                            | pair t₁ u₁ =>
+                                cases tR₀ with
+                                | pair t₂ u₂ =>
+                                    unfold distCaseOut at hD; cases hD
+                                    -- Dist pair peel uses `fuel`; unfold when `fuel = succ`.
+                                    cases fuel with
+                                    | zero => simp [peelCaseOuterGo] at h
+                                    | succ fuel =>
+                                        simp only [peelCaseOuterGo] at h
+                                        cases h1 : peelCaseOuterGo fuel ε o
+                                            (.case (.var x) t₁ t₂) with
+                                        | none => simp [h1] at h
+                                        | some r1 =>
+                                            cases h2 : peelCaseOuterGo fuel ε o
+                                                (.case (.var x) u₁ u₂) with
+                                            | none => simp [h1, h2] at h
+                                            | some r2 =>
+                                                simp only [h1, h2] at h
+                                                rcases r1 with ⟨A₁, B₁, n₁, l₁, r₁⟩
+                                                rcases r2 with ⟨A₂, B₂, n₂, l₂, r₂⟩
+                                                split at h
+                                                · rename_i hA
+                                                  split at h
+                                                  · rename_i hB
+                                                    split at h
+                                                    · rename_i hbeq
+                                                      simp only [Option.some.injEq] at h
+                                                      obtain ⟨rfl, rfl, hn, hl, hr⟩ :=
+                                                        peel_result_eq h
+                                                      cases eq_of_heq hn
+                                                      cases eq_of_heq hl
+                                                      cases eq_of_heq hr
+                                                      cases hA; cases hB
+                                                      obtain ⟨_, hneq⟩ :=
+                                                        NegNeu.eq_of_beq n₁ n₂ hbeq
+                                                      cases eq_of_heq hneq
+                                                      have ih1 :=
+                                                        ih fuel (by omega) ε _ h1
+                                                      have ih2 :=
+                                                        ih fuel (by omega) ε _ h2
+                                                      simp only [InvTm.size,
+                                                        InvTm.posPushBudget, NegNeu.size]
+                                                        at ih1 ih2 ⊢
+                                                      omega
+                                                    · nomatch h
+                                                  · nomatch h
+                                                · nomatch h
+                                | abort _ | foc _ | case _ _ _ =>
+                                    unfold distCaseOut at hD; nomatch hD
+                            | lam t₁ =>
+                                cases tR₀ with
+                                | lam u₁ =>
+                                    unfold distCaseOut at hD; cases hD
+                                    have ih' :=
+                                      ih fuel (Nat.lt_succ_self _) ε _ h
+                                    simp only [InvTm.size, NegNeu.size, NegNeu.weaken,
+                                      NegNeu.rename, InvTm.size_rename,
+                                      InvTm.posPushBudget, InvTm.posPushBudget_rename]
+                                      at ih' ⊢
+                                    omega
+                                | abort _ | foc _ | case _ _ _ =>
+                                    unfold distCaseOut at hD; nomatch hD
+                            | unit =>
+                                cases tR₀ with
+                                | unit =>
+                                    unfold distCaseOut at hD; cases hD
+                                    cases fuel <;> simp [peelCaseOuterGo] at h
+                                | abort _ | foc _ | case _ _ _ =>
+                                    unfold distCaseOut at hD; nomatch hD
+                            | abort _ | foc _ | case _ _ _ =>
+                                unfold distCaseOut at hD; nomatch hD
+                    | some rL =>
+                        cases hR : peelCaseOuterGo fuel
+                            (OriginEnv.weaken (A := _) ε (.split (ε x) true)) o tR₀ with
+                        | none =>
+                            simp only [hL, hR] at h
+                            cases hD : distCaseOut (.var x) tL₀ tR₀ with
+                            | none => simp [hD] at h
+                            | some t' =>
+                                simp only [hD] at h
+                                cases tL₀ with
+                                | pair t₁ u₁ =>
+                                    cases tR₀ with
+                                    | pair t₂ u₂ =>
+                                        unfold distCaseOut at hD; cases hD
+                                        cases fuel with
+                                        | zero => simp [peelCaseOuterGo] at h
+                                        | succ fuel =>
+                                            simp only [peelCaseOuterGo] at h
+                                            cases h1 : peelCaseOuterGo fuel ε o
+                                                (.case (.var x) t₁ t₂) with
+                                            | none => simp [h1] at h
+                                            | some r1 =>
+                                                cases h2 : peelCaseOuterGo fuel ε o
+                                                    (.case (.var x) u₁ u₂) with
+                                                | none => simp [h1, h2] at h
+                                                | some r2 =>
+                                                    simp only [h1, h2] at h
+                                                    rcases r1 with ⟨A₁, B₁, n₁, l₁, r₁⟩
+                                                    rcases r2 with ⟨A₂, B₂, n₂, l₂, r₂⟩
+                                                    split at h
+                                                    · rename_i hA
+                                                      split at h
+                                                      · rename_i hB
+                                                        split at h
+                                                        · rename_i hbeq
+                                                          simp only [Option.some.injEq] at h
+                                                          obtain ⟨rfl, rfl, hn, hl, hr⟩ :=
+                                                            peel_result_eq h
+                                                          cases eq_of_heq hn
+                                                          cases eq_of_heq hl
+                                                          cases eq_of_heq hr
+                                                          cases hA; cases hB
+                                                          obtain ⟨_, hneq⟩ :=
+                                                            NegNeu.eq_of_beq n₁ n₂ hbeq
+                                                          cases eq_of_heq hneq
+                                                          have ih1 :=
+                                                            ih fuel (by omega) ε _ h1
+                                                          have ih2 :=
+                                                            ih fuel (by omega) ε _ h2
+                                                          simp only [InvTm.size,
+                                                            InvTm.posPushBudget, NegNeu.size]
+                                                            at ih1 ih2 ⊢
+                                                          omega
+                                                        · nomatch h
+                                                      · nomatch h
+                                                    · nomatch h
+                                    | abort _ | foc _ | case _ _ _ =>
+                                        unfold distCaseOut at hD; nomatch hD
+                                | lam t₁ =>
+                                    cases tR₀ with
+                                    | lam u₁ =>
+                                        unfold distCaseOut at hD; cases hD
+                                        have ih' :=
+                                          ih fuel (Nat.lt_succ_self _) ε _ h
+                                        simp only [InvTm.size, NegNeu.size, NegNeu.weaken,
+                                          NegNeu.rename, InvTm.size_rename,
+                                          InvTm.posPushBudget, InvTm.posPushBudget_rename]
+                                          at ih' ⊢
+                                        omega
+                                    | abort _ | foc _ | case _ _ _ =>
+                                        unfold distCaseOut at hD; nomatch hD
+                                | unit =>
+                                    cases tR₀ with
+                                    | unit =>
+                                        unfold distCaseOut at hD; cases hD
+                                        cases fuel <;> simp [peelCaseOuterGo] at h
+                                    | abort _ | foc _ | case _ _ _ =>
+                                        unfold distCaseOut at hD; nomatch hD
+                                | abort _ | foc _ | case _ _ _ =>
+                                    unfold distCaseOut at hD; nomatch hD
+                        | some rR =>
+                            simp only [hL, hR] at h
+                            rcases rL with ⟨C₁, D₁, n₁, a₁, b₁⟩
+                            rcases rR with ⟨C₂, D₂, n₂, a₂, b₂⟩
+                            split at h
+                            · rename_i hC
+                              split at h
+                              · rename_i hDty
+                                split at h
+                                · rename_i hbeq
+                                  split at h
+                                  · rename_i m hunw
+                                    split at h
+                                    · rename_i om horig
+                                      split at h
+                                      · rename_i _hom
+                                        simp only [Option.some.injEq] at h
+                                        obtain ⟨rfl, rfl, hn, hl, hr⟩ :=
+                                          peel_result_eq h
+                                        cases eq_of_heq hn
+                                        cases eq_of_heq hl
+                                        cases eq_of_heq hr
+                                        cases hC; cases hDty
+                                        have ihL :=
+                                          ih fuel (Nat.lt_succ_self _) _ tL₀ hL
+                                        have ihR :=
+                                          ih fuel (Nat.lt_succ_self _) _ tR₀ hR
+                                        simp only [InvTm.size, NegNeu.size,
+                                          NegNeu.weaken, NegNeu.rename,
+                                          InvTm.size_rename, InvTm.size_cast_eq,
+                                          InvTm.posPushBudget,
+                                          InvTm.posPushBudget_rename,
+                                          InvTm.posPushBudget_cast_eq] at ihL ihR ⊢
+                                        omega
+                                      · nomatch h
+                                    · nomatch h
+                                  · nomatch h
+                                · nomatch h
+                              · nomatch h
+                            · nomatch h
+
+theorem peelCaseOuter_size_budget {Γ : Ctx sig} {C : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig) (t : InvTm Γ C)
+    {A B : Object sig.nBases} {n : NegNeu Γ (.coprod A B)}
+    {tL : InvTm (Γ ▻ A) C} {tR : InvTm (Γ ▻ B) C}
+    (h : peelCaseOuter ε o t = some ⟨A, B, n, tL, tR⟩) :
+    InvTm.size tL < InvTm.size t ∧
+    InvTm.size tR < InvTm.size t ∧
+    InvTm.posPushBudget tL ≤ InvTm.posPushBudget t ∧
+    InvTm.posPushBudget tR ≤ InvTm.posPushBudget t :=
+  peelCaseOuterGo_size_budget _ ε o t h
+
+/--
+Left-coprod branch fuel is strictly below the parent after a successful peel.
+-/
+theorem encodeFuelBranches_lt_of_peel {Γ : Ctx sig} {C L R : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig))
+    (hty : e.ty = .coprod L R)
+    (ε : OriginEnv Γ) (t : InvTm Γ C)
+    (n : NegNeu Γ (.coprod L R))
+    (tL : InvTm (Γ ▻ L) C) (tR : InvTm (Γ ▻ R) C)
+    (h : peelCaseOuter ε e.origin t = some ⟨L, R, n, tL, tR⟩) :
+    encodeFuelBranches (e :: ws) e tL tR < encodeFuel (e :: ws) t := by
+  obtain ⟨hsL, hsR, hbL, hbR⟩ := peelCaseOuter_size_budget ε e.origin t h
+  have hpushL := worklistWeight_pushPos_le ws (.split e.origin false) L
+  have hpushR := worklistWeight_pushPos_le ws (.split e.origin true) R
+  have hRpos := objectWeight_pos R
+  have hLpos := objectWeight_pos L
+  have hLfuel :
+      encodeFuel (pushPos ws (.split e.origin false) L) tL <
+        encodeFuel (e :: ws) t := by
+    simp only [encodeFuel, encodeMeasure, worklistWeight_cons, hty, objectWeight]
+      at hsL hbL hpushL ⊢
+    omega
+  have hRfuel :
+      encodeFuel (pushPos ws (.split e.origin true) R) tR <
+        encodeFuel (e :: ws) t := by
+    simp only [encodeFuel, encodeMeasure, worklistWeight_cons, hty, objectWeight]
+      at hsR hbR hpushR ⊢
+    omega
+  simp only [encodeFuelBranches, List.tail_cons]
+  exact (Nat.max_lt).mpr ⟨hLfuel, hRfuel⟩
 
 /-! ### Peel agreement for ICC `case_pair` -/
 

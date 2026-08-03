@@ -42,6 +42,66 @@ theorem subst0_rename_exchange {Γ : Ctx sig} {A B C : Object sig.nBases}
   | .there .here => rfl
   | .there (.there _) => rfl
 
+/--
+`letPos` / `case` exchange on erasures: cutting an independent observation
+through a `case` equals casing then cutting in each branch (with binder
+exchange). Erasure form of `ICCEq.case_letPos`.
+-/
+theorem cc_case_letPos {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (m : Tm Γ (.coprod A B)) (n : Tm Γ P)
+    (tL : Tm (Γ ▻ P ▻ A) C) (tR : Tm (Γ ▻ P ▻ B) C) :
+    TmEq
+      (subst0 (.case (weakenTerm m) tL tR) n)
+      (.case m
+        (subst0 (rename Rename.exchange tL) (weakenTerm n))
+        (subst0 (rename Rename.exchange tR) (weakenTerm n))) := by
+  apply TmEq.of_eq
+  change
+      Tm.case (subst0 (weakenTerm m) n)
+        (subst (Subst.exts (Subst.single n)) tL)
+        (subst (Subst.exts (Subst.single n)) tR) =
+      Tm.case m
+        (subst0 (rename Rename.exchange tL) (weakenTerm n))
+        (subst0 (rename Rename.exchange tR) (weakenTerm n))
+  rw [subst0_weakenTerm]
+  -- `subst0_rename_exchange` has binders `(Γ ▻ A ▻ B)` with cut of type `A`;
+  -- here the case binder is newest (`A`/`B`) and the observation `P` is older,
+  -- so exchange then cut matches `exts (single n)` on the unexchanged body.
+  have hL :
+      subst0 (rename Rename.exchange tL) (weakenTerm n) =
+        subst (Subst.exts (Subst.single n)) tL := by
+    -- Rename.exchange : (Γ ▻ P ▻ A) → (Γ ▻ A ▻ P); cut has type A after exchange?
+    -- Actually after exchange newest is P, and we cut with weaken n : Γ ▻ A ⊢ P.
+    -- subst0_rename_exchange expects t : Γ ▻ A ▻ B with cut : Γ ⊢ A.
+    -- We need the symmetric form: t : Γ ▻ P ▻ A, cut : Γ ⊢ P.
+    -- Prove by unfolding like subst0_rename_exchange with swapped roles.
+    rw [subst0, subst_rename]
+    refine subst_eq_of_pointwise ?_ tL
+    intro D x
+    match x with
+    | .here =>
+        -- exchange maps here (A) to there here; exts (single n) on here = var here
+        -- after rename+subst0 with weaken n on (Γ ▻ A ▻ P): here ↦ weaken n? No:
+        -- After exchange, here is P-binder; subst0 (weaken n) substitutes n for P.
+        -- Pointwise on original tL's here (A): exchange sends it to there.here (A under P);
+        -- subst0 (weaken n) leaves there.here as var here (A). Good = exts here.
+        rfl
+    | .there .here =>
+        rfl
+    | .there (.there _) =>
+        rfl
+  have hR :
+      subst0 (rename Rename.exchange tR) (weakenTerm n) =
+        subst (Subst.exts (Subst.single n)) tR := by
+    rw [subst0, subst_rename]
+    refine subst_eq_of_pointwise ?_ tR
+    intro D x
+    match x with
+    | .here => rfl
+    | .there .here => rfl
+    | .there (.there _) => rfl
+  rw [hL, hR]
+
 /-- A branch pushed under an extra binder is unaffected by the `letPos` cut. -/
 theorem subst_exts_single_rename_skip1 {Γ : Ctx sig} {A P C : Object sig.nBases}
     (t : Tm (Γ ▻ A) C) (n : Tm Γ P) :

@@ -28,15 +28,9 @@ theorem encodeICC_unit_of_nilWorklist {Γ : Ctx sig} (ε : OriginEnv Γ)
     encodeICC ε (.unit (Γ := Γ)) = some .unit := by
   unfold encodeICC
   rw [hws]
-  have hpos : 0 < objectWeight (.unit : Object sig.nBases) := objectWeight_pos _
-  have : 0 < encodeMeasure ([] : List (PosEntry sig)) (.unit : Object sig.nBases) := by
-    simpa [encodeMeasure, worklistWeight] using hpos
-  match hm : encodeMeasure ([] : List (PosEntry sig)) (.unit : Object sig.nBases) with
-  | 0 =>
-      simp only [encodeMeasure, worklistWeight, List.foldl, objectWeight] at hm
-      omega
-  | fuel + 1 =>
-      simpa [hm] using encodeICCGo_unit_nil fuel ε 0 0
+  have hpos := encodeFuel_pos ([] : List (PosEntry sig)) (.unit (Γ := Γ))
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using encodeICCGo_unit_nil fuel ε 0 0
 
 /-- Trivial direction of generator invariance. -/
 theorem encodeICC_eq_refl {Γ : Ctx sig} {A : Object sig.nBases}
@@ -100,7 +94,24 @@ private theorem List.foldl_add_nat {α : Type _} (ws : List α) (f : α → Nat)
       rw [ih (a + f x), hx]
       omega
 
-/-- `ICCEq.case_pair` preserves `encodeICC` when the worklist head is that coprod. -/
+/-- `ICCEq.case_pair` preserves codes at every common fuel (Go level). -/
+theorem encodeICCGo_case_pair_any {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
+      encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) := by
+  match fuel with
+  | 0 => simp [encodeICCGo]
+  | fuel + 1 => exact encodeICCGo_case_pair fuel e ws ε domNest obsSlot x t₁ t₂ u₁ u₂ hty hit
+
+/-- Top-level `case_pair` packaging: see `encodeIccStep_case_pair` in `ICCTotal`
+(after successful-result fuel mono + max-fuel lift). -/
 theorem encodeICC_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
     (x : Var Γ (.coprod A B))
@@ -108,35 +119,34 @@ theorem encodeICC_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
     (hws : OriginEnv.posWorklist ε = e :: ws)
     (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
-    encodeICC ε (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
-      encodeICC ε (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) := by
-  unfold encodeICC
-  rw [hws]
-  have hpos := encodeMeasure_cons_pos e ws (.prod C D)
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simpa [hm] using
-    encodeICCGo_case_pair fuel e ws ε 0 0 x t₁ t₂ u₁ u₂ hty hit
+    encodeICCGo (encodeFuel (e :: ws)
+        (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)))
+        (e :: ws) ε 0 0
+        (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)) =
+      encodeICCGo (encodeFuel (e :: ws)
+        (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂)))
+        (e :: ws) ε 0 0
+        (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) :=
+  encodeICCGo_case_pair_any _ e ws ε 0 0 x t₁ t₂ u₁ u₂ hty hit
 
-/-- `ICCEq.case_lam` preserves `encodeICC` when the worklist head is that coprod. -/
-theorem encodeICC_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+/-- `ICCEq.case_lam` preserves codes at every common fuel (Go level). -/
+theorem encodeICCGo_case_lam_any {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
     (x : Var Γ (.coprod A B))
     (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
-    (hws : OriginEnv.posWorklist ε = e :: ws)
     (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
-    encodeICC ε (.case (.var x) (.lam t) (.lam u)) =
-      encodeICC ε
+    encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.case (.var x) (.lam t) (.lam u)) =
+      encodeICCGo fuel (e :: ws) ε domNest obsSlot
         (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
           (InvTm.rename Rename.exchange t)
           (InvTm.rename Rename.exchange u))) := by
-  unfold encodeICC
-  rw [hws]
-  have hpos := encodeMeasure_cons_pos e ws (.exp Arg Ret)
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simpa [hm] using
-    encodeICCGo_case_lam fuel e ws ε 0 0 x t u hty hit
+  match fuel with
+  | 0 => simp [encodeICCGo]
+  | fuel + 1 => exact encodeICCGo_case_lam fuel e ws ε domNest obsSlot x t u hty hit
 
-/-- `ICCEq.case_case` preserves codes when the forced head origin is `xs`. -/
+/-- `ICCEq.case_case` at a successor fuel. -/
 theorem encodeICCGo_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
     (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
     (ε : OriginEnv Γ) (domNest obsSlot : Nat)
@@ -161,19 +171,20 @@ theorem encodeICCGo_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
   have hpeel := peelCaseOuter_case_case ε e.origin xs xt t₁ t₂ u₁ u₂ hit miss
   simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
 
-theorem encodeICC_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+/-- `ICCEq.case_case` preserves codes at every common fuel (Go level). -/
+theorem encodeICCGo_case_case_any {Γ : Ctx sig} {A B C D E : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
     (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
     (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
     (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
-    (hws : OriginEnv.posWorklist ε = e :: ws)
     (hty : e.ty = .coprod A B) (hit : ε xs = e.origin)
     (miss : (ε xt == e.origin) = false) :
-    encodeICC ε
+    encodeICCGo fuel (e :: ws) ε domNest obsSlot
         (.case (.var xs)
           (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
           (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂)) =
-      encodeICC ε
+      encodeICCGo fuel (e :: ws) ε domNest obsSlot
         (.case (.var xt)
           (.case (NegNeu.weaken (B := C) (.var xs))
             (InvTm.rename Rename.exchange t₁)
@@ -181,63 +192,12 @@ theorem encodeICC_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
           (.case (NegNeu.weaken (B := D) (.var xs))
             (InvTm.rename Rename.exchange t₂)
             (InvTm.rename Rename.exchange u₂))) := by
-  unfold encodeICC
-  rw [hws]
-  have hpos := encodeMeasure_cons_pos e ws E
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simpa [hm] using
-    encodeICCGo_case_case fuel e ws ε 0 0 xs xt t₁ t₂ u₁ u₂ hty hit miss
+  match fuel with
+  | 0 => simp [encodeICCGo]
+  | fuel + 1 =>
+      exact encodeICCGo_case_case fuel e ws ε domNest obsSlot xs xt t₁ t₂ u₁ u₂ hty hit miss
 
-/-! ### Package commute rules as `EncodeIccStep` -/
-
-theorem encodeIccStep_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
-    (x : Var Γ (.coprod A B))
-    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
-    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
-    (hws : OriginEnv.posWorklist ε = e :: ws)
-    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
-    EncodeIccStep ε
-      (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂))
-      (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) :=
-  EncodeIccStep.of_option_eq ε (encodeICC_case_pair ε e ws x t₁ t₂ u₁ u₂ hws hty hit)
-
-theorem encodeIccStep_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
-    (x : Var Γ (.coprod A B))
-    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
-    (hws : OriginEnv.posWorklist ε = e :: ws)
-    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
-    EncodeIccStep ε
-      (.case (.var x) (.lam t) (.lam u))
-      (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
-        (InvTm.rename Rename.exchange t)
-        (InvTm.rename Rename.exchange u))) :=
-  EncodeIccStep.of_option_eq ε (encodeICC_case_lam ε e ws x t u hws hty hit)
-
-theorem encodeIccStep_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
-    (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
-    (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
-    (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
-    (hws : OriginEnv.posWorklist ε = e :: ws)
-    (hty : e.ty = .coprod A B) (hit : ε xs = e.origin)
-    (miss : (ε xt == e.origin) = false) :
-    EncodeIccStep ε
-      (.case (.var xs)
-        (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
-        (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂))
-      (.case (.var xt)
-        (.case (NegNeu.weaken (B := C) (.var xs))
-          (InvTm.rename Rename.exchange t₁)
-          (InvTm.rename Rename.exchange u₁))
-        (.case (NegNeu.weaken (B := D) (.var xs))
-          (InvTm.rename Rename.exchange t₂)
-          (InvTm.rename Rename.exchange u₂))) :=
-  EncodeIccStep.of_option_eq ε
-    (encodeICC_case_case ε e ws xs xt t₁ t₂ u₁ u₂ hws hty hit miss)
-
-/-! ### `case_unit` via left-η expansion -/
+/-! ### `case_unit` via left-η; `EncodeIccStep` packaging lives in `ICCTotal` -/
 
 theorem peelCaseOuter_unit_none {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin sig) :
     peelCaseOuter ε o (.unit (Γ := Γ)) = none := by
@@ -267,28 +227,19 @@ theorem encodeICCGo_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
   simp only [encodeICCGo, hforce, hpeelX, hpeelU, hfind, hit, beq_self_eq_true,
     ↓reduceDIte, ↓reduceIte, eq_rec_constant]
 
-theorem encodeICC_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+theorem encodeICCGo_case_unit_any {Γ : Ctx sig} {A B : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
     (x : Var Γ (.coprod A B))
-    (hws : OriginEnv.posWorklist ε = e :: ws)
     (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
     (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod A B, x⟩) :
-    encodeICC ε (.case (.var x) .unit .unit) = encodeICC ε (.unit (Γ := Γ)) := by
-  unfold encodeICC
-  rw [hws]
-  have hpos := encodeMeasure_cons_pos e ws (.unit : Object sig.nBases)
-  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
-  simpa [hm] using
-    encodeICCGo_case_unit fuel e ws ε 0 0 x hty hit hfind
-
-theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
-    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
-    (x : Var Γ (.coprod A B))
-    (hws : OriginEnv.posWorklist ε = e :: ws)
-    (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
-    (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod A B, x⟩) :
-    EncodeIccStep ε (.case (.var x) .unit .unit) (.unit (Γ := Γ)) :=
-  EncodeIccStep.of_option_eq ε (encodeICC_case_unit ε e ws x hws hty hit hfind)
+    encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.case (.var x) .unit .unit) =
+      encodeICCGo fuel (e :: ws) ε domNest obsSlot .unit := by
+  match fuel with
+  | 0 => simp [encodeICCGo]
+  | fuel + 1 =>
+      exact encodeICCGo_case_unit fuel e ws ε domNest obsSlot x hty hit hfind
 
 /-! ### Right-introduction unfolds (nil worklist) -/
 
@@ -345,7 +296,7 @@ theorem encodeICC_abort_leftNever {Γ : Ctx sig} {A : Object sig.nBases}
     encodeICC ε (.abort (A := A) n) = some (.abort e.origin) := by
   unfold encodeICC
   rw [hws]
-  have hpos := encodeMeasure_cons_pos e ws A
+  have hpos := encodeFuel_pos (e :: ws) (.abort (A := A) n)
   obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
   simpa [hm] using encodeICCGo_abort_leftNever fuel e ws ε 0 0 n hty
 
@@ -449,8 +400,10 @@ Tracked as goal Props in `Completeness.lean`:
 2. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done**
 3. `EncodeIccInvariant` (`ValidEncodeFragment` → `EncodeIccStep`) — commute
    rules packaged; `case_unit` left-η; `abort_eq` under `leftNever`; sat erase
-   and Go-level pair/lam/case congruence landed; fuel mono / top-level cong remain.
-4. `EncodeTotal` — `ValidEncodeFragment` only (`ICCFragment.lean` / `ICCTotal.lean`)
+   and Go-level pair/lam/case congruence landed; fuel mono / top-level cong /
+   `EncodeIccStep` packaging without `hdom` landed; full `ofHyps` induction open.
+4. `EncodeTotal` — `EncodeReady` ⇒ encodable proved (`encodeReady_go_some`);
+   `ValidEncodeFragment` ⇒ `EncodeReady` still open (`EncodeTotal_of_ready`).
 5. `ReferenceCompareTotal` + iff — erase `2048` from decidability
 6. Wire code equality into the total `referenceCompare`; resume 8G
 -/
