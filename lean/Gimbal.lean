@@ -23,6 +23,7 @@ import Gimbal.Equality.Translate
 import Gimbal.Equality.Interpret
 import Gimbal.Equality.Polarized
 import Gimbal.Equality.Focused
+import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Deduction

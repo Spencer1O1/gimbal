@@ -19,9 +19,11 @@ namespace Equality
 
 variable {sig : Signature}
 
-/-- Stages reported when the candidate runner exhausts fuel. -/
+/--
+Stages reported when the candidate runner exhausts fuel.
+Focusing is total (hereditary substitution), so it is not a stage.
+-/
 inductive EqualityStage where
-  | focus
   | saturate
   | canonicalize
   deriving DecidableEq, Repr
@@ -174,9 +176,7 @@ def compareUnder {A : Object sig.nBases}
 def compareTm {Γ : Ctx sig} {A : Object sig.nBases}
     (goal : Object sig.nBases) (t u : Tm Γ A) (fuel : Nat := 2048) :
     CandidateResult :=
-  match focusInv fuel t, focusInv fuel u with
-  | .exhausted, _ | _, .exhausted => .exhausted .focus
-  | .ok t', .ok u' => compareUnder Γ goal t' u' (fuel := fuel)
+  compareUnder Γ goal (focus t) (focus u) (fuel := fuel)
 
 /--
 Private candidate: compare two intrinsic morphisms via translate → focus →

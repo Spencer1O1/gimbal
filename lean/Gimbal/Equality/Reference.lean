@@ -215,14 +215,12 @@ def referenceCompareUnder {A : Object sig.nBases}
 def referenceCompareTm {Γ : Ctx sig} {A : Object sig.nBases}
     (goal : Object sig.nBases) (t u : Tm Γ A) (fuel : Nat := 2048) :
     CandidateResult :=
-  match focusInv fuel t, focusInv fuel u with
-  | .exhausted, _ | _, .exhausted => .exhausted .focus
-  | .ok t', .ok u' => referenceCompareUnder Γ goal t' u' (fuel := fuel)
+  referenceCompareUnder Γ goal (focus t) (focus u) (fuel := fuel)
 
 /--
 Reference comparator on intrinsic morphisms.
-Proof target for Milestone 8G (`↔ DefEq`); fuel is temporary until hereditary
-focusing / well-founded saturation measures land.
+Proof target for Milestone 8G (`↔ DefEq`); the remaining fuel is for
+saturation and ICC, which still need well-founded measures.
 -/
 def referenceCompare {X Y : Object sig.nBases}
     (f g : IntrinsicMorphism sig X Y) (fuel : Nat := 2048) : CandidateResult :=

@@ -418,7 +418,7 @@ example :
     compareIntrinsic (fuel := 0)
       (IntrinsicMorphism.id (sig := NumSig) Number)
       (IntrinsicMorphism.id (sig := NumSig) Number) =
-      CandidateResult.exhausted .focus := by
+      CandidateResult.exhausted .saturate := by
   native_decide
 
 /-! ### Unit / Never generator laws & observation order -/
@@ -1049,7 +1049,7 @@ example :
     compareIntrinsic (fuel := 0)
       (IntrinsicMorphism.id (sig := NumSig) Number)
       (IntrinsicMorphism.id (sig := NumSig) Number) =
-      CandidateResult.exhausted .focus := by
+      CandidateResult.exhausted .saturate := by
   native_decide
 
 end Gimbal.Equality.Fixtures

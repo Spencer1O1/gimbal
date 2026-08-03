@@ -129,6 +129,19 @@ def exchange {Γ : Ctx sig} {A B : Object sig.nBases} :
   | _, .there .here => .here
   | _, .there (.there x) => .there (.there x)
 
+/-- Contract two copies of the same newest binder: `(Γ ▻ A ▻ A) → (Γ ▻ A)`. -/
+def diag {Γ : Ctx sig} {A : Object sig.nBases} :
+    Rename sig (Γ ▻ A ▻ A) (Γ ▻ A)
+  | _, .here => .here
+  | _, .there .here => .here
+  | _, .there (.there x) => .there x
+
+/-- Insert one binder underneath the newest one: `(Γ ▻ A) → (Γ ▻ B ▻ A)`. -/
+def skip1 {Γ : Ctx sig} {A B : Object sig.nBases} :
+    Rename sig (Γ ▻ A) (Γ ▻ B ▻ A)
+  | _, .here => .here
+  | _, .there x => .there (.there x)
+
 end Rename
 
 /-- Apply a renaming to a term. -/
