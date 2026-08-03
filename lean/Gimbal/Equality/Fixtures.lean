@@ -316,6 +316,38 @@ def applyNeverAbortUnit : Bool :=
 
 example : applyNeverAbortUnit = true := by native_decide
 
+/--
+Handoff adversarial #10: in an inconsistent context the comparison collapses two
+genuinely different terms through the discovered proof of `0`. Context is
+`z : 0`, `x y : X`; the two focused forms differ, and the comparison is `.equal`.
+-/
+def inconsistentCollapsesCompare : Bool :=
+  let hyps : Array (Object 1) := #[.never, .base 0, .base 0]
+  let Γ : ReachCtx 1 := ⟨hyps, 0⟩
+  let t : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) := .var (.there .here)
+  let u : Tm (Ctx.ofHyps (sig := Sig1) hyps) (.base 0) := .var .here
+  !InvTm.beq (focus t) (focus u) &&
+    (match referenceCompareInv (sig := Sig1) Γ (.base 0) (focus t) (focus u) 256 with
+     | .equal => true
+     | _ => false)
+
+example : inconsistentCollapsesCompare = true := by native_decide
+
+/--
+Handoff adversarial #9: at the root every hypothesis is new, so a generator
+whose target is positive makes that positive a scheduled observation. The
+counterfactual with the same hypothesis marked old schedules nothing, which is
+exactly the observation that would have been dropped.
+-/
+def positiveGeneratorIsNewAtRoot : Bool :=
+  let hyps : Array (Object 1) := #[.exp (.unit : Object 1) (.base 0)]
+  let root : ReachCtx 1 := ⟨hyps, 0⟩
+  let asOld : ReachCtx 1 := ⟨hyps, 1⟩
+  (buildSchedule (runReachability root (.unit : Object 1))).size == 1 &&
+    (buildSchedule (runReachability asOld (.unit : Object 1))).size == 0
+
+example : positiveGeneratorIsNewAtRoot = true := by native_decide
+
 /-! ### ICC canonicalizer -/
 
 def iccCaseUnit :
