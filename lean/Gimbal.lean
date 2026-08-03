@@ -47,6 +47,7 @@ import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon
 import Gimbal.Equality.ICCWell
+import Gimbal.Equality.ICCIdem
 import Gimbal.Equality.Compare
 import Gimbal.Equality.Reference
 import Gimbal.Equality.ReferenceSound
