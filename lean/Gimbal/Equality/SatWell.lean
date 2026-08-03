@@ -385,6 +385,19 @@ theorem wellEntry_of_mem_mergePairObs {σ : ReachState sig.nBases}
       · exact h1 ▸ .consistency (hcons _ (consistency.entries.getElem_mem i.2))
     · exact hacc
 
+/-- Admissibility is stable under reordering, so canonicalization preserves it. -/
+theorem wellEntries_canonicalizePairObsOrder {σ : ReachState sig.nBases}
+    {hyps : Array (Object sig.nBases)} {entries : Array (PairEntry sig hyps)}
+    (h : WellEntries entries.toList) :
+    WellEntries (canonicalizePairObsOrder σ entries).toList := fun _ he =>
+  h _ (Array.mem_def.1 (mem_of_mem_canonicalizePairObsOrder (Array.mem_def.2 he)))
+
+/-- Extending an admissible schedule with an admissible entry keeps it admissible. -/
+theorem wellEntries_append {hyps : Array (Object sig.nBases)}
+    {es fs : List (PairEntry sig hyps)} (hes : WellEntries es) (hfs : WellEntries fs) :
+    WellEntries (es ++ fs) := fun e he =>
+  (List.mem_append.1 he).elim (hes e) (hfs e)
+
 /--
 The schedule built for a pair of well-focused terms is admissible: every
 observation is a legal spine at a positive type.
