@@ -13,6 +13,22 @@ namespace Equality
 
 variable {sig : Signature}
 
+/-! ### Coproduct η patterns
+
+The two branches of a coproduct η-expansion: the newest variable re-injected on
+the corresponding side.
+-/
+
+/-- `x. inl x`, the left branch of a coproduct η-expansion. -/
+def InvTm.etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
+    InvTm (Γ ▻ A) (.coprod A B) :=
+  .foc (.pos (.done (.inl (.neu (.var .here)))))
+
+/-- `y. inr y`, the right branch of a coproduct η-expansion. -/
+def InvTm.etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
+    InvTm (Γ ▻ B) (.coprod A B) :=
+  .foc (.pos (.done (.inr (.neu (.var .here)))))
+
 /-! ### ICC relation -/
 
 mutual
@@ -71,10 +87,7 @@ inductive ICCEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
       ICCEq (.abort (A := A) n) (.abort m)
   /-- Coproduct η: a `case` returning the two injections of its own binder. -/
   | coprod_eta {Γ A B} (n : NegNeu Γ (.coprod A B)) :
-      ICCEq
-        (.case n
-          (.foc (.pos (.done (.inl (.neu (.var .here))))))
-          (.foc (.pos (.done (.inr (.neu (.var .here)))))))
+      ICCEq (.case n (InvTm.etaInl A B) (InvTm.etaInr A B))
         (.foc (.pos (.done (.neu n))))
 
 inductive ICCFocEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
@@ -156,18 +169,19 @@ decreasing_by
 /--
 Coproduct η: `case n (x. inl x) (y. inr y) = n` when the result type is the sum.
 
-The dependent match does the type reasoning: a branch of the shape
-`inl (var here)` in `Γ ▻ A` forces the result type to be `A + _`, and the
-matching right branch forces the summand to be `B`.
+The branches are recognised by typed structural equality, which is
+heterogeneous, so the result type is checked once and the comparison needs no
+transport.
 -/
 def tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
     (n : NegNeu Γ (.coprod A B))
     (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : Option (InvTm Γ C) :=
-  match t, u with
-  | .foc (.pos (.done (.inl (.neu (.var .here))))),
-    .foc (.pos (.done (.inr (.neu (.var .here))))) =>
-      some (.foc (.pos (.done (.neu n))))
-  | _, _ => none
+  if h : C = (.coprod A B : Object sig.nBases) then
+    if InvTm.beq t (InvTm.etaInl (Γ := Γ) A B) &&
+        InvTm.beq u (InvTm.etaInr (Γ := Γ) A B) then
+      some (h ▸ .foc (.pos (.done (.neu n))))
+    else none
+  else none
 
 mutual
 /-- Push `case` outward past invertible introductions. -/

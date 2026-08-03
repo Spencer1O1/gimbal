@@ -618,6 +618,12 @@ theorem sum_eta {Γ : Ctx sig} {A B Z : Object sig.nBases}
   · rw [← Category.assoc, csProdSnd_left_csDistrib, cinl_ccase]
   · rw [← Category.assoc, csProdSnd_right_csDistrib, cinr_ccase]
 
+/-- Coproduct η: re-injecting the scrutinee in each branch is the identity. -/
+theorem eta_coprod {Γ : Ctx sig} {A B : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) :
+    TmEq (.case s (.inl (.var .here)) (.inr (.var .here))) s :=
+  sum_eta s (.var .here)
+
 /--
 A `case` whose two branches ignore the bound variable is that branch.
 This is the semantic content of a saturation split that has not yet used the
