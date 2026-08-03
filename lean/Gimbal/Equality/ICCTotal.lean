@@ -1030,8 +1030,8 @@ theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
 
 `ICCEq.sat_body` unwraps `.foc (.sat _)` to the body. Encode of sat under
 `forcedRule = .focus` yields `.foc (.body c)` while encode of the body yields
-`c`, so raw `EncodeIccStep` needs either body-erasure on codes or a restricted
-domain — not claimed here.
+`c`, so codes are **not** equal: `EncodeIccStep` does not hold for `sat_body`
+in general (needs body-erasure on codes or a restricted domain).
 
 `ICCEq.case_letPos` peel agreement and Go/`EncodeIccStep` packaging are landed
 below (`encodeIccStep_case_letPos`).
@@ -1063,6 +1063,20 @@ theorem encodeICCGo_foc_sat_eq {Γ : Ctx sig} {A : Object sig.nBases}
       | some c => some (.foc (.body c))
       | none => none :=
   encodeICCGo_foc_sat fuel ws ε domNest obsSlot s t hfr
+
+/--
+Code relationship for `ICCEq.sat_body` under `focus`: sat encodes to
+`.foc (.body c)` when the body encodes to `c`. Not an `EncodeIccStep`
+(wrapper mismatch).
+-/
+theorem encodeICCGo_sat_body_codes {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (s : Schedule sig.nBases) (t : InvTm Γ A)
+    (hfr : forcedRule ws A = .focus) :
+    encodeICCGo (fuel + 2) ws ε domNest obsSlot (.foc (.sat (.mk s t))) =
+      (encodeICCGo fuel ws ε domNest obsSlot t).map fun c => .foc (.body c) := by
+  rw [encodeICCGo_foc_sat_eq fuel ws ε domNest obsSlot s t hfr]
+  cases encodeICCGo fuel ws ε domNest obsSlot t <;> rfl
 
 /-! ### EncodeTotal base witnesses -/
 
@@ -2563,6 +2577,306 @@ theorem encodeReady_newest_hyp_to_obs
     (fun {B} x => OriginEnv.rekey_ofHyps_weaken_to_obs hyps P 0 x) ?_
   simpa [posWorklist_rekey_weaken_hyp_to_obs] using hr
 
+/-! ### Left-coprod branch schedules (`ofHyps.push` vs encode `ws.tail` + split)
+
+Encode's left-coprod branches use `pushPos ws.tail (.split e.origin side) _`
+(`encodeLeftCoprodBranches`). Phase-entry `ofHyps (hyps.push L)` readiness
+uses `pushPos (e :: ws) (.hyp hyps.size) L` when the parent worklist is
+`e :: ws`. Two gaps:
+
+1. **Consume** — drop left-coprod head `e` from the branch worklist.
+2. **Binder tag** — `rekeyHypToSplit` (newest hyp → `.split parent side`).
+
+`Origin.rekeyHypToSplit` + `mergeSort_cons_split_of_hyps` /
+`posWorklist_rekey_weaken_hyp_to_split` land binder-tag algebra (ofHyps →
+`pushPos parent (.split …)`). Full `EncodeReady` transport still needs (1)
+rekey induction that tolerates hyp→split order reversal vs obs/dom, and (2)
+consume of the left-coprod head (`pushPos (e :: ws) split = e :: pushPos ws split`,
+then drop `e`).
+-/
+
+/-- Parent `ofHyps` worklist agrees with weaken-hyp after push (cast form). -/
+theorem posWorklist_ofHyps_push_eq_weaken_hyp
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases) :
+    OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)) =
+      OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) :=
+  posWorklist_ofHyps_push hyps P
+
+/--
+Encode branch schedule after consuming left-coprod head `e` (definitional form
+of `encodeLeftCoprodBranches`'s worklist).
+-/
+def leftCoprodBranchWs (ws : List (PosEntry sig)) (e : PosEntry sig)
+    (side : Bool) (ty : Object sig.nBases) : List (PosEntry sig) :=
+  pushPos ws (.split e.origin side) ty
+
+/-- Split insertion after a hyp-only worklist sorts to the end (like `obs`). -/
+theorem mergeSort_cons_split_of_hyps
+    (ws : List (PosEntry sig)) (parent : Origin sig) (side : Bool)
+    (P : Object sig.nBases)
+    (hws : ∀ e ∈ ws, ∃ i, e.origin = .hyp (sig := sig) i) :
+    (({ origin := .split parent side, ty := P } : PosEntry sig) :: ws).mergeSort
+        (fun a b => Origin.ble a.origin b.origin) =
+      ws.mergeSort (fun a b => Origin.ble a.origin b.origin) ++
+        [{ origin := .split parent side, ty := P }] := by
+  let e : PosEntry sig := { origin := .split parent side, ty := P }
+  let le : PosEntry sig → PosEntry sig → Bool :=
+    fun a b => Origin.ble a.origin b.origin
+  obtain ⟨l₁, l₂, h₁, h₂, hl₁⟩ :=
+    List.mergeSort_cons (α := PosEntry sig) (le := le)
+      ble_posEntry_trans ble_posEntry_total e ws
+  have hl₂ : l₂ = [] := by
+    cases l₂ with
+    | nil => rfl
+    | cons b rest =>
+        have hb_sort : b ∈ ws.mergeSort le := by
+          rw [h₂]; exact List.mem_append_right _ (List.Mem.head _)
+        have ⟨i, hi⟩ := hws b (List.mem_mergeSort.mp hb_sort)
+        have hp := List.pairwise_mergeSort (α := PosEntry sig) (le := le)
+          ble_posEntry_trans ble_posEntry_total (e :: ws)
+        rw [h₁] at hp
+        have hpair : List.Pairwise (fun a b => le a b = true) (e :: b :: rest) :=
+          (List.pairwise_append.mp hp).2.1
+        have hrel : le e b = true := by
+          cases hpair with
+          | cons h _ => exact h b (List.Mem.head _)
+        -- split > hyp, so ble split hyp is false
+        simp only [le, e, Origin.ble, hi, Origin.cmp] at hrel
+        cases hrel <;> contradiction
+  subst hl₂
+  have h₂' : ws.mergeSort le = l₁ := by simpa using h₂
+  calc
+    (e :: ws).mergeSort le = l₁ ++ [e] := h₁
+    _ = ws.mergeSort le ++ [e] := by rw [h₂']
+
+/-- Parent `ofHyps` collect is unchanged by `rekeyHypToSplit` at `hyps.size`. -/
+theorem map_rekeyHypToSplit_posCollect_ofHyps
+    (hyps : Array (Object sig.nBases)) (parent : Origin sig) (side : Bool) :
+    (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).map
+        (PosEntry.rekeyHypToSplit hyps.size parent side) =
+      OriginEnv.posCollect (OriginEnv.ofHyps hyps) := by
+  have h : ∀ e ∈ OriginEnv.posCollect (OriginEnv.ofHyps hyps),
+      PosEntry.rekeyHypToSplit hyps.size parent side e = e := by
+    intro e he
+    have ⟨i, hlt, hi⟩ := posCollect_ofHyps_origin_hyp_lt hyps he
+    match e with
+    | ⟨origin, ty⟩ =>
+        simp only at hi
+        subst hi
+        simp [PosEntry.rekeyHypToSplit, Origin.rekeyHypToSplit, Nat.ne_of_lt hlt]
+  refine List.ext_getElem ?_ ?_
+  · simp
+  · intro n h₁ h₂
+    have he :
+        (OriginEnv.posCollect (OriginEnv.ofHyps hyps))[n] ∈
+          OriginEnv.posCollect (OriginEnv.ofHyps hyps) :=
+      List.getElem_mem _
+    simpa [List.getElem_map, h _ he]
+
+/-- Same as `map_rekeyHypToSplit_posCollect_ofHyps` after `mergeSort`. -/
+theorem map_rekeyHypToSplit_posWorklist_ofHyps
+    (hyps : Array (Object sig.nBases)) (parent : Origin sig) (side : Bool) :
+    (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)).map
+        (PosEntry.rekeyHypToSplit hyps.size parent side) =
+      OriginEnv.posWorklist (OriginEnv.ofHyps hyps) := by
+  dsimp only [OriginEnv.posWorklist]
+  have h : ∀ e ∈
+      (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort
+        fun a b => Origin.ble a.origin b.origin,
+      PosEntry.rekeyHypToSplit hyps.size parent side e = e := by
+    intro e he
+    have ⟨i, hlt, hi⟩ :=
+      posCollect_ofHyps_origin_hyp_lt hyps (List.mem_mergeSort.mp he)
+    match e with
+    | ⟨origin, ty⟩ =>
+        simp only at hi
+        subst hi
+        simp [PosEntry.rekeyHypToSplit, Origin.rekeyHypToSplit, Nat.ne_of_lt hlt]
+  refine List.ext_getElem ?_ ?_
+  · simp
+  · intro n h₁ h₂
+    have he :
+        ((OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort
+            fun a b => Origin.ble a.origin b.origin)[n] ∈
+          (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort
+            fun a b => Origin.ble a.origin b.origin :=
+      List.getElem_mem _
+    simpa [List.getElem_map, h _ he]
+
+/-- Newest hyp index sorts after every strictly-older hyp entry. -/
+theorem mergeSort_cons_hyp_newest_of_hyps
+    (ws : List (PosEntry sig)) (P : Object sig.nBases) (idx : Nat)
+    (hws : ∀ e ∈ ws, ∃ i < idx, e.origin = .hyp (sig := sig) i) :
+    (({ origin := .hyp (sig := sig) idx, ty := P } : PosEntry sig) :: ws).mergeSort
+        (fun a b => Origin.ble a.origin b.origin) =
+      ws.mergeSort (fun a b => Origin.ble a.origin b.origin) ++
+        [{ origin := .hyp (sig := sig) idx, ty := P }] := by
+  let e : PosEntry sig := { origin := .hyp (sig := sig) idx, ty := P }
+  let le : PosEntry sig → PosEntry sig → Bool :=
+    fun a b => Origin.ble a.origin b.origin
+  obtain ⟨l₁, l₂, h₁, h₂, hl₁⟩ :=
+    List.mergeSort_cons (α := PosEntry sig) (le := le)
+      ble_posEntry_trans ble_posEntry_total e ws
+  have hl₂ : l₂ = [] := by
+    cases l₂ with
+    | nil => rfl
+    | cons b rest =>
+        have hb_sort : b ∈ ws.mergeSort le := by
+          rw [h₂]; exact List.mem_append_right _ (List.Mem.head _)
+        have ⟨i, hlt, hi⟩ := hws b (List.mem_mergeSort.mp hb_sort)
+        have hp := List.pairwise_mergeSort (α := PosEntry sig) (le := le)
+          ble_posEntry_trans ble_posEntry_total (e :: ws)
+        rw [h₁] at hp
+        have hpair : List.Pairwise (fun a b => le a b = true) (e :: b :: rest) :=
+          (List.pairwise_append.mp hp).2.1
+        have hrel : le e b = true := by
+          cases hpair with
+          | cons h _ => exact h b (List.Mem.head _)
+        -- hyp idx > hyp i, so ble (hyp idx) (hyp i) is false
+        simp only [le, e, Origin.ble, hi, Origin.cmp_hyp_hyp] at hrel
+        have hgt : compare idx i = Ordering.gt := Nat.compare_eq_gt.mpr hlt
+        simp [hgt] at hrel
+  subst hl₂
+  have h₂' : ws.mergeSort le = l₁ := by simpa using h₂
+  calc
+    (e :: ws).mergeSort le = l₁ ++ [e] := h₁
+    _ = ws.mergeSort le ++ [e] := by rw [h₂']
+
+/--
+Binder-tag half: rekey newest hyp under `weaken (.hyp size)` to split yields
+encode's `pushPos` on the **full** parent worklist (left-coprod head still
+present). Compare `posWorklist_rekey_weaken_hyp_to_obs`. Hyp→split does not
+preserve `Origin.cmp` vs obs/dom, so this uses hyp-only `mergeSort_cons_*`
+instead of `List.map_mergeSort`.
+-/
+theorem posWorklist_rekey_weaken_hyp_to_split
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    (parent : Origin sig) (side : Bool) :
+    (OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size))).map
+        (PosEntry.rekeyHypToSplit hyps.size parent side) =
+      pushPos (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+        (.split parent side) P := by
+  dsimp only [OriginEnv.posWorklist, pushPos]
+  have hws : ∀ e ∈ OriginEnv.posCollect (OriginEnv.ofHyps hyps),
+      ∃ i < hyps.size, e.origin = .hyp (sig := sig) i :=
+    fun e he => posCollect_ofHyps_origin_hyp_lt hyps he
+  have hws' : ∀ e ∈ OriginEnv.posCollect (OriginEnv.ofHyps hyps),
+      ∃ i, e.origin = .hyp (sig := sig) i :=
+    fun e he => match hws e he with | ⟨i, _, hi⟩ => ⟨i, hi⟩
+  let le : PosEntry sig → PosEntry sig → Bool :=
+    fun a b => Origin.ble a.origin b.origin
+  rw [posCollect_weaken_hyp]
+  split_ifs with hpol
+  · -- P positive
+    have hHypEnd :=
+      mergeSort_cons_hyp_newest_of_hyps
+        (OriginEnv.posCollect (OriginEnv.ofHyps hyps)) P hyps.size hws
+    have hSplitEnd :=
+      mergeSort_cons_split_of_hyps
+        ((OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le) parent side P
+        (fun e he => hws' e (List.mem_mergeSort.mp he))
+    have hid :
+        ((OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le).mergeSort le =
+          (OriginEnv.posCollect (OriginEnv.ofHyps hyps)).mergeSort le :=
+      List.mergeSort_of_pairwise
+        (List.pairwise_mergeSort ble_posEntry_trans ble_posEntry_total _)
+    rw [hHypEnd, List.map_append, List.map_cons, List.map_nil]
+    have hsorted := map_rekeyHypToSplit_posWorklist_ofHyps hyps parent side
+    dsimp only [OriginEnv.posWorklist] at hsorted
+    rw [hsorted]
+    simp only [PosEntry.rekeyHypToSplit, Origin.rekeyHypToSplit, BEq.rfl, ↓reduceIte]
+    rw [hSplitEnd, hid]
+  · -- P not positive: both sides are the parent worklist
+    exact map_rekeyHypToSplit_posWorklist_ofHyps hyps parent side
+
+/--
+Gap statement: with parent worklist `e :: ws`, `ofHyps.push` readiness is under
+`posWorklist (weaken (.hyp size))` (still containing `e`), while encode branches
+need `leftCoprodBranchWs ws e side` (= `pushPos ws (.split …)`, `e` consumed).
+Binder rekey lands `pushPos (e :: ws) (.split …)` on the full parent worklist;
+consume (`drop e`) remains. Relating that to `e :: leftCoprodBranchWs` is
+`pushPos_cons_of_blt_head` (open).
+-/
+theorem leftCoprod_branch_schedule_gap
+    (hyps : Array (Object sig.nBases)) {L : Object sig.nBases}
+    {e : PosEntry sig} {ws : List (PosEntry sig)} (side : Bool)
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = e :: ws) :
+    OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push L)) =
+      OriginEnv.posWorklist
+        (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) ∧
+    (OriginEnv.posWorklist
+        (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size))).map
+        (PosEntry.rekeyHypToSplit hyps.size e.origin side) =
+      pushPos (e :: ws) (.split e.origin side) L ∧
+    leftCoprodBranchWs ws e side L =
+      pushPos ws (.split e.origin side) L :=
+  ⟨posWorklist_ofHyps_push hyps L,
+    by simpa [hws] using
+      posWorklist_rekey_weaken_hyp_to_split hyps L e.origin side,
+    rfl⟩
+
+/-! ### Empty-schedule continuations (shape-directed, no ready stash) -/
+
+/-- Empty phase worklist: `.unit` is phase-encode-ready. -/
+theorem phaseEncodeReady_unit_nil_worklist
+    {hyps : Array (Object sig.nBases)}
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = []) :
+    PhaseEncodeReady (.unit (Γ := Ctx.ofHyps hyps)) := by
+  simpa [PhaseEncodeReady, hws] using
+    encodeReady_unit_nil (OriginEnv.ofHyps hyps) 0 0
+
+/-- Base-only (or empty) worklist + `focus`: done positive focus is ready. -/
+theorem phaseEncodeReady_foc_pos_bases_focus
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (p : PosNeu (Ctx.ofHyps hyps) A)
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    PhaseEncodeReady (.foc (.pos (.done p))) := by
+  refine encodeReady_of_noPeel ?_
+  -- reuse moveStable stripping from `encodeReady_foc_letPos_basesOnly_noPeel` pattern
+  have go :
+      ∀ ws,
+        (∀ e ∈ ws, ∃ b : Fin sig.nBases, e.ty = .base b) →
+        EncodeReadyNoPeel ws (OriginEnv.ofHyps hyps) 0 0
+          (.foc (.pos (.done p))) := by
+    intro ws hws'
+    induction ws with
+    | nil => exact .focus hfr .pos
+    | cons e ws ih =>
+        have ⟨b, hb⟩ := hws' e (List.Mem.head _)
+        exact .moveStable (forcedRule_cons_base_moveStable e ws hb A)
+          (ih fun e' he' => hws' e' (List.Mem.tail _ he'))
+  simpa [PhaseEncodeReady] using go _ hws
+
+theorem phaseEncodeReady_foc_neg_bases_focus
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) A)
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    PhaseEncodeReady (.foc (.neg (.done n))) := by
+  refine encodeReady_of_noPeel ?_
+  have go :
+      ∀ ws,
+        (∀ e ∈ ws, ∃ b : Fin sig.nBases, e.ty = .base b) →
+        EncodeReadyNoPeel ws (OriginEnv.ofHyps hyps) 0 0
+          (.foc (.neg (.done n))) := by
+    intro ws hws'
+    induction ws with
+    | nil => exact .focus hfr .neg
+    | cons e ws ih =>
+        have ⟨b, hb⟩ := hws' e (List.Mem.head _)
+        exact .moveStable (forcedRule_cons_base_moveStable e ws hb A)
+          (ih fun e' he' => hws' e' (List.Mem.tail _ he'))
+  simpa [PhaseEncodeReady] using go _ hws
+
 /-- Invert `moveStable` when the worklist head is a base. -/
 theorem encodeReadyNoPeel_tail_of_base_head
     {Γ : Ctx sig} {A : Object sig.nBases}
@@ -3264,10 +3578,16 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   outer-`letPos` after peel-ready bodies on `ofHyps.push`.
 * ~~`Ctx.ofHyps_push` cast~~ **Landed**
 * ~~Coprod observation → outer `case` (var hit) + ready split branches~~
-  **Landed** as packaging (`encodeReady_applyObsNeu_coprod_var`); still need
-  `ofHyps.push` → split/`pushPos` branch transport, and non-var scrutinees.
-* Empty-schedule case needs cont readiness from `WellInv` (raw has no stash);
-  `WellInv` alone remains insufficient for arbitrary continuations.
+  **Landed** as packaging (`encodeReady_applyObsNeu_coprod_var`); binder-tag
+  schedule algebra landed (`posWorklist_rekey_weaken_hyp_to_split`,
+  `leftCoprod_branch_schedule_gap`); still need consume left-coprod head +
+  `EncodeReady` under `rekeyHypToSplit` (hyp→split reverses vs obs/dom, so
+  full rekey induction ≠ obs path).
+* Empty-schedule: shape-directed unit / foc-done under nil or base-only+focus
+  landed (`phaseEncodeReady_unit_nil_worklist`, `phaseEncodeReady_foc_*_bases_focus`);
+  general `WellInv`→ready without stash still open.
+* `sat_body`: code relationship landed (`encodeICCGo_sat_body_codes`); not
+  `EncodeIccStep` (`.foc (.body _)` wrapper).
 -/
 
 /--

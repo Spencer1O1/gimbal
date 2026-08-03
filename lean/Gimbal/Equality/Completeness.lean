@@ -242,8 +242,11 @@ Blocked / WIP:
    characterization until the stash is eliminated. WIP: `encodeReady_applyPairObs`
    (~~ofHyps_push~~ / ~~peel rekey~~ / ~~full `encodeReady_rekeyHypToObs`~~ /
    ~~leftCoprod under letPos via push-body ready~~ /
-   ~~coprod obs outer `case` (var) packaging~~ landed; still need
-   `ofHyps.push`→split branch transport, non-var scrutinees, and empty-schedule
+   ~~coprod obs outer `case` (var) packaging~~ /
+   ~~branch schedule gap + `rekeyHypToSplit` API +
+   `posWorklist_rekey_weaken_hyp_to_split`~~ /
+   ~~empty-schedule unit/foc-done shapes~~ landed; still need consume
+   left-coprod head + `EncodeReady` under `rekeyHypToSplit`, and general
    `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
@@ -251,8 +254,8 @@ Blocked / WIP:
    full `ofHyps` induction and reflection beyond unit/abort remain.
    `ICCCompleteness` needs both + encodability — never `none = none` as ICC.
    New gens ~~`case_letPos`~~ packaged (`encodeIccStep_case_letPos`); `sat_body`
-   still needs packaging when invariance runs (`sat_body` wraps `.foc (.body _)`
-   so raw code equality is not automatic).
+   has Go code relationship (`encodeICCGo_sat_body_codes`) but not `EncodeIccStep`
+   (`.foc (.body _)` wrapper vs raw body code).
 5. Switch `referenceStructEq` / `referenceCompare` to `ICCCode` equality
    (`beq_iff_eq`) only after EncodeTotal + both characterization directions;
    erase public `2048` / fuel from the total API

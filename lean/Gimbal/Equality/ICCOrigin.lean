@@ -1098,5 +1098,78 @@ theorem posWorklist_ofHyps_push (hyps : Array (Object sig.nBases))
       (.hyp (sig := sig) hyps.size))
     (fun {A} y => OriginEnv.ofHyps_eq_weaken_hyp_cast hyps P y)
 
+/--
+Rename newest-hyp tag `hyp hypIdx` to `.split parent side`. Unlike
+`rekeyHypToObs`, does not shift obs indices. Used to align `ofHyps.push`
+binder tags with encode's left-coprod branch origins (after the left-coprod
+head has already been dropped from the worklist).
+-/
+def Origin.rekeyHypToSplit (hypIdx : Nat) (parent : Origin sig) (side : Bool) :
+    Origin sig → Origin sig
+  | .hyp i => if i == hypIdx then .split parent side else .hyp i
+  | .obs j => .obs j
+  | .dom n => .dom n
+  | .split p s => .split (Origin.rekeyHypToSplit hypIdx parent side p) s
+
+def PosEntry.rekeyHypToSplit (hypIdx : Nat) (parent : Origin sig) (side : Bool)
+    (e : PosEntry sig) : PosEntry sig :=
+  { origin := Origin.rekeyHypToSplit hypIdx parent side e.origin, ty := e.ty }
+
+@[simp] theorem Origin.rekeyHypToSplit_hyp_exact (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) :
+    Origin.rekeyHypToSplit (sig := sig) hypIdx parent side (.hyp hypIdx) =
+      .split parent side := by
+  simp [Origin.rekeyHypToSplit]
+
+@[simp] theorem Origin.rekeyHypToSplit_hyp_ne (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (i : Nat) (hne : i ≠ hypIdx) :
+    Origin.rekeyHypToSplit (sig := sig) hypIdx parent side (.hyp i) = .hyp i := by
+  simp [Origin.rekeyHypToSplit, hne]
+
+@[simp] theorem Origin.rekeyHypToSplit_obs (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (j : Nat) :
+    Origin.rekeyHypToSplit (sig := sig) hypIdx parent side (.obs j) = .obs j := by
+  simp [Origin.rekeyHypToSplit]
+
+@[simp] theorem Origin.rekeyHypToSplit_dom (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (n : Nat) :
+    Origin.rekeyHypToSplit (sig := sig) hypIdx parent side (.dom n) = .dom n := by
+  simp [Origin.rekeyHypToSplit]
+
+@[simp] theorem Origin.rekeyHypToSplit_split (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (p : Origin sig) (s : Bool) :
+    Origin.rekeyHypToSplit (sig := sig) hypIdx parent side (.split p s) =
+      .split (Origin.rekeyHypToSplit hypIdx parent side p) s := by
+  simp [Origin.rekeyHypToSplit]
+
+@[simp] theorem PosEntry.rekeyHypToSplit_ty (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (e : PosEntry sig) :
+    (PosEntry.rekeyHypToSplit hypIdx parent side e).ty = e.ty := rfl
+
+@[simp] theorem PosEntry.rekeyHypToSplit_origin (hypIdx : Nat)
+    (parent : Origin sig) (side : Bool) (e : PosEntry sig) :
+    (PosEntry.rekeyHypToSplit hypIdx parent side e).origin =
+      Origin.rekeyHypToSplit hypIdx parent side e.origin := rfl
+
+/-- Rekey turns `weaken (ofHyps) (.hyp size)` into `weaken (ofHyps) (.split …)`. -/
+theorem OriginEnv.rekey_ofHyps_weaken_to_split (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) (parent : Origin sig) (side : Bool)
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps ▻ P) A) :
+    Origin.rekeyHypToSplit hyps.size parent side
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size) x) =
+      OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.split parent side) x := by
+  cases x with
+  | here => simp [OriginEnv.weaken, Origin.rekeyHypToSplit]
+  | there y =>
+      have hne : OriginEnv.ofHyps hyps y ≠ .hyp (sig := sig) hyps.size :=
+        OriginEnv.ofHyps_ne_size hyps y
+      simp only [OriginEnv.weaken, OriginEnv.snoc]
+      dsimp only [OriginEnv.ofHyps] at hne ⊢
+      have hne' : hyps.size - 1 - Var.toRawIdx y ≠ hyps.size := by
+        intro hi; exact hne (by rw [hi])
+      simp [Origin.rekeyHypToSplit, hne']
+
 end Equality
 end Gimbal
