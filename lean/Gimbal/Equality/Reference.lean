@@ -44,7 +44,7 @@ def completeSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
         | .exhausted => .exhausted
         | .invariantFailure => .invariantFailure
         | .ok t' =>
-            completeInvRec fuel Γ.hyps goal (canonicalize (fuel := fuel) t')
+            completeInvRec fuel Γ.hyps goal (canonicalize t')
 
 /-- Descend invertible structure, re-saturating under each new binder. -/
 def completeInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))
@@ -125,8 +125,8 @@ def referenceSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
         | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
         | .ok t', .ok u' =>
             referenceInvRec fuel Γ.hyps goal
-              (canonicalize (fuel := fuel) t')
-              (canonicalize (fuel := fuel) u')
+              (canonicalize t')
+              (canonicalize u')
 
 /-- Lockstep comparison of completed phase results. -/
 def referenceInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))

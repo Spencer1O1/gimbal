@@ -394,7 +394,111 @@ theorem cc_case_case {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
   refine congrArg₂ ccase ?_ ?_ <;>
     rw [cs_pair_fst_eq, Category.assoc, cs_frame_case]
 
+end TmEq
+
 /-! ### Sum η -/
+
+namespace Subst
+
+/-- Commit the newest binder to the left injection. -/
+def injLeft {Γ : Ctx sig} {A B : Object sig.nBases} :
+    Subst sig (Γ ▻ .coprod A B) (Γ ▻ A)
+  | _, .here => .inl (.var .here)
+  | _, .there y => .var (.there y)
+
+/-- Commit the newest binder to the right injection. -/
+def injRight {Γ : Ctx sig} {A B : Object sig.nBases} :
+    Subst sig (Γ ▻ .coprod A B) (Γ ▻ B)
+  | _, .here => .inr (.var .here)
+  | _, .there y => .var (.there y)
+
+end Subst
+
+/-- `⟨π₁, π₂ ≫ inl⟩ : X × A ⟶ X × (A + B)`. -/
+def IntrinsicMorphism.prodInl (X A B : Object sig.nBases) :
+    IntrinsicMorphism sig (.prod X A) (.prod X (.coprod A B)) :=
+  .pair (.first X A) (.compose (.second X A) (.left A B))
+
+/-- `⟨π₁, π₂ ≫ inr⟩ : X × B ⟶ X × (A + B)`. -/
+def IntrinsicMorphism.prodInr (X A B : Object sig.nBases) :
+    IntrinsicMorphism sig (.prod X B) (.prod X (.coprod A B)) :=
+  .pair (.first X B) (.compose (.second X B) (.right A B))
+
+@[simp] theorem qm_prodInl (X A B : Object sig.nBases) :
+    qm (IntrinsicMorphism.prodInl (sig := sig) X A B) =
+      csProdSnd (quotientObject X)
+        (cinl (quotientObject A) (quotientObject B)) := rfl
+
+@[simp] theorem qm_prodInr (X A B : Object sig.nBases) :
+    qm (IntrinsicMorphism.prodInr (sig := sig) X A B) =
+      csProdSnd (quotientObject X)
+        (cinr (quotientObject A) (quotientObject B)) := rfl
+
+theorem interpret_qm_injLeft {X : Object sig.nBases} {Γ : Ctx sig}
+    {A B Z : Object sig.nBases} (ρ : Env X Γ) (w : Tm (Γ ▻ .coprod A B) Z) :
+    qm (interpret (Env.extend (A := A) ρ) (subst Subst.injLeft w)) =
+      csProdSnd (quotientObject X) (cinl (quotientObject A) (quotientObject B)) ≫
+        qm (interpret (Env.extend (A := .coprod A B) ρ) w) := by
+  rw [interpret_qm_subst, ← qm_prodInl,
+    interpret_qm_natural (IntrinsicMorphism.prodInl X A B) (Env.extend ρ) w]
+  refine interpret_qm_eq_of_pointwise ?_ w
+  intro C x
+  cases x with
+  | here =>
+      show qm (IntrinsicMorphism.compose (IntrinsicMorphism.second X A)
+        (IntrinsicMorphism.left A B)) =
+          qm (.compose (IntrinsicMorphism.prodInl X A B)
+            (IntrinsicMorphism.second X (.coprod A B)))
+      simp [IntrinsicMorphism.prodInl]
+  | there y =>
+      show qm (IntrinsicMorphism.compose (IntrinsicMorphism.first X A) (ρ y)) =
+          qm (.compose (IntrinsicMorphism.prodInl X A B)
+            (.compose (IntrinsicMorphism.first X (.coprod A B)) (ρ y)))
+      simp [IntrinsicMorphism.prodInl, ← Category.assoc]
+
+theorem interpret_qm_injRight {X : Object sig.nBases} {Γ : Ctx sig}
+    {A B Z : Object sig.nBases} (ρ : Env X Γ) (w : Tm (Γ ▻ .coprod A B) Z) :
+    qm (interpret (Env.extend (A := B) ρ) (subst Subst.injRight w)) =
+      csProdSnd (quotientObject X) (cinr (quotientObject A) (quotientObject B)) ≫
+        qm (interpret (Env.extend (A := .coprod A B) ρ) w) := by
+  rw [interpret_qm_subst, ← qm_prodInr,
+    interpret_qm_natural (IntrinsicMorphism.prodInr X A B) (Env.extend ρ) w]
+  refine interpret_qm_eq_of_pointwise ?_ w
+  intro C x
+  cases x with
+  | here =>
+      show qm (IntrinsicMorphism.compose (IntrinsicMorphism.second X B)
+        (IntrinsicMorphism.right A B)) =
+          qm (.compose (IntrinsicMorphism.prodInr X A B)
+            (IntrinsicMorphism.second X (.coprod A B)))
+      simp [IntrinsicMorphism.prodInr]
+  | there y =>
+      show qm (IntrinsicMorphism.compose (IntrinsicMorphism.first X B) (ρ y)) =
+          qm (.compose (IntrinsicMorphism.prodInr X A B)
+            (.compose (IntrinsicMorphism.first X (.coprod A B)) (ρ y)))
+      simp [IntrinsicMorphism.prodInr, ← Category.assoc]
+
+namespace TmEq
+
+/--
+Strong sum η: a `case` whose branches are the two injection instances of a
+common body is that body applied to the scrutinee. This is the law that makes
+a saturation split on a coproduct observation meaning-preserving even when the
+branches genuinely use the observation.
+-/
+theorem sum_eta {Γ : Ctx sig} {A B Z : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) (w : Tm (Γ ▻ .coprod A B) Z) :
+    TmEq (.case s (subst Subst.injLeft w) (subst Subst.injRight w))
+      (subst0 w s) := by
+  refine ⟨?_⟩
+  intro X ρ
+  rw [interpret_qm_subst0]
+  simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib]
+  rw [interpret_qm_injLeft, interpret_qm_injRight]
+  refine congrArg (fun k => cpair (𝟙 _) (qm (interpret ρ s)) ≫ k) ?_
+  refine cs_hom_ext_prod_coprod ?_ ?_
+  · rw [← Category.assoc, csProdSnd_left_csDistrib, cinl_ccase]
+  · rw [← Category.assoc, csProdSnd_right_csDistrib, cinr_ccase]
 
 /--
 A `case` whose two branches ignore the bound variable is that branch.

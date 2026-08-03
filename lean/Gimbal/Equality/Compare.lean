@@ -81,8 +81,8 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
         | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
         | .ok t', .ok u' =>
             compareInvRec fuel Γ.hyps goal
-              (canonicalize (fuel := fuel) t')
-              (canonicalize (fuel := fuel) u')
+              (canonicalize t')
+              (canonicalize u')
 
 /-- Lockstep invertible comparison with re-entry under new binders. -/
 def compareInvRec (fuel : Nat) (hyps : Array (Object sig.nBases))

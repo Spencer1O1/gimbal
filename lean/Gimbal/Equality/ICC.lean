@@ -6,7 +6,7 @@
   Full completeness of the canonicalizer is deferred to Milestone 8.
 -/
 
-import Gimbal.Equality.Focused
+import Gimbal.Equality.Hereditary
 
 namespace Gimbal
 namespace Equality
@@ -84,57 +84,61 @@ inductive ICCFocEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
       s₁ = s₂ → ICCEq t u → ICCFocEq (.sat (.mk s₁ t)) (.sat (.mk s₂ u))
 end
 
-/-! ### Deterministic canonicalizer -/
+/-! ### Deterministic canonicalizer
+
+Fuel-free: `caseCommute` recurses on the size of its left branch (renaming
+preserves size), and the mutual canonicalizer is structural.
+-/
 
 /-- Commute a fully-normalized `case` past invertible introductions. -/
 def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
-    (fuel : Nat)
     (n : NegNeu Γ (.coprod A B))
     (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : InvTm Γ C :=
-  match fuel with
-  | 0 => .case n t u
-  | fuel + 1 =>
-    match t with
-    | .unit =>
-        match u with
-        | .unit => .unit
-        | u => .case n .unit u
-    | .pair t₁ u₁ =>
-        match u with
-        | .pair t₂ u₂ =>
-            .pair (caseCommute fuel n t₁ t₂) (caseCommute fuel n u₁ u₂)
-        | u => .case n (.pair t₁ u₁) u
-    | .lam t₁ =>
-        match u with
-        | .lam u₁ =>
-            .lam (caseCommute fuel (NegNeu.weaken n)
-              (InvTm.rename Rename.exchange t₁)
-              (InvTm.rename Rename.exchange u₁))
-        | u => .case n (.lam t₁) u
-    | .case (A := C) (B := D) n₁ t₁ u₁ =>
-        match u with
-        | .case (A := C') (B := D') n₂ t₂ u₂ =>
-            if hC : C = C' then
-              if hD : D = D' then
-                match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
-                | some m₁, some m₂ =>
-                  if NegNeu.toRaw m₁ == NegNeu.toRaw m₂ then
-                    let t₂' : InvTm (Γ ▻ B ▻ C) _ := hC.symm ▸ t₂
-                    let u₂' : InvTm (Γ ▻ B ▻ D) _ := hD.symm ▸ u₂
-                    .case m₁
-                      (caseCommute fuel (NegNeu.weaken (B := C) n)
-                        (InvTm.rename Rename.exchange t₁)
-                        (InvTm.rename Rename.exchange t₂'))
-                      (caseCommute fuel (NegNeu.weaken (B := D) n)
-                        (InvTm.rename Rename.exchange u₁)
-                        (InvTm.rename Rename.exchange u₂'))
-                  else
-                    .case n (.case n₁ t₁ u₁) u
-                | _, _ => .case n (.case n₁ t₁ u₁) u
-              else .case n (.case n₁ t₁ u₁) u
+  match t with
+  | .unit =>
+      match u with
+      | .unit => .unit
+      | u => .case n .unit u
+  | .pair t₁ u₁ =>
+      match u with
+      | .pair t₂ u₂ =>
+          .pair (caseCommute n t₁ t₂) (caseCommute n u₁ u₂)
+      | u => .case n (.pair t₁ u₁) u
+  | .lam t₁ =>
+      match u with
+      | .lam u₁ =>
+          .lam (caseCommute (NegNeu.weaken n)
+            (InvTm.rename Rename.exchange t₁)
+            (InvTm.rename Rename.exchange u₁))
+      | u => .case n (.lam t₁) u
+  | .case (A := L) (B := R) n₁ t₁ u₁ =>
+      match u with
+      | .case (A := L') (B := R') n₂ t₂ u₂ =>
+          if hL : L = L' then
+            if hR : R = R' then
+              match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
+              | some m₁, some m₂ =>
+                if NegNeu.toRaw m₁ == NegNeu.toRaw m₂ then
+                  let t₂' : InvTm (Γ ▻ B ▻ L) _ := hL.symm ▸ t₂
+                  let u₂' : InvTm (Γ ▻ B ▻ R) _ := hR.symm ▸ u₂
+                  .case m₁
+                    (caseCommute (NegNeu.weaken (B := L) n)
+                      (InvTm.rename Rename.exchange t₁)
+                      (InvTm.rename Rename.exchange t₂'))
+                    (caseCommute (NegNeu.weaken (B := R) n)
+                      (InvTm.rename Rename.exchange u₁)
+                      (InvTm.rename Rename.exchange u₂'))
+                else
+                  .case n (.case n₁ t₁ u₁) u
+              | _, _ => .case n (.case n₁ t₁ u₁) u
             else .case n (.case n₁ t₁ u₁) u
-        | u => .case n (.case n₁ t₁ u₁) u
-    | t => .case n t u
+          else .case n (.case n₁ t₁ u₁) u
+      | u => .case n (.case n₁ t₁ u₁) u
+  | t => .case n t u
+termination_by InvTm.size t
+decreasing_by
+  all_goals simp only [InvTm.size, InvTm.size_rename]
+  all_goals omega
 
 /--
 Coproduct η: `case n (x. inl x) (y. inr y) = n` when the result type is the sum.
@@ -152,46 +156,37 @@ def tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
     none
 
 mutual
-/-- Push `case` outward past invertible introductions (fueled). -/
-def canonicalizeInv (fuel : Nat) {Γ : Ctx sig} {A : Object sig.nBases} :
+/-- Push `case` outward past invertible introductions. -/
+def canonicalizeInv {Γ : Ctx sig} {A : Object sig.nBases} :
     InvTm Γ A → InvTm Γ A
-  | t =>
-    match fuel with
-    | 0 => t
-    | fuel + 1 =>
-      match t with
-      | .unit => .unit
-      | .pair t u =>
-          .pair (canonicalizeInv fuel t) (canonicalizeInv fuel u)
-      | .lam t =>
-          .lam (canonicalizeInv fuel t)
-      | .abort n =>
-          .abort n
-      | .case n t u =>
-          let t' := canonicalizeInv fuel t
-          let u' := canonicalizeInv fuel u
-          match tryCoprodEta n t' u' with
-          | some r => r
-          | none => caseCommute fuel n t' u'
-      | .foc f =>
-          .foc (canonicalizeFoc fuel f)
+  | .unit => .unit
+  | .pair t u => .pair (canonicalizeInv t) (canonicalizeInv u)
+  | .lam t => .lam (canonicalizeInv t)
+  | .abort n => .abort n
+  | .case n t u =>
+      let t' := canonicalizeInv t
+      let u' := canonicalizeInv u
+      match tryCoprodEta n t' u' with
+      | some r => r
+      | none => caseCommute n t' u'
+  | .foc f => .foc (canonicalizeFoc f)
 
-def canonicalizeFoc (fuel : Nat) {Γ : Ctx sig} {A : Object sig.nBases} :
+def canonicalizeFoc {Γ : Ctx sig} {A : Object sig.nBases} :
     FocTm Γ A → FocTm Γ A
   | .pos p => .pos p
   | .neg n => .neg n
-  | .letPos n t => .letPos n (canonicalizeInv fuel t)
+  | .letPos n t => .letPos n (canonicalizeInv t)
   | .sat (.mk _s t) =>
       -- Drop schedule metadata; keep only the saturated body.
-      match canonicalizeInv fuel t with
+      match canonicalizeInv t with
       | .foc f => f
       | t' => .sat (.mk ⟨#[]⟩ t')
 end
 
-/-- Default-fuel ICC canonicalizer. -/
+/-- ICC canonicalizer (total, structural). -/
 def canonicalize {Γ : Ctx sig} {A : Object sig.nBases}
-    (t : InvTm Γ A) (fuel : Nat := 2048) : InvTm Γ A :=
-  canonicalizeInv fuel t
+    (t : InvTm Γ A) : InvTm Γ A :=
+  canonicalizeInv t
 
 end Equality
 end Gimbal
