@@ -1222,9 +1222,9 @@ theorem peelCaseOuter_case_case {Γ : Ctx sig}
 
 /-! ### Peel stable under `rekeyHypToObs`
 
-LetPos dig uses `.dom 0` (fixed by rekey; same as λ dig). Full
-`peelCaseOuterGo_rekeyHypToObs` (nested case-miss) is still WIP; these lemmas
-are the origin-side substrate.
+LetPos dig uses `.dom 0` (fixed by rekey; same as λ dig), so dig-under-foc
+commutes with newest-hyp→obs rekey. Nested case-miss needs the same
+`weaken_rekey` / `originOfVar` / `beq` substrate.
 -/
 
 theorem originOfVar_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
@@ -1235,7 +1235,7 @@ theorem originOfVar_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
   | var x => rfl
   | app _ _ | fst _ | snd _ => rfl
 
-/-- Rekey of a found origin preserves the hit/miss test (injectivity). -/
+/-- Rekey of a found origin preserves the hit/miss test (`=` form). -/
 theorem originOfVar_rekey_hit_iff {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (hypIdx k : Nat) (n : NegNeu Γ A) (o : Origin sig)
     {β : Type} (r : β) :
@@ -1259,6 +1259,25 @@ theorem originOfVar_rekey_hit_iff {Γ : Ctx sig} {A : Object sig.nBases}
           h (Origin.rekeyHypToObs_inj hr)
         simp [h, hne]
 
+/-- Same as `originOfVar_rekey_hit_iff`, for the `BEq` tests in `peelCaseOuterGo`. -/
+theorem originOfVar_rekey_beq_hit_iff {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (hypIdx k : Nat) (n : NegNeu Γ A) (o : Origin sig)
+    {β : Type} (r : β) :
+    (match (originOfVar ε n).map (Origin.rekeyHypToObs hypIdx k) with
+      | some om => if om == Origin.rekeyHypToObs hypIdx k o then some r else none
+      | none => none) =
+    (match originOfVar ε n with
+      | some om => if om == o then some r else none
+      | none => none) := by
+  cases originOfVar ε n with
+  | none => rfl
+  | some om =>
+      change
+          (if Origin.rekeyHypToObs hypIdx k om ==
+                Origin.rekeyHypToObs hypIdx k o then some r else none) =
+            (if om == o then some r else none)
+      rw [Origin.beq_rekeyHypToObs]
+
 theorem originOfVar_env_eq {Γ : Ctx sig} {A : Object sig.nBases}
     {ε ε' : OriginEnv Γ} (n : NegNeu Γ A)
     (hε : ∀ {B} (x : Var Γ B), ε x = ε' x) :
@@ -1267,6 +1286,260 @@ theorem originOfVar_env_eq {Γ : Ctx sig} {A : Object sig.nBases}
   | var x => exact congrArg some (hε x)
   | app _ _ | fst _ | snd _ => rfl
 
+/-- Pointwise env equality preserves peel. -/
+theorem peelCaseOuterGo_env_eq {Γ : Ctx sig} {C : Object sig.nBases}
+    (fuel : Nat) {ε ε' : OriginEnv Γ} {o o' : Origin sig} (t : InvTm Γ C)
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' x) (ho : o = o') :
+    peelCaseOuterGo fuel ε o t = peelCaseOuterGo fuel ε' o' t := by
+  subst ho
+  induction fuel generalizing Γ C ε ε' with
+  | zero => rfl
+  | succ fuel ih =>
+      cases t with
+      | unit | abort _ => rfl
+      | foc f =>
+          cases f with
+          | pos _ | neg _ => rfl
+          | sat s =>
+              cases s with
+              | mk _ body =>
+                  simp only [peelCaseOuterGo]
+                  exact ih (ε := ε) (ε' := ε') body hε
+          | letPos _n body =>
+              rename_i P
+              simp only [peelCaseOuterGo]
+              have hεw : ∀ {B} (x : Var (Γ ▻ P) B),
+                  OriginEnv.weaken (A := P) ε (.dom 0) x =
+                    OriginEnv.weaken (A := P) ε' (.dom 0) x := by
+                intro B x; cases x with
+                | here => rfl
+                | there y => exact hε y
+              rw [ih (ε := OriginEnv.weaken (A := P) ε (.dom 0))
+                (ε' := OriginEnv.weaken (A := P) ε' (.dom 0)) body hεw]
+      | pair t₁ t₂ =>
+          simp only [peelCaseOuterGo]
+          rw [ih (ε := ε) (ε' := ε') t₁ hε, ih (ε := ε) (ε' := ε') t₂ hε]
+      | lam body =>
+          rename_i Arg _Ret
+          simp only [peelCaseOuterGo]
+          have hεw : ∀ {B} (x : Var (Γ ▻ Arg) B),
+              OriginEnv.weaken (A := Arg) ε (.dom 0) x =
+                OriginEnv.weaken (A := Arg) ε' (.dom 0) x := by
+            intro B x; cases x with
+            | here => rfl
+            | there y => exact hε y
+          rw [ih (ε := OriginEnv.weaken (A := Arg) ε (.dom 0))
+            (ε' := OriginEnv.weaken (A := Arg) ε' (.dom 0)) body hεw]
+      | case scr tL tR =>
+          rename_i A B
+          cases scr with
+          | app _ _ | fst _ | snd _ => rfl
+          | var x =>
+              simp only [peelCaseOuterGo]
+              have hhit : (ε x == o) = (ε' x == o) := by rw [hε x]
+              rw [hhit]
+              split
+              · rfl
+              · have hx : ε x = ε' x := hε x
+                have hεL : ∀ {C} (y : Var (Γ ▻ A) C),
+                    OriginEnv.weaken (A := A) ε (.split (ε x) false) y =
+                      OriginEnv.weaken (A := A) ε' (.split (ε' x) false) y := by
+                  intro C y; cases y with
+                  | here => simp [OriginEnv.weaken, hx]
+                  | there z => exact hε z
+                have hεR : ∀ {C} (y : Var (Γ ▻ B) C),
+                    OriginEnv.weaken (A := B) ε (.split (ε x) true) y =
+                      OriginEnv.weaken (A := B) ε' (.split (ε' x) true) y := by
+                  intro C y; cases y with
+                  | here => simp [OriginEnv.weaken, hx]
+                  | there z => exact hε z
+                rw [ih (ε := OriginEnv.weaken (A := A) ε (.split (ε x) false))
+                  (ε' := OriginEnv.weaken (A := A) ε' (.split (ε' x) false))
+                  tL hεL]
+                rw [ih (ε := OriginEnv.weaken (A := B) ε (.split (ε x) true))
+                  (ε' := OriginEnv.weaken (A := B) ε' (.split (ε' x) true))
+                  tR hεR]
+                cases peelCaseOuterGo fuel
+                    (OriginEnv.weaken (A := A) ε' (.split (ε' x) false)) o tL with
+                | none =>
+                    cases distCaseOut (.var x) tL tR with
+                    | none => rfl
+                    | some t' => exact ih (ε := ε) (ε' := ε') t' hε
+                | some rL =>
+                    cases peelCaseOuterGo fuel
+                        (OriginEnv.weaken (A := B) ε' (.split (ε' x) true)) o tR with
+                    | none =>
+                        cases distCaseOut (.var x) tL tR with
+                        | none => rfl
+                        | some t' => exact ih (ε := ε) (ε' := ε') t' hε
+                    | some rR =>
+                        rcases rL with ⟨C₁, D₁, n₁, a₁, b₁⟩
+                        rcases rR with ⟨C₂, D₂, n₂, a₂, b₂⟩
+                        -- Only `originOfVar` differs (ε vs ε'); rewrite it under the shared spine.
+                        simp_rw [originOfVar_env_eq (hε := hε)]
+
+/--
+Simultaneous rekey of the origin environment and forced query leaves
+`peelCaseOuterGo` unchanged (returned neutrals/terms carry no origin tags).
+-/
+theorem peelCaseOuterGo_rekeyHypToObs {Γ : Ctx sig} {C : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (hypIdx k : Nat) (o : Origin sig)
+    (t : InvTm Γ C) :
+    peelCaseOuterGo fuel
+        (fun {_B} x => Origin.rekeyHypToObs hypIdx k (ε x))
+        (Origin.rekeyHypToObs hypIdx k o) t =
+      peelCaseOuterGo fuel ε o t := by
+  induction fuel generalizing Γ C ε with
+  | zero => rfl
+  | succ fuel ih =>
+      cases t with
+      | unit | abort _ => rfl
+      | foc f =>
+          cases f with
+          | pos _ | neg _ => rfl
+          | sat s =>
+              cases s with
+              | mk _ body =>
+                  simp only [peelCaseOuterGo]
+                  exact ih ε body
+          | letPos _n body =>
+              rename_i P
+              simp only [peelCaseOuterGo]
+              have hεw : ∀ {B} (x : Var (Γ ▻ P) B),
+                  Origin.rekeyHypToObs hypIdx k
+                    (OriginEnv.weaken (A := P) ε (.dom 0) x) =
+                    OriginEnv.weaken (A := P)
+                      (fun {_C} y => Origin.rekeyHypToObs hypIdx k (ε y))
+                      (.dom 0) x := by
+                intro B x
+                simpa [Origin.rekeyHypToObs_dom] using
+                  OriginEnv.weaken_rekeyHypToObs ε (.dom 0) hypIdx k x
+              have hdig :=
+                peelCaseOuterGo_env_eq (o := Origin.rekeyHypToObs hypIdx k o)
+                  (o' := Origin.rekeyHypToObs hypIdx k o) fuel body hεw rfl
+              have hmain :
+                  peelCaseOuterGo fuel
+                      (OriginEnv.weaken (A := P)
+                        (fun {_C} y => Origin.rekeyHypToObs hypIdx k (ε y))
+                        (.dom 0))
+                      (Origin.rekeyHypToObs hypIdx k o) body =
+                    peelCaseOuterGo fuel
+                      (OriginEnv.weaken (A := P) ε (.dom 0)) o body :=
+                hdig.symm.trans (ih (OriginEnv.weaken (A := P) ε (.dom 0)) body)
+              rw [hmain]
+      | pair t₁ t₂ =>
+          simp only [peelCaseOuterGo]
+          rw [ih ε t₁, ih ε t₂]
+      | lam body =>
+          rename_i Arg _Ret
+          simp only [peelCaseOuterGo]
+          have hεw : ∀ {B} (x : Var (Γ ▻ Arg) B),
+              Origin.rekeyHypToObs hypIdx k
+                (OriginEnv.weaken (A := Arg) ε (.dom 0) x) =
+                OriginEnv.weaken (A := Arg)
+                  (fun {_C} y => Origin.rekeyHypToObs hypIdx k (ε y))
+                  (.dom 0) x := by
+            intro B x
+            simpa [Origin.rekeyHypToObs_dom] using
+              OriginEnv.weaken_rekeyHypToObs ε (.dom 0) hypIdx k x
+          have hdig :=
+            peelCaseOuterGo_env_eq (o := Origin.rekeyHypToObs hypIdx k o)
+              (o' := Origin.rekeyHypToObs hypIdx k o) fuel body hεw rfl
+          have hmain :
+              peelCaseOuterGo fuel
+                  (OriginEnv.weaken (A := Arg)
+                    (fun {_C} y => Origin.rekeyHypToObs hypIdx k (ε y))
+                    (.dom 0))
+                  (Origin.rekeyHypToObs hypIdx k o) body =
+                peelCaseOuterGo fuel
+                  (OriginEnv.weaken (A := Arg) ε (.dom 0)) o body :=
+            hdig.symm.trans (ih (OriginEnv.weaken (A := Arg) ε (.dom 0)) body)
+          rw [hmain]
+      | case scr tL tR =>
+          rename_i A B
+          cases scr with
+          | app _ _ | fst _ | snd _ => rfl
+          | var x =>
+              simp only [peelCaseOuterGo]
+              have hhit :
+                  ((fun {_B} y => Origin.rekeyHypToObs hypIdx k (ε y)) x ==
+                    Origin.rekeyHypToObs hypIdx k o) =
+                    (ε x == o) :=
+                Origin.beq_rekeyHypToObs hypIdx k (ε x) o
+              rw [hhit]
+              split
+              · rfl
+              · have hεL : ∀ {C} (y : Var (Γ ▻ A) C),
+                    Origin.rekeyHypToObs hypIdx k
+                      (OriginEnv.weaken (A := A) ε (.split (ε x) false) y) =
+                      OriginEnv.weaken (A := A)
+                        (fun {_C} z => Origin.rekeyHypToObs hypIdx k (ε z))
+                        (.split (Origin.rekeyHypToObs hypIdx k (ε x)) false) y := by
+                  intro C y
+                  simpa [Origin.rekeyHypToObs_split] using
+                    OriginEnv.weaken_rekeyHypToObs ε (.split (ε x) false) hypIdx k y
+                have hεR : ∀ {C} (y : Var (Γ ▻ B) C),
+                    Origin.rekeyHypToObs hypIdx k
+                      (OriginEnv.weaken (A := B) ε (.split (ε x) true) y) =
+                      OriginEnv.weaken (A := B)
+                        (fun {_C} z => Origin.rekeyHypToObs hypIdx k (ε z))
+                        (.split (Origin.rekeyHypToObs hypIdx k (ε x)) true) y := by
+                  intro C y
+                  simpa [Origin.rekeyHypToObs_split] using
+                    OriginEnv.weaken_rekeyHypToObs ε (.split (ε x) true) hypIdx k y
+                have hL :=
+                  (peelCaseOuterGo_env_eq
+                    (o := Origin.rekeyHypToObs hypIdx k o)
+                    (o' := Origin.rekeyHypToObs hypIdx k o) fuel tL hεL rfl).symm.trans
+                    (ih (OriginEnv.weaken (A := A) ε (.split (ε x) false)) tL)
+                have hR :=
+                  (peelCaseOuterGo_env_eq
+                    (o := Origin.rekeyHypToObs hypIdx k o)
+                    (o' := Origin.rekeyHypToObs hypIdx k o) fuel tR hεR rfl).symm.trans
+                    (ih (OriginEnv.weaken (A := B) ε (.split (ε x) true)) tR)
+                rw [hL, hR]
+                cases peelCaseOuterGo fuel
+                    (OriginEnv.weaken (A := A) ε (.split (ε x) false)) o tL with
+                | none =>
+                    cases distCaseOut (.var x) tL tR with
+                    | none => rfl
+                    | some t' => exact ih ε t'
+                | some rL =>
+                    cases peelCaseOuterGo fuel
+                        (OriginEnv.weaken (A := B) ε (.split (ε x) true)) o tR with
+                    | none =>
+                        cases distCaseOut (.var x) tL tR with
+                        | none => rfl
+                        | some t' => exact ih ε t'
+                    | some rR =>
+                        rcases rL with ⟨C₁, D₁, n₁, a₁, b₁⟩
+                        rcases rR with ⟨C₂, D₂, n₂, a₂, b₂⟩
+                        -- Shared peel spine; only originOfVar / == query differ.
+                        by_cases hC : C₁ = C₂
+                        · by_cases hD : D₁ = D₂
+                          · by_cases hbeq :
+                                NegNeu.beq n₁ (hD ▸ hC ▸ n₂) = true
+                            · cases hunw : NegNeu.unweaken? n₁ with
+                              | none =>
+                                  simp [hC, hD, hbeq, hunw]
+                              | some m =>
+                                  simp only [hC, hD, hbeq, hunw, ↓reduceDIte,
+                                    ↓reduceIte]
+                                  rw [originOfVar_rekeyHypToObs ε hypIdx k m]
+                                  exact originOfVar_rekey_beq_hit_iff
+                                    ε hypIdx k m o _
+                            · simp [hC, hD, hbeq]
+                          · simp [hC, hD]
+                        · simp [hC]
+
+/-- Top-level peel is stable under simultaneous env/query rekey. -/
+theorem peelCaseOuter_rekeyHypToObs {Γ : Ctx sig} {C : Object sig.nBases}
+    (ε : OriginEnv Γ) (hypIdx k : Nat) (o : Origin sig) (t : InvTm Γ C) :
+    peelCaseOuter
+        (fun {_B} x => Origin.rekeyHypToObs hypIdx k (ε x))
+        (Origin.rekeyHypToObs hypIdx k o) t =
+      peelCaseOuter ε o t :=
+  peelCaseOuterGo_rekeyHypToObs (InvTm.size t) ε hypIdx k o t
 
 end Equality
 end Gimbal
