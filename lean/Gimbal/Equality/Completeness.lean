@@ -264,11 +264,13 @@ Blocked / WIP:
    `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds`~~ /
    ~~derived nil-rest push/branch readiness (foc-done atom, unit coprod-var)
    `EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds`~~ /
+   ~~empty-schedule WellInv intro→ready (no stash) + combined Raw fragment
+   `EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived_holds`~~ /
    ~~empty-schedule unit/foc-done shapes~~ landed; same-term
    `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
    head); still need full unrestricted `encodeReady_of_rawReferenceProduced`
-   (letPos/sat conts, non-unit coprod branches, consistency / mixed multi-entry),
-   and general `WellInv`→ready)
+   (atom letPos/sat conts, non-unit coprod branches, consistency / mixed
+   multi-entry, general WellInv→ready), and general `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
