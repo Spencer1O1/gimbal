@@ -561,6 +561,234 @@ theorem wellInv_hinr {Γ : Ctx sig} {B : Object sig.nBases}
       cases h with
       | lam ht => exact .foc (.pos rfl (.inr (.val rfl (.lam ht))))
 
+/-! #### The hereditary operations -/
+
+/-- Legality of a spine-substitution result, by case. -/
+def WellHSubst {Γ : Ctx sig} {A C : Object sig.nBases} : HSubst Γ A C → Prop
+  | .neu n => WellNeg n
+  | .here w _ => WellInv w
+  | .val w _ => WellInv w
+
+mutual
+
+theorem wellInv_happ {Γ : Ctx sig} {A B : Object sig.nBases}
+    {f : InvTm Γ (.exp A B)} {u : InvTm Γ A}
+    (hf : WellInv f) (hu : WellInv u) : WellInv (happ f u) := by
+  match f, hf with
+  | .lam _, .lam hb => simpa [happ] using wellInv_hsubstInv hb hu
+  | .case _ _ _, .case hn h₁ h₂ =>
+      simp only [happ]
+      exact .case hn (wellInv_happ h₁ (wellInv_weaken hu))
+        (wellInv_happ h₂ (wellInv_weaken hu))
+  | .abort _, .abort hn => simpa [happ] using WellInv.abort hn
+  | .foc (.pos (.done (.neu _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.pos (.done (.val _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.neg (.done _)), .foc (.neg _ hn) =>
+      simp only [happ]; exact wellInv_eta _ (.app hn hu)
+  | .foc (.letPos _ _), .foc (.letPos hpol hn hw) =>
+      simp only [happ]
+      exact .foc (.letPos hpol hn (wellInv_happ hw (wellInv_weaken hu)))
+  | .foc (.sat (.mk _ _)), .foc (.sat hw) =>
+      simp only [happ]; exact .foc (.sat (wellInv_happ hw hu))
+termination_by (objectSize (Object.exp A B), 0, f.size)
+
+theorem wellInv_hfst {Γ : Ctx sig} {A B : Object sig.nBases}
+    {t : InvTm Γ (.prod A B)} (h : WellInv t) : WellInv (hfst t) := by
+  match t, h with
+  | .pair _ _, .pair h₁ _ => simpa [hfst] using h₁
+  | .case _ _ _, .case hn h₁ h₂ =>
+      simp only [hfst]; exact .case hn (wellInv_hfst h₁) (wellInv_hfst h₂)
+  | .abort _, .abort hn => simpa [hfst] using WellInv.abort hn
+  | .foc (.pos (.done (.neu _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.pos (.done (.val _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.neg (.done _)), .foc (.neg _ hn) =>
+      simp only [hfst]; exact wellInv_eta _ (.fst hn)
+  | .foc (.letPos _ _), .foc (.letPos hpol hn hw) =>
+      simp only [hfst]; exact .foc (.letPos hpol hn (wellInv_hfst hw))
+  | .foc (.sat (.mk _ _)), .foc (.sat hw) =>
+      simp only [hfst]; exact .foc (.sat (wellInv_hfst hw))
+termination_by (objectSize (Object.prod A B), 0, t.size)
+
+theorem wellInv_hsnd {Γ : Ctx sig} {A B : Object sig.nBases}
+    {t : InvTm Γ (.prod A B)} (h : WellInv t) : WellInv (hsnd t) := by
+  match t, h with
+  | .pair _ _, .pair _ h₂ => simpa [hsnd] using h₂
+  | .case _ _ _, .case hn h₁ h₂ =>
+      simp only [hsnd]; exact .case hn (wellInv_hsnd h₁) (wellInv_hsnd h₂)
+  | .abort _, .abort hn => simpa [hsnd] using WellInv.abort hn
+  | .foc (.pos (.done (.neu _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.pos (.done (.val _))), .foc (.pos hpol _) => simp at hpol
+  | .foc (.neg (.done _)), .foc (.neg _ hn) =>
+      simp only [hsnd]; exact wellInv_eta _ (.snd hn)
+  | .foc (.letPos _ _), .foc (.letPos hpol hn hw) =>
+      simp only [hsnd]; exact .foc (.letPos hpol hn (wellInv_hsnd hw))
+  | .foc (.sat (.mk _ _)), .foc (.sat hw) =>
+      simp only [hsnd]; exact .foc (.sat (wellInv_hsnd hw))
+termination_by (objectSize (Object.prod A B), 0, t.size)
+
+theorem wellInv_habort {Γ : Ctx sig} (C : Object sig.nBases)
+    {w : InvTm Γ .never} (h : WellInv w) : WellInv (habort C w) := by
+  match w, h with
+  | .case _ _ _, .case hn h₁ h₂ =>
+      simp only [habort]
+      exact .case hn (wellInv_habort C h₁) (wellInv_habort C h₂)
+  | .abort _, .abort hn => simpa [habort] using WellInv.abort hn
+  | .foc (.pos (.done (.neu _))), .foc (.pos _ (.neu _ hn)) =>
+      simp only [habort]; exact .abort hn
+  | .foc (.pos (.done (.val _))), .foc (.pos _ (.val hpol _)) => simp at hpol
+  | .foc (.neg (.done _)), .foc (.neg hpol _) => simp at hpol
+  | .foc (.letPos _ _), .foc (.letPos hpol hn hw) =>
+      simp only [habort]; exact .foc (.letPos hpol hn (wellInv_habort C hw))
+  | .foc (.sat (.mk _ _)), .foc (.sat hw) =>
+      simp only [habort]; exact .foc (.sat (wellInv_habort C hw))
+termination_by (objectSize (Object.never (n := sig.nBases)), 0, w.size)
+
+theorem wellInv_hcase {Γ : Ctx sig} {A B C : Object sig.nBases}
+    {s : InvTm Γ (.coprod A B)} {l : InvTm (Γ ▻ A) C} {r : InvTm (Γ ▻ B) C}
+    (hs : WellInv s) (hl : WellInv l) (hr : WellInv r) :
+    WellInv (hcase s l r) := by
+  match s, hs with
+  | .case _ _ _, .case hn h₁ h₂ =>
+      simp only [hcase]
+      exact .case hn
+        (wellInv_hcase h₁ (wellInv_rename _ hl) (wellInv_rename _ hr))
+        (wellInv_hcase h₂ (wellInv_rename _ hl) (wellInv_rename _ hr))
+  | .abort _, .abort hn => simpa [hcase] using WellInv.abort hn
+  | .foc (.pos (.done (.neu _))), .foc (.pos _ (.neu _ hn)) =>
+      simp only [hcase]; exact .case hn hl hr
+  | .foc (.pos (.done (.inl _))), .foc (.pos _ (.inl hp)) =>
+      simp only [hcase]; exact wellInv_hsubstInv hl (wellInv_toInv hp)
+  | .foc (.pos (.done (.inr _))), .foc (.pos _ (.inr hp)) =>
+      simp only [hcase]; exact wellInv_hsubstInv hr (wellInv_toInv hp)
+  | .foc (.pos (.done (.val _))), .foc (.pos _ (.val hpol _)) => simp at hpol
+  | .foc (.neg (.done _)), .foc (.neg hpol _) => simp at hpol
+  | .foc (.letPos _ _), .foc (.letPos hpol hn hw) =>
+      simp only [hcase]
+      exact .foc (.letPos hpol hn
+        (wellInv_hcase hw (wellInv_rename _ hl) (wellInv_rename _ hr)))
+  | .foc (.sat (.mk _ _)), .foc (.sat hw) =>
+      simp only [hcase]; exact .foc (.sat (wellInv_hcase hw hl hr))
+termination_by (objectSize (Object.coprod A B), 0, s.size)
+
+theorem wellInv_hsubstInv {Γ : Ctx sig} {A C : Object sig.nBases}
+    {t : InvTm (Γ ▻ A) C} {v : InvTm Γ A} (ht : WellInv t) (hv : WellInv v) :
+    WellInv (hsubstInv t v) := by
+  match t, ht with
+  | .unit, _ => simpa [hsubstInv] using WellInv.unit
+  | .pair _ _, .pair h₁ h₂ =>
+      simp only [hsubstInv]
+      exact .pair (wellInv_hsubstInv h₁ hv) (wellInv_hsubstInv h₂ hv)
+  | .lam _, .lam hb =>
+      simp only [hsubstInv]
+      exact .lam (wellInv_hsubstInv (wellInv_rename _ hb) (wellInv_weaken hv))
+  | .case n _ _, .case hn h₁ h₂ =>
+      simp only [hsubstInv]
+      have hres := wellHSubst_hsubstNeu hn hv
+      match hsubstNeu n v, hres with
+      | .neu _, hn' =>
+          exact .case hn'
+            (wellInv_hsubstInv (wellInv_rename _ h₁) (wellInv_weaken hv))
+            (wellInv_hsubstInv (wellInv_rename _ h₂) (wellInv_weaken hv))
+      | .here _ _, hw =>
+          exact wellInv_hcase hw
+            (wellInv_hsubstInv (wellInv_rename _ h₁) (wellInv_weaken hv))
+            (wellInv_hsubstInv (wellInv_rename _ h₂) (wellInv_weaken hv))
+      | .val _ _, hw =>
+          exact wellInv_hcase hw
+            (wellInv_hsubstInv (wellInv_rename _ h₁) (wellInv_weaken hv))
+            (wellInv_hsubstInv (wellInv_rename _ h₂) (wellInv_weaken hv))
+  | .abort n, .abort hn =>
+      simp only [hsubstInv]
+      have hres := wellHSubst_hsubstNeu hn hv
+      match hsubstNeu n v, hres with
+      | .neu _, hn' => exact .abort hn'
+      | .here _ _, hw => exact wellInv_habort C hw
+      | .val _ _, hw => exact wellInv_habort C hw
+  | .foc (.pos (.done _)), .foc (.pos _ hp) =>
+      simp only [hsubstInv]; exact wellInv_hsubstPos hp hv
+  | .foc (.neg (.done n)), .foc (.neg _ hn) =>
+      simp only [hsubstInv]
+      have hres := wellHSubst_hsubstNeu hn hv
+      match hsubstNeu n v, hres with
+      | .neu _, hn' => exact wellInv_eta _ hn'
+      | .here _ _, hw => exact hw
+      | .val _ _, hw => exact hw
+  | .foc (.letPos n _), .foc (.letPos hpol hn hb) =>
+      simp only [hsubstInv]
+      have hres := wellHSubst_hsubstNeu hn hv
+      match hsubstNeu n v, hres with
+      | .neu _, hn' =>
+          exact .foc (.letPos hpol hn'
+            (wellInv_hsubstInv (wellInv_rename _ hb) (wellInv_weaken hv)))
+      | .here _ _, _ => exact wellInv_hsubstInv (wellInv_rename _ hb) hv
+      | .val _ _, hw =>
+          exact wellInv_hsubstInv
+            (wellInv_hsubstInv (wellInv_rename _ hb) (wellInv_weaken hv)) hw
+  | .foc (.sat (.mk _ _)), .foc (.sat hb) =>
+      simp only [hsubstInv]; exact .foc (.sat (wellInv_hsubstInv hb hv))
+termination_by (objectSize A, 1, t.size)
+decreasing_by
+  all_goals
+    first
+    | decreasing_tactic
+    | (subst_vars; decreasing_tactic)
+
+theorem wellInv_hsubstPos {Γ : Ctx sig} {A C : Object sig.nBases}
+    {p : PosNeu (Γ ▻ A) C} {v : InvTm Γ A} (hp : WellPos p) (hv : WellInv v) :
+    WellInv (hsubstPos p v) := by
+  match p, hp with
+  | .neu n, .neu _ hn =>
+      simp only [hsubstPos]
+      have hres := wellHSubst_hsubstNeu hn hv
+      match hsubstNeu n v, hres with
+      | .neu _, hn' => exact wellInv_eta _ hn'
+      | .here _ _, hw => exact hw
+      | .val _ _, hw => exact hw
+  | .inl _, .inl hq =>
+      simp only [hsubstPos]; exact wellInv_hinl _ (wellInv_hsubstPos hq hv)
+  | .inr _, .inr hq =>
+      simp only [hsubstPos]; exact wellInv_hinr _ (wellInv_hsubstPos hq hv)
+  | .val _, .val _ hb =>
+      simp only [hsubstPos]; exact wellInv_hsubstInv hb hv
+termination_by (objectSize A, 1, p.size)
+
+theorem wellHSubst_hsubstNeu {Γ : Ctx sig} {A C : Object sig.nBases}
+    {n : NegNeu (Γ ▻ A) C} {v : InvTm Γ A} (hn : WellNeg n) (hv : WellInv v) :
+    WellHSubst (hsubstNeu n v) := by
+  match n, hn with
+  | .var .here, _ => simpa [hsubstNeu, WellHSubst] using hv
+  | .var (.there _), _ => simpa [hsubstNeu, WellHSubst] using WellNeg.var
+  | .app m _, .app hm hu =>
+      simp only [hsubstNeu]
+      have hres := wellHSubst_hsubstNeu hm hv
+      match hsubstNeu m v, hres with
+      | .neu _, hm' =>
+          exact WellNeg.app hm' (wellInv_hsubstInv hu hv)
+      | .here _ _, hw => exact wellInv_happ hw (wellInv_hsubstInv hu hv)
+      | .val _ _, hw => exact wellInv_happ hw (wellInv_hsubstInv hu hv)
+  | .fst m, .fst hm =>
+      simp only [hsubstNeu]
+      have hres := wellHSubst_hsubstNeu hm hv
+      match hsubstNeu m v, hres with
+      | .neu _, hm' => exact WellNeg.fst hm'
+      | .here _ _, hw => exact wellInv_hfst hw
+      | .val _ _, hw => exact wellInv_hfst hw
+  | .snd m, .snd hm =>
+      simp only [hsubstNeu]
+      have hres := wellHSubst_hsubstNeu hm hv
+      match hsubstNeu m v, hres with
+      | .neu _, hm' => exact WellNeg.snd hm'
+      | .here _ _, hw => exact wellInv_hsnd hw
+      | .val _ _, hw => exact wellInv_hsnd hw
+termination_by (objectSize A, 1, n.size)
+decreasing_by
+  all_goals
+    first
+    | decreasing_tactic
+    | (subst_vars; decreasing_tactic)
+
+end
+
 /-! ### Total focusing -/
 
 /--
@@ -579,6 +807,27 @@ def focusTm {Γ : Ctx sig} {A : Object sig.nBases} : Tm Γ A → InvTm Γ A
   | .case s t u => hcase (focusTm s) (focusTm t) (focusTm u)
   | .lam t => .lam (focusTm t)
   | .app t u => happ (focusTm t) (focusTm u)
+
+/-! ### Focusing lands in the legal fragment -/
+
+/--
+Completeness of focusing: every intrinsic term has a focused representative,
+and that representative is phase-legal.
+-/
+theorem wellInv_focusTm {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
+    WellInv (focusTm t) := by
+  induction t with
+  | var x => exact wellInv_eta _ .var
+  | unit => exact .unit
+  | abort _ ih => exact wellInv_habort _ ih
+  | pair _ _ iht ihu => exact .pair iht ihu
+  | fst _ ih => exact wellInv_hfst ih
+  | snd _ ih => exact wellInv_hsnd ih
+  | inl _ ih => exact wellInv_hinl _ ih
+  | inr _ ih => exact wellInv_hinr _ ih
+  | «case» _ _ _ ihs iht ihu => exact wellInv_hcase ihs iht ihu
+  | lam _ ih => exact .lam ih
+  | app _ _ iht ihu => exact wellInv_happ iht ihu
 
 end Equality
 end Gimbal

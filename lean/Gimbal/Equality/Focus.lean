@@ -29,5 +29,15 @@ def focus! {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) : Option (InvTm 
 @[simp] theorem focus!_isSome {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
     (focus! t).isSome = true := rfl
 
+/-- Completeness: focusing produces a focused representative of every term. -/
+theorem focus_wellInv {Γ : Ctx sig} {A : Object sig.nBases} (t : Tm Γ A) :
+    WellInv (focus t) :=
+  wellInv_focusTm t
+
+/-- The executable phase check agrees with the proof above. -/
+@[simp] theorem focus_wellFocused {Γ : Ctx sig} {A : Object sig.nBases}
+    (t : Tm Γ A) : (focus t).wellFocused = true :=
+  InvTm.wellFocused_of_wellInv (focus_wellInv t)
+
 end Equality
 end Gimbal

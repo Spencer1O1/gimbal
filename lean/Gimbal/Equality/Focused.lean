@@ -390,6 +390,53 @@ end
 def InvTm.wellFocused {Γ : Ctx sig} {A : Object sig.nBases} (t : InvTm Γ A) : Bool :=
   wellInvb t
 
+mutual
+theorem wellInvb_of_wellInv {Γ : Ctx sig} {A : Object sig.nBases}
+    {t : InvTm Γ A} (h : WellInv t) : wellInvb t = true :=
+  match t, h with
+  | .unit, _ => rfl
+  | .pair _ _, .pair ht hu => by
+      simp [wellInvb, wellInvb_of_wellInv ht, wellInvb_of_wellInv hu]
+  | .lam _, .lam ht => by simp [wellInvb, wellInvb_of_wellInv ht]
+  | .case _ _ _, .case hn ht hu => by
+      simp [wellInvb, wellNegb_of_wellNeg hn, wellInvb_of_wellInv ht,
+        wellInvb_of_wellInv hu]
+  | .abort _, .abort hn => by simp [wellInvb, wellNegb_of_wellNeg hn]
+  | .foc _, .foc hf => by simp [wellInvb, wellFocb_of_wellFoc hf]
+
+theorem wellFocb_of_wellFoc {Γ : Ctx sig} {A : Object sig.nBases}
+    {f : FocTm Γ A} (h : WellFoc f) : wellFocb f = true :=
+  match f, h with
+  | .pos (.done _), .pos hpol hp => by
+      simp [wellFocb, hpol, wellPosb_of_wellPos hp]
+  | .neg (.done _), .neg hpol hn => by
+      simp [wellFocb, hpol, wellNegb_of_wellNeg hn]
+  | .letPos _ _, .letPos hpol hn ht => by
+      simp [wellFocb, hpol, wellNegb_of_wellNeg hn, wellInvb_of_wellInv ht]
+  | .sat (.mk _ _), .sat ht => by simp [wellFocb, wellInvb_of_wellInv ht]
+
+theorem wellPosb_of_wellPos {Γ : Ctx sig} {A : Object sig.nBases}
+    {p : PosNeu Γ A} (h : WellPos p) : wellPosb p = true :=
+  match p, h with
+  | .neu _, .neu hpol hn => by simp [wellPosb, hpol, wellNegb_of_wellNeg hn]
+  | .inl _, .inl hp => by simp [wellPosb, wellPosb_of_wellPos hp]
+  | .inr _, .inr hp => by simp [wellPosb, wellPosb_of_wellPos hp]
+  | .val _, .val hpol ht => by simp [wellPosb, hpol, wellInvb_of_wellInv ht]
+
+theorem wellNegb_of_wellNeg {Γ : Ctx sig} {A : Object sig.nBases}
+    {n : NegNeu Γ A} (h : WellNeg n) : wellNegb n = true :=
+  match n, h with
+  | .var _, _ => rfl
+  | .app _ _, .app hn ht => by
+      simp [wellNegb, wellNegb_of_wellNeg hn, wellInvb_of_wellInv ht]
+  | .fst _, .fst hn => by simp [wellNegb, wellNegb_of_wellNeg hn]
+  | .snd _, .snd hn => by simp [wellNegb, wellNegb_of_wellNeg hn]
+end
+
+theorem InvTm.wellFocused_of_wellInv {Γ : Ctx sig} {A : Object sig.nBases}
+    {t : InvTm Γ A} (h : WellInv t) : t.wellFocused = true :=
+  wellInvb_of_wellInv h
+
 /-! ### Unweakening (for nested case/case commuting) -/
 
 /--
