@@ -7,8 +7,14 @@
   occurrence site well-typed, and what lets the ICC canonicalizer identify the
   two scrutinees of a nested `case`.
 
-  `sat` nodes compare schedule identity and body; schedules are operational
-  metadata but must agree for Boolean equality to imply term equality.
+  **Schedule metadata (intentional split):**
+
+  * `FocTm.beq` compares `sat` **schedules** (`decide (s = s')`) as well as
+    bodies. It is strict structural equality of focused terms, including
+    operational saturation annotations.
+  * `ICCCode` / `FocCode.beq` **erase** schedules: encode maps `.sat (.mk _ t)`
+    to `.foc (.body c)`. Code equality is the semantic ICC comparison surface
+    for design E; it must not require schedule identity.
 -/
 
 import Gimbal.Equality.Hereditary
@@ -37,8 +43,8 @@ Heterogeneous in both the context and the type, so that binders can be entered
 without transporting either side. Soundness for neutrals returns the type
 equality as well; that is what makes replacement well-typed.
 
-`sat` nodes are operational metadata rather than focused syntax, so two
-saturation phases are never identified here.
+`FocTm.beq` on `.sat` is schedule-strict (see module docstring). Ordered-phase
+codes erase schedules; do not conflate the two equality surfaces.
 -/
 
 mutual

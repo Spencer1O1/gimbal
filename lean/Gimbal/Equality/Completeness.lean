@@ -22,6 +22,7 @@ import Gimbal.Equality.ICCCode
 import Gimbal.Equality.ICCEncode
 import Gimbal.Equality.ICCFragment
 import Gimbal.Equality.ICCTotal
+import Gimbal.Equality.ICCReflect
 import Gimbal.Equality.ICCIdem
 import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.Reference
@@ -83,9 +84,8 @@ def OriginCollisionFree : Prop := True
 /-! ### Totality of encode (no correctness-critical fuel) -/
 
 /--
-`encodeICC` must succeed on every term in the **valid fragment** consumed by
-the reference comparator (`ValidEncodeFragment`: WellInv + reference
-saturation under phase-entry `OriginEnv.ofHyps`).
+`encodeICC` must succeed on every term in the **valid fragment**, returning a
+concrete code witness (prefer `∃ c, … = some c` over bare `isSome`).
 
 It is not required for arbitrary `InvTm`. The present `encodeICCGo` fuel is a
 proof device (`encodeMeasure`); prove adequacy on the valid fragment or switch
@@ -94,7 +94,39 @@ to WF recursion. Fuel exhaustion must not appear on the proof-critical path.
 def EncodeTotal : Prop :=
   ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t : InvTm (Ctx.ofHyps hyps) A),
-    ValidEncodeFragment t → EncodableICC (OriginEnv.ofHyps hyps) t
+    ValidEncodeFragment t →
+      ∃ c, encodeICC (OriginEnv.ofHyps hyps) t = some c
+
+/-- Reflection / common-code soundness (design-E rigidity). -/
+abbrev EncodeIccReflect : Prop := EncodeIccReflectGoal (sig := sig)
+
+/-- Alias: rigidity means reflection, not encoder determinism alone. -/
+abbrev EncodeIccRigidity : Prop := EncodeIccRigidityGoal (sig := sig)
+
+/--
+If invariance (on `ofHyps` phase-entry envs) and reflection both hold, the
+characterization holds for those environments. Reflection is stated for
+arbitrary `OriginEnv`; invariance is the `ofHyps` fragment used by the
+reference pipeline.
+-/
+theorem iccEq_iff_encode_eq_of_inv_reflect
+    (hInv : EncodeIccInvariantGoal (sig := sig))
+    (hRefl : EncodeIccReflectGoal (sig := sig)) :
+    ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+      (t u : InvTm (Ctx.ofHyps hyps) A),
+      EncodableICC (OriginEnv.ofHyps hyps) t →
+      EncodableICC (OriginEnv.ofHyps hyps) u →
+        (ICCEq t u ↔
+          encodeICC (OriginEnv.ofHyps hyps) t =
+            encodeICC (OriginEnv.ofHyps hyps) u) := by
+  intro hyps A t u ht hu
+  constructor
+  · intro heq
+    exact (hInv heq).2 ht
+  · intro hcode
+    obtain ⟨c, hc⟩ := EncodableICC.exists ht
+    have hu' : encodeICC (OriginEnv.ofHyps hyps) u = some c := hcode ▸ hc
+    exact hRefl (OriginEnv.ofHyps hyps) hc hu'
 
 /-! ### Reference completeness and decidability (fuel-free) -/
 
@@ -167,14 +199,15 @@ Blocked / WIP:
 1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`)
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
-3. `EncodeTotal` on `ValidEncodeFragment` — measure adequacy; no
-   proof-critical fuel exhaustion. `ValidEncodeFragment` supplies initial
-   `EncodableICC` only; ICCEq intermediates use `EncodeIccStep` alone.
-4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) / rigidity /
-   `ICCCompleteness` (iff requires `EncodableICC` on both sides — never
-   `none = none` as ICC)
-5. `ReferenceCompareTotal` + iff — erase `2048` from decidability
-6. 8G packaging
+3. `EncodeTotal` on `ValidEncodeFragment` — measure adequacy + fuel mono;
+   witness form `∃ c, encodeICC … = some c`. `ValidEncodeFragment` supplies
+   initial encodability only; ICCEq intermediates use `EncodeIccStep` alone.
+4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
+   `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
+   `ICCCompleteness` needs both + encodability — never `none = none` as ICC.
+5. Switch `referenceStructEq` / `referenceCompare` to `ICCCode` equality
+   (`beq_iff_eq`); erase public `2048` / fuel from the total API
+6. 8G packaging (`DefEqDecidable` from total comparator)
 
 Fallback if ordered-phase reification proves infeasible: `decideICCEq`, not a
 return to the unsourced local rewrite loop.

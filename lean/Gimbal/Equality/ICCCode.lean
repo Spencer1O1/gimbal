@@ -21,6 +21,7 @@
 import Gimbal.Equality.Beq
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCOrigin
+import Init.Data.List.Sort.Lemmas
 
 namespace Gimbal
 namespace Equality
@@ -285,6 +286,47 @@ theorem encodeMeasure_exp_ret_lt (ws : List (PosEntry sig))
   simp only [encodeMeasure, objectWeight]
   omega
 
+/-! ### Worklist permutation (for `pushPos` / `mergeSort`) -/
+
+private theorem foldl_objectWeight_perm {ws ws' : List (PosEntry sig)}
+    (h : ws.Perm ws') (a : Nat) :
+    ws.foldl (fun acc e => acc + objectWeight e.ty) a =
+      ws'.foldl (fun acc e => acc + objectWeight e.ty) a := by
+  induction h generalizing a with
+  | nil => rfl
+  | cons _ h ih =>
+      simpa [List.foldl] using ih _
+  | swap x y l =>
+      simp only [List.foldl]
+      have hx :=
+        List.foldl_add_nat l (fun e => objectWeight e.ty)
+          (a + objectWeight x.ty + objectWeight y.ty)
+      have hy :=
+        List.foldl_add_nat l (fun e => objectWeight e.ty)
+          (a + objectWeight y.ty + objectWeight x.ty)
+      rw [hx, hy]
+      omega
+  | trans _ _ ih₁ ih₂ =>
+      exact (ih₁ a).trans (ih₂ a)
+
+theorem worklistWeight_of_perm {ws ws' : List (PosEntry sig)}
+    (h : ws.Perm ws') :
+    worklistWeight ws = worklistWeight ws' :=
+  foldl_objectWeight_perm h 0
+
+theorem worklistWeight_mergeSort (ws : List (PosEntry sig))
+    (le : PosEntry sig → PosEntry sig → Bool) :
+    worklistWeight (ws.mergeSort le) = worklistWeight ws :=
+  worklistWeight_of_perm (List.mergeSort_perm ws le)
+
+/--
+Fuel for `encodeICC` must also cover term-shaped recursion (`sat` unwrap,
+`letPos` observation push). Candidate: formula measure plus invertible size.
+-/
+def encodeFuel {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (t : InvTm Γ A) : Nat :=
+  encodeMeasure ws A + InvTm.size t
+
 /-! ### Forced next rule -/
 
 /-- Which unique-order rule is forced by the current worklist and goal. -/
@@ -452,6 +494,139 @@ def pushPos (ws : List (PosEntry sig)) (o : Origin sig) (ty : Object sig.nBases)
     ({ origin := o, ty := ty } :: ws).mergeSort fun a b =>
       Origin.ble a.origin b.origin
   else ws
+
+/--
+`pushPos` either leaves the worklist alone (negative type) or inserts one
+entry and reorders; weight gains exactly `objectWeight ty` when polarity is
+positive.
+-/
+theorem worklistWeight_pushPos (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty : Object sig.nBases) :
+    worklistWeight (pushPos ws o ty) =
+      if objectPolarity ty == .pos then
+        objectWeight ty + worklistWeight ws
+      else
+        worklistWeight ws := by
+  dsimp only [pushPos]
+  cases hpol : objectPolarity ty == Polarity.pos
+  · change worklistWeight ws = worklistWeight ws
+    rfl
+  · change
+      worklistWeight
+          (({ origin := o, ty := ty } :: ws).mergeSort
+            fun a b => Origin.ble a.origin b.origin) =
+        objectWeight ty + worklistWeight ws
+    rw [worklistWeight_mergeSort, worklistWeight_cons]
+
+/-- Pushing a formula adds at most that formula's weight. -/
+theorem worklistWeight_pushPos_le (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty : Object sig.nBases) :
+    worklistWeight (pushPos ws o ty) ≤ objectWeight ty + worklistWeight ws := by
+  rw [worklistWeight_pushPos]
+  split <;> omega
+
+/-- At a positive type, `pushPos` adds exactly one copy of its weight. -/
+theorem encodeMeasure_pushPos_of_pos (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
+    encodeMeasure (pushPos ws o ty) goal =
+      objectWeight ty + encodeMeasure ws goal := by
+  have hbeq : (objectPolarity ty == Polarity.pos) = true := by simp [hpos]
+  simp only [encodeMeasure]
+  rw [worklistWeight_pushPos, hbeq]
+  change
+    objectWeight ty + worklistWeight ws + objectWeight goal =
+      objectWeight ty + (worklistWeight ws + objectWeight goal)
+  omega
+
+/--
+A positive insertion strictly increases the measure. In particular, a
+positive `letPos` observation cannot be justified by `encodeMeasure` alone
+— use `encodeFuel` (measure + term size) or WF recursion for that path.
+-/
+theorem encodeMeasure_lt_pushPos_of_pos (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
+    encodeMeasure ws goal < encodeMeasure (pushPos ws o ty) goal :=
+  encodeMeasure_pushPos_pos_lt ws o ty goal hpos
+
+/-- Pushing a positive formula onto the worklist strictly increases weight. -/
+theorem encodeMeasure_pushPos_pos_lt (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
+    encodeMeasure ws goal < encodeMeasure (pushPos ws o ty) goal := by
+  have hw := objectWeight_pos ty
+  have hbeq : (objectPolarity ty == Polarity.pos) = true := by
+    simp [hpos]
+  simp only [encodeMeasure]
+  rw [worklistWeight_pushPos, hbeq]
+  change
+    worklistWeight ws + objectWeight goal <
+      objectWeight ty + worklistWeight ws + objectWeight goal
+  omega
+
+/--
+Left-coprod recursion: after consuming a `.coprod L R` head, each branch
+worklist (tail + optional push of the binder) has strictly smaller measure
+than the parent. Here `ws` is already the tail of the forced worklist.
+-/
+theorem encodeMeasure_leftCoprod_lt (e : PosEntry sig) (ws : List (PosEntry sig))
+    {L R : Object sig.nBases} (hty : e.ty = .coprod L R)
+    (goal : Object sig.nBases) (side : Bool) :
+    encodeMeasure (pushPos ws (.split e.origin side) (if side then R else L)) goal <
+      encodeMeasure (e :: ws) goal := by
+  have he : objectWeight e.ty = objectWeight L + objectWeight R + 1 := by
+    simp [hty, objectWeight]
+  have hL := objectWeight_pos L
+  have hR := objectWeight_pos R
+  cases side with
+  | false =>
+      change encodeMeasure (pushPos ws (.split e.origin false) L) goal <
+        encodeMeasure (e :: ws) goal
+      simp only [encodeMeasure, worklistWeight_cons, he]
+      rw [worklistWeight_pushPos]
+      cases hpol : objectPolarity L == Polarity.pos
+      · change
+          worklistWeight ws + objectWeight goal <
+            objectWeight L + objectWeight R + 1 + worklistWeight ws + objectWeight goal
+        omega
+      · change
+          objectWeight L + worklistWeight ws + objectWeight goal <
+            objectWeight L + objectWeight R + 1 + worklistWeight ws + objectWeight goal
+        omega
+  | true =>
+      change encodeMeasure (pushPos ws (.split e.origin true) R) goal <
+        encodeMeasure (e :: ws) goal
+      simp only [encodeMeasure, worklistWeight_cons, he]
+      rw [worklistWeight_pushPos]
+      cases hpol : objectPolarity R == Polarity.pos
+      · change
+          worklistWeight ws + objectWeight goal <
+            objectWeight L + objectWeight R + 1 + worklistWeight ws + objectWeight goal
+        omega
+      · change
+          objectWeight R + worklistWeight ws + objectWeight goal <
+            objectWeight L + objectWeight R + 1 + worklistWeight ws + objectWeight goal
+        omega
+
+/--
+Right-λ recursion: encode the body at `Ret` under `pushPos` of the domain.
+Always strictly smaller than encoding at `.exp Arg Ret` on the same spine.
+-/
+theorem encodeMeasure_exp_push_lt (ws : List (PosEntry sig)) (o : Origin sig)
+    (Arg Ret : Object sig.nBases) :
+    encodeMeasure (pushPos ws o Arg) Ret <
+      encodeMeasure ws (.exp Arg Ret) := by
+  have hArg := objectWeight_pos Arg
+  have hRet := objectWeight_pos Ret
+  simp only [encodeMeasure, objectWeight]
+  rw [worklistWeight_pushPos]
+  cases hpol : objectPolarity Arg == Polarity.pos
+  · change
+      worklistWeight ws + objectWeight Ret <
+        worklistWeight ws + (objectWeight Arg + objectWeight Ret + 1)
+    omega
+  · change
+      objectWeight Arg + worklistWeight ws + objectWeight Ret <
+        worklistWeight ws + (objectWeight Arg + objectWeight Ret + 1)
+    omega
 
 /-! ### Encoding -/
 
@@ -622,6 +797,28 @@ theorem EncodableICC.iff_isSome {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (t : InvTm Γ A) :
     EncodableICC ε t ↔ (encodeICC ε t).isSome := Iff.rfl
 
+/-- Prefer this form in proofs: a concrete code witness, not bare `isSome`. -/
+theorem EncodableICC.exists {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t : InvTm Γ A} (h : EncodableICC ε t) :
+    ∃ c, encodeICC ε t = some c :=
+  Option.isSome_iff_exists.mp h
+
+theorem EncodableICC.of_eq_some {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t : InvTm Γ A} {c : ICCCode Γ A}
+    (h : encodeICC ε t = some c) : EncodableICC ε t := by
+  simp only [EncodableICC, h, Option.isSome_some]
+
+/-- Extract the unique code when encodable. -/
+def EncodableICC.get {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t : InvTm Γ A} (h : EncodableICC ε t) : ICCCode Γ A :=
+  (encodeICC ε t).get (by simpa [EncodableICC] using h)
+
+theorem EncodableICC.get_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t : InvTm Γ A} (h : EncodableICC ε t) :
+    encodeICC ε t = some h.get := by
+  simp only [EncodableICC.get]
+  exact Option.eq_some_of_isSome _
+
 /--
 Strong ICC step on codes: encodability is preserved both ways, and codes agree
 whenever either side is encodable.
@@ -676,15 +873,39 @@ theorem EncodeIccStep.refl {Γ : Ctx sig} {A : Object sig.nBases}
   EncodeIccStep.of_option_eq ε rfl
 
 /--
-Primary characterization on the encoder domain.
+Primary characterization on the encoder domain — both directions.
 
-Both sides must be encodable — `none = none` is never read as ICC equality.
-On the valid fragment, `EncodeTotal` discharges the encodability hypotheses.
+* **Invariance** (`EncodeIccInvariantGoal`): `ICCEq t u → EncodeIccStep ε t u`
+  (hence codes agree when either encodes).
+* **Reflection / common-code soundness** (`EncodeIccReflectGoal`): same
+  successful code implies `ICCEq`. This is the content of “rigidity” for
+  design E — not merely that encode is a function.
+
+Both sides must be encodable for the published iff — `none = none` is never
+ICC equality. `EncodeTotal` discharges encodability on the valid fragment.
 -/
 def IccEqIffEncodeEqGoal : Prop :=
   ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ) (t u : InvTm Γ A),
     EncodableICC ε t → EncodableICC ε u →
       (ICCEq t u ↔ encodeICC ε t = encodeICC ε u)
+
+/--
+Reflection: a shared successful code implies ICC equality.
+
+Peel soundness (`peelCaseOuter_icc`) supports the inductive argument that each
+encodable term is ICC-equivalent to the ordered phase its code denotes; two
+terms with the same code are then ICC-equivalent to each other.
+-/
+def EncodeIccReflectGoal : Prop :=
+  ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ)
+    {t u : InvTm Γ A} {c : ICCCode Γ A},
+    encodeICC ε t = some c → encodeICC ε u = some c → ICCEq t u
+
+/--
+Rigidity for design E = reflection/common-code soundness (`EncodeIccReflectGoal`).
+Determinism of `encodeICC` alone is not rigidity.
+-/
+abbrev EncodeIccRigidityGoal : Prop := EncodeIccReflectGoal (sig := sig)
 
 end Equality
 end Gimbal

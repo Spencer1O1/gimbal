@@ -53,6 +53,7 @@ import Gimbal.Equality.ICCCode
 import Gimbal.Equality.ICCEncode
 import Gimbal.Equality.ICCFragment
 import Gimbal.Equality.ICCTotal
+import Gimbal.Equality.ICCReflect
 import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.Compare
 import Gimbal.Equality.Reference
