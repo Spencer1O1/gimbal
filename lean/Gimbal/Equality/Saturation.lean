@@ -843,25 +843,33 @@ theorem mem_canonicalizePairObsOrder {sig : Signature}
 Union consistency witnesses with exact term-demanded neutrals, then
 canonicalize order (dependency DAG + stable key).
 -/
+def consistencyBag {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (hasExactTy : Object sig.nBases → Bool) (consistency : Schedule sig.nBases) :
+    Array (PairEntry sig hyps) :=
+  consistency.entries.foldl (init := #[]) fun acc e =>
+    if !hasExactTy e.1 && !acc.any fun
+        | .consistency Q _ => Q == e.1
+        | .exact .. => false
+    then acc.push (.consistency e.1 e.2) else acc
+
+/-- The result types the exact half of the bag already observes. -/
+def exactTys {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P))
+    (A : Object sig.nBases) : Bool :=
+  exactSrc.any (fun e => e.1 == A)
+
 def mergePairObs (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
     (consistency : Schedule sig.nBases)
     (exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
     Array (PairEntry sig hyps) :=
-  let exactBag : Array (PairEntry sig hyps) :=
-    exactSrc.map fun e => .exact e.1 e.2
-  let hasExactTy (A : Object sig.nBases) : Bool :=
-    exactSrc.any (fun e => e.1 == A)
-  -- The dedupe below only inspects `consistency` entries, so it is unaffected
-  -- by the exact half of the bag; keeping the two apart makes the provenance
-  -- of every entry visible.
-  let consBag : Array (PairEntry sig hyps) :=
-    consistency.entries.foldl (init := #[]) fun acc e =>
-      if !hasExactTy e.1 && !acc.any fun
-          | .consistency Q _ => Q == e.1
-          | .exact .. => false
-      then acc.push (.consistency e.1 e.2) else acc
-  canonicalizePairObsOrder σ (exactBag ++ consBag)
+  -- The consistency half is deduplicated against itself and against the result
+  -- types of the exact half only, so it depends on the exact observations
+  -- purely through `exactTys`. That is what makes the merge insensitive to the
+  -- order the two inputs were given in.
+  canonicalizePairObsOrder σ
+    ((exactSrc.map fun e => .exact e.1 e.2) ++
+      consistencyBag (exactTys exactSrc) consistency)
 
 /-- Outcome of building the shared pair observation list. -/
 inductive PairObsResult (sig : Signature) (hyps : Array (Object sig.nBases)) where
