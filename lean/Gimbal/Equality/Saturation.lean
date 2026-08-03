@@ -344,56 +344,68 @@ def PairEntry.ty {sig : Signature} {hyps : Array (Object sig.nBases)} :
   | .consistency P _ => P
   | .exact P _ => P
 
-private inductive ExactCmd (sig : Signature) (Γ : Ctx sig) where
-  | neu {A : Object sig.nBases} : NegNeu Γ A → ExactCmd sig Γ
-  | pos {A : Object sig.nBases} : PosNeu Γ A → ExactCmd sig Γ
-  | inv {A : Object sig.nBases} : InvTm Γ A → ExactCmd sig Γ
-  | foc {A : Object sig.nBases} : FocTm Γ A → ExactCmd sig Γ
-
 /-- Exact identity: same result type and raw neutral spine. -/
 def exactIdEq {Γ : Ctx sig}
     (e₁ e₂ : (P : Object sig.nBases) × NegNeu Γ P) : Bool :=
   e₁.1 == e₂.1 && NegNeu.toRaw e₁.2 == NegNeu.toRaw e₂.2
 
-/-- Collect exact positive-typed negative neutrals at the current context.
-Deduplicates by neutral identity, not by result type alone. -/
-def exactGo (fuel : Nat) {Γ : Ctx sig} :
-    ExactCmd sig Γ → Array ((P : Object sig.nBases) × NegNeu Γ P) →
-    Array ((P : Object sig.nBases) × NegNeu Γ P)
-  | cmd, acc =>
-    match fuel with
-    | 0 => acc
-    | fuel + 1 =>
-      match cmd with
-      | .neu (A := A) n =>
-        let acc :=
-          if objectPolarity A == .pos then
-            let e : (P : Object sig.nBases) × NegNeu Γ P := ⟨A, n⟩
-            if acc.any (exactIdEq e) then acc else acc.push e
-          else acc
-        match n with
-        | .var _ => acc
-        | .app n t => exactGo fuel (.inv t) (exactGo fuel (.neu n) acc)
-        | .fst n => exactGo fuel (.neu n) acc
-        | .snd n => exactGo fuel (.neu n) acc
-      | .pos (.neu n) => exactGo fuel (.neu n) acc
-      | .pos (.inl p) => exactGo fuel (.pos p) acc
-      | .pos (.inr p) => exactGo fuel (.pos p) acc
-      | .pos (.val t) => exactGo fuel (.inv t) acc
-      | .inv .unit => acc
-      | .inv (.pair t u) => exactGo fuel (.inv u) (exactGo fuel (.inv t) acc)
-      | .inv (.lam _) => acc
-      | .inv (.case n _ _) => exactGo fuel (.neu n) acc
-      | .inv (.abort n) => exactGo fuel (.neu n) acc
-      | .inv (.foc f) => exactGo fuel (.foc f) acc
-      | .foc (.pos (.done p)) => exactGo fuel (.pos p) acc
-      | .foc (.neg (.done n)) => exactGo fuel (.neu n) acc
-      | .foc (.letPos n _) => exactGo fuel (.neu n) acc
-      | .foc (.sat (.mk _ t)) => exactGo fuel (.inv t) acc
+/-- Append an entry unless an identical spine is already collected. -/
+def insertExact {Γ : Ctx sig} (acc : Array ((P : Object sig.nBases) × NegNeu Γ P))
+    (e : (P : Object sig.nBases) × NegNeu Γ P) :
+    Array ((P : Object sig.nBases) × NegNeu Γ P) :=
+  if acc.any (exactIdEq e) then acc else acc.push e
+
+/-- Collect a neutral if its result type is positive. -/
+def pushExact {Γ : Ctx sig} {A : Object sig.nBases}
+    (acc : Array ((P : Object sig.nBases) × NegNeu Γ P)) (n : NegNeu Γ A) :
+    Array ((P : Object sig.nBases) × NegNeu Γ P) :=
+  if objectPolarity A == .pos then insertExact acc ⟨A, n⟩ else acc
+
+/-!
+Exact positive-typed negative neutrals of a focused term, deduplicated by
+neutral identity rather than by result type. The traversal is structural: a
+neutral is collected before its own subspines, so no fuel is involved and the
+emitted order is the pre-order of the previous depth-first collector.
+-/
+mutual
+def exactNegNeu {Γ : Ctx sig} {A : Object sig.nBases} :
+    NegNeu Γ A → Array ((P : Object sig.nBases) × NegNeu Γ P) →
+      Array ((P : Object sig.nBases) × NegNeu Γ P)
+  | .var x, acc => pushExact acc (.var x)
+  | .app f t, acc => exactInvTm t (exactNegNeu f (pushExact acc (.app f t)))
+  | .fst f, acc => exactNegNeu f (pushExact acc (.fst f))
+  | .snd f, acc => exactNegNeu f (pushExact acc (.snd f))
+
+def exactPosNeu {Γ : Ctx sig} {A : Object sig.nBases} :
+    PosNeu Γ A → Array ((P : Object sig.nBases) × NegNeu Γ P) →
+      Array ((P : Object sig.nBases) × NegNeu Γ P)
+  | .neu n, acc => exactNegNeu n acc
+  | .inl p, acc => exactPosNeu p acc
+  | .inr p, acc => exactPosNeu p acc
+  | .val t, acc => exactInvTm t acc
+
+def exactInvTm {Γ : Ctx sig} {A : Object sig.nBases} :
+    InvTm Γ A → Array ((P : Object sig.nBases) × NegNeu Γ P) →
+      Array ((P : Object sig.nBases) × NegNeu Γ P)
+  | .unit, acc => acc
+  | .pair t u, acc => exactInvTm u (exactInvTm t acc)
+  | .lam _, acc => acc
+  | .case n _ _, acc => exactNegNeu n acc
+  | .abort n, acc => exactNegNeu n acc
+  | .foc f, acc => exactFocTm f acc
+
+def exactFocTm {Γ : Ctx sig} {A : Object sig.nBases} :
+    FocTm Γ A → Array ((P : Object sig.nBases) × NegNeu Γ P) →
+      Array ((P : Object sig.nBases) × NegNeu Γ P)
+  | .pos (.done p), acc => exactPosNeu p acc
+  | .neg (.done n), acc => exactNegNeu n acc
+  | .letPos n _, acc => exactNegNeu n acc
+  | .sat (.mk _ t), acc => exactInvTm t acc
+end
 
 def collectExact {Γ : Ctx sig} {A : Object sig.nBases}
     (t : InvTm Γ A) : Array ((P : Object sig.nBases) × NegNeu Γ P) :=
-  exactGo 4096 (.inv t) #[]
+  exactInvTm t #[]
 
 /-! ### Exact newness (current-phase observations must use Γnew) -/
 
@@ -453,6 +465,18 @@ def exactsAllUseNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
     (exact : Array ((P : Object sig.nBases) × NegNeu Γ P)) : Bool :=
   exact.all fun e => NegNeu.mentionsNew hypsSize newFrom e.2
 
+/-- A neutral that is just a context variable needs no observation. -/
+def NegNeu.isVar {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → Bool
+  | .var _ => true
+  | _ => false
+
+/-- Keep the entries that pass selection, first occurrence wins. -/
+def selectExactStep {Γ : Ctx sig}
+    (out : Array ((P : Object sig.nBases) × NegNeu Γ P))
+    (e : (P : Object sig.nBases) × NegNeu Γ P) :
+    Array ((P : Object sig.nBases) × NegNeu Γ P) :=
+  if objectPolarity e.1 == .pos && !e.2.isVar then insertExact out e else out
+
 /--
 Exact neutrals that still need observation.
 A type may already be retrievable from a hypothesis while a distinct exact
@@ -463,30 +487,13 @@ def selectExactObs (_σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases))
     (exact : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)) :
     Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) :=
-  Id.run do
-    let mut out :
-        Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P) := #[]
-    for e in exact do
-      if objectPolarity e.1 == .pos && !out.any (exactIdEq e) then
-        let bareHyp :=
-          match e.2 with
-          | .var _ => true
-          | _ => false
-        if !bareHyp then
-          out := out.push e
-    pure out
+  exact.foldl selectExactStep #[]
 
 /-- Commutative idempotent union of exact neutrals by identity. -/
 def unionExact {Γ : Ctx sig}
     (a b : Array ((P : Object sig.nBases) × NegNeu Γ P)) :
     Array ((P : Object sig.nBases) × NegNeu Γ P) :=
-  Id.run do
-    let mut out : Array ((P : Object sig.nBases) × NegNeu Γ P) := #[]
-    for e in a do
-      if !out.any (exactIdEq e) then out := out.push e
-    for e in b do
-      if !out.any (exactIdEq e) then out := out.push e
-    pure out
+  b.foldl insertExact (a.foldl insertExact #[])
 
 /-- Stable identity for a schedule entry (left/right-insensitive). -/
 def PairEntry.idEq {sig : Signature} {hyps : Array (Object sig.nBases)} :
