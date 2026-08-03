@@ -52,7 +52,8 @@ theorem tmEq_branch_inl {Γ : Ctx sig} {L R A : Object sig.nBases}
     (body : InvTm (Γ ▻ .coprod L R) A) :
     TmEq (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInl L R)).erase
       (subst Subst.injLeft body.erase) := by
-  refine .trans (tmEq_hsubstInv _ _) (.of_eq ?_)
+  refine .trans (tmEq_hsubstInv _ _)
+    (.trans (TmEq.subst0_congr (.refl _) (tmEq_etaInl L R)) (.of_eq ?_))
   show subst0 (InvTm.rename (Rename.skip1 (B := L)) body).erase
       (Tm.inl (Tm.var .here)) = _
   rw [InvTm.erase_rename, subst0_skip1_inl]
@@ -61,7 +62,8 @@ theorem tmEq_branch_inr {Γ : Ctx sig} {L R A : Object sig.nBases}
     (body : InvTm (Γ ▻ .coprod L R) A) :
     TmEq (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInr L R)).erase
       (subst Subst.injRight body.erase) := by
-  refine .trans (tmEq_hsubstInv _ _) (.of_eq ?_)
+  refine .trans (tmEq_hsubstInv _ _)
+    (.trans (TmEq.subst0_congr (.refl _) (tmEq_etaInr L R)) (.of_eq ?_))
   show subst0 (InvTm.rename (Rename.skip1 (B := R)) body).erase
       (Tm.inr (Tm.var .here)) = _
   rw [InvTm.erase_rename, subst0_skip1_inr]

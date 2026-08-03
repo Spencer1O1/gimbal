@@ -215,6 +215,25 @@ def InvTm.hinr {Γ : Ctx sig} {B : Object sig.nBases} (A : Object sig.nBases) :
   | .pair t u => .foc (.pos (.done (.inr (.val (.pair t u)))))
   | .lam t => .foc (.pos (.done (.inr (.val (.lam t)))))
 
+/-! ### Coproduct η patterns
+
+The two branches of a coproduct η-expansion: the newest variable, identity
+expanded and injected on the corresponding side. Saturation commits a
+coproduct observation to these, and the ICC canonicalizer contracts them
+again. The expansion is what keeps the branch legal when the summand is
+negative: `inl ⟨⟩` has to be written `inl (↓⟨⟩)`.
+-/
+
+/-- `x. inl x`, the left branch of a coproduct η-expansion. -/
+def InvTm.etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
+    InvTm (Γ ▻ A) (.coprod A B) :=
+  InvTm.hinl B (NegNeu.eta A (.var .here))
+
+/-- `y. inr y`, the right branch of a coproduct η-expansion. -/
+def InvTm.etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
+    InvTm (Γ ▻ B) (.coprod A B) :=
+  InvTm.hinr A (NegNeu.eta B (.var .here))
+
 /-! ### Hereditary substitution -/
 
 /--
@@ -560,6 +579,15 @@ theorem wellInv_hinr {Γ : Ctx sig} {B : Object sig.nBases}
   | case9 _ _ _ t =>
       cases h with
       | lam ht => exact .foc (.pos rfl (.inr (.val rfl (.lam ht))))
+
+/-- The η-expanded injections are legal branches at any summand polarity. -/
+theorem wellInv_etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
+    WellInv (InvTm.etaInl (Γ := Γ) A B) :=
+  wellInv_hinl B (wellInv_eta A .var)
+
+theorem wellInv_etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
+    WellInv (InvTm.etaInr (Γ := Γ) A B) :=
+  wellInv_hinr A (wellInv_eta B .var)
 
 /-! #### The hereditary operations -/
 

@@ -182,23 +182,6 @@ def NegNeu.weaken {Γ : Ctx sig} {A B : Object sig.nBases}
     (n : NegNeu Γ A) : NegNeu (Γ ▻ B) A :=
   NegNeu.rename Rename.weaken n
 
-/-! ### Coproduct η patterns
-
-The two branches of a coproduct η-expansion: the newest variable re-injected on
-the corresponding side. Saturation commits a coproduct observation to these,
-and the ICC canonicalizer contracts them again.
--/
-
-/-- `x. inl x`, the left branch of a coproduct η-expansion. -/
-def InvTm.etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
-    InvTm (Γ ▻ A) (.coprod A B) :=
-  .foc (.pos (.done (.inl (.neu (.var .here)))))
-
-/-- `y. inr y`, the right branch of a coproduct η-expansion. -/
-def InvTm.etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
-    InvTm (Γ ▻ B) (.coprod A B) :=
-  .foc (.pos (.done (.inr (.neu (.var .here)))))
-
 /-- Cast a negative neutral along a type equality. -/
 def NegNeu.cast {Γ : Ctx sig} {A B : Object sig.nBases}
     (h : A = B) (n : NegNeu Γ A) : NegNeu Γ B :=

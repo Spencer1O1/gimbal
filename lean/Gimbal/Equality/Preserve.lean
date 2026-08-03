@@ -147,6 +147,16 @@ theorem tmEq_hinr {Γ : Ctx sig} {B : Object sig.nBases} (A : Object sig.nBases)
   | case8 => exact .refl _
   | case9 => exact .refl _
 
+/-- The η-expanded left injection means what it looks like. -/
+theorem tmEq_etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
+    TmEq (InvTm.etaInl (Γ := Γ) A B).erase (.inl (.var .here)) :=
+  (tmEq_hinl B _).trans (TmEq.inl (tmEq_eta A (.var .here)))
+
+/-- The η-expanded right injection means what it looks like. -/
+theorem tmEq_etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
+    TmEq (InvTm.etaInr (Γ := Γ) A B).erase (.inr (.var .here)) :=
+  (tmEq_hinr A _).trans (TmEq.inr (tmEq_eta B (.var .here)))
+
 /-! ### Hereditary substitution preserves meaning -/
 
 /-- Erasure of a spine-substitution result. -/
