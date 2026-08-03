@@ -267,6 +267,29 @@ def pushPos (ws : List (PosEntry sig)) (o : Origin sig) (ty : Object sig.nBases)
 
 mutual
 /--
+Shared continuation for a forced left-coprod: encode the two branches under
+split origins and assemble `.case e.origin _ _`. Used by both successful peel
+and left-η for `.unit`, so `case_unit` is an `Option` identity.
+-/
+def encodeLeftCoprodBranches (fuel : Nat) {Γ : Ctx sig}
+    (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (e : PosEntry sig)
+    {L R A : Object sig.nBases}
+    (tL : InvTm (Γ ▻ L) A) (tR : InvTm (Γ ▻ R) A) :
+    Option (ICCCode Γ A) :=
+  let ws' := ws.tail
+  let εL : OriginEnv (Γ ▻ L) :=
+    OriginEnv.weaken (A := L) ε (.split e.origin false)
+  let εR : OriginEnv (Γ ▻ R) :=
+    OriginEnv.weaken (A := R) ε (.split e.origin true)
+  let wsL := pushPos ws' (.split e.origin false) L
+  let wsR := pushPos ws' (.split e.origin true) R
+  match encodeICCGo fuel wsL εL domNest obsSlot tL,
+        encodeICCGo fuel wsR εR domNest obsSlot tR with
+  | some cL, some cR => some (.case e.origin cL cR)
+  | _, _ => none
+
+/--
 Worklist-driven encode, bounded by `encodeMeasure`.
 
 * `domNest` — next λ-domain origin index (`Origin.dom`)
@@ -326,45 +349,22 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
           | some ⟨L', R', _n, tL, tR⟩ =>
               if hL : L' = L then
                 if hR : R' = R then
-                  let ws' := ws.tail
                   let tL' : InvTm (Γ ▻ L) A := hL ▸ tL
                   let tR' : InvTm (Γ ▻ R) A := hR ▸ tR
-                  let εL : OriginEnv (Γ ▻ L) :=
-                    OriginEnv.weaken (A := L) ε (.split e.origin false)
-                  let εR : OriginEnv (Γ ▻ R) :=
-                    OriginEnv.weaken (A := R) ε (.split e.origin true)
-                  let wsL := pushPos ws' (.split e.origin false) L
-                  let wsR := pushPos ws' (.split e.origin true) R
-                  match encodeICCGo fuel wsL εL domNest obsSlot tL',
-                        encodeICCGo fuel wsR εR domNest obsSlot tR' with
-                  | some cL, some cR => some (.case e.origin cL cR)
-                  | _, _ => none
+                  encodeLeftCoprodBranches fuel ws ε domNest obsSlot e tL' tR'
                 else none
               else none
           | none =>
-              -- Left-η for `.unit`: synthesize the forced `case` and encode its
-              -- unit branches with the same fuel/worklist as a successful peel.
-              -- (Recursing through `encodeICCGo` on the expanded term would
-              -- burn an extra fuel unit and break domain agreement.)
+              -- Left-η for `.unit`: same branch continuation as a successful peel.
               match t with
               | .unit =>
                   match OriginEnv.find? ε e.origin with
                   | some ⟨ty, x⟩ =>
                       if hty : ty = (.coprod L R : Object sig.nBases) then
                         if ε x == e.origin then
-                          let ws' := ws.tail
-                          let εL : OriginEnv (Γ ▻ L) :=
-                            OriginEnv.weaken (A := L) ε (.split e.origin false)
-                          let εR : OriginEnv (Γ ▻ R) :=
-                            OriginEnv.weaken (A := R) ε (.split e.origin true)
-                          let wsL := pushPos ws' (.split e.origin false) L
-                          let wsR := pushPos ws' (.split e.origin true) R
-                          match encodeICCGo fuel wsL εL domNest obsSlot
-                                  (.unit : InvTm (Γ ▻ L) .unit),
-                                encodeICCGo fuel wsR εR domNest obsSlot
-                                  (.unit : InvTm (Γ ▻ R) .unit) with
-                          | some cL, some cR => some (.case e.origin cL cR)
-                          | _, _ => none
+                          encodeLeftCoprodBranches fuel ws ε domNest obsSlot e
+                            (.unit : InvTm (Γ ▻ L) .unit)
+                            (.unit : InvTm (Γ ▻ R) .unit)
                         else none
                       else none
                   | none => none

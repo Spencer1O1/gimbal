@@ -20,7 +20,8 @@ variable {sig : Signature}
 theorem encodeICCGo_unit_nil (fuel : Nat) {Γ : Ctx sig} (ε : OriginEnv Γ)
     (domNest obsSlot : Nat) :
     encodeICCGo (fuel + 1) ([] : List (PosEntry sig)) ε domNest obsSlot
-      (.unit (Γ := Γ)) = some .unit := rfl
+      (.unit (Γ := Γ)) = some .unit := by
+  simp [encodeICCGo, forcedRule, peelUnit]
 
 theorem encodeICC_unit_of_nilWorklist {Γ : Ctx sig} (ε : OriginEnv Γ)
     (hws : OriginEnv.posWorklist ε = []) :
@@ -35,7 +36,7 @@ theorem encodeICC_unit_of_nilWorklist {Γ : Ctx sig} (ε : OriginEnv Γ)
       simp only [encodeMeasure, worklistWeight, List.foldl, objectWeight] at hm
       omega
   | fuel + 1 =>
-      exact encodeICCGo_unit_nil fuel ε 0 0
+      simpa [hm] using encodeICCGo_unit_nil fuel ε 0 0
 
 /-- Trivial direction of generator invariance. -/
 theorem encodeICC_eq_refl {Γ : Ctx sig} {A : Object sig.nBases}
@@ -260,12 +261,48 @@ theorem peelCaseOuter_unit_none {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin s
   · simp [peelCaseOuterGo]
 
 /-!
-`case_unit` left-η is implemented in `encodeICCGo` (domain both ways at runtime).
-The general `encodeICC ε (.case x unit unit) = encodeICC ε .unit` Prop under a
-forced head is deferred: the peel-success path still carries `eq.rec` casts that
-block `rfl` against the η path despite identical pretty-printed goals.
-Executable agreement is pinned by `encodeCaseUnitAgree` in `Fixtures.lean`.
+`case_unit` left-η is implemented via `encodeLeftCoprodBranches` (same
+continuation as a successful peel).
 -/
+
+theorem encodeICCGo_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B))
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
+    (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod A B, x⟩) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.case (.var x) .unit .unit) =
+      encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot .unit := by
+  have hforce := forcedRule_cons_coprod e ws hty (.unit : Object sig.nBases)
+  have hpeelX := peelCaseOuter_case_var_hit ε e.origin x
+    (.unit : InvTm (Γ ▻ A) .unit) (.unit) hit
+  have hpeelU := peelCaseOuter_unit_none ε e.origin
+  simp only [encodeICCGo, hforce, hpeelX, hpeelU, hfind, hit, beq_self_eq_true,
+    ↓reduceDIte, ↓reduceIte, eq_rec_constant]
+
+theorem encodeICC_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
+    (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod A B, x⟩) :
+    encodeICC ε (.case (.var x) .unit .unit) = encodeICC ε (.unit (Γ := Γ)) := by
+  unfold encodeICC
+  rw [hws]
+  have hpos := encodeMeasure_cons_pos e ws (.unit : Object sig.nBases)
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using
+    encodeICCGo_case_unit fuel e ws ε 0 0 x hty hit hfind
+
+theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
+    (hfind : OriginEnv.find? ε e.origin = some ⟨.coprod A B, x⟩) :
+    EncodeIccStep ε (.case (.var x) .unit .unit) (.unit (Γ := Γ)) :=
+  EncodeIccStep.of_option_eq ε (encodeICC_case_unit ε e ws x hws hty hit hfind)
 
 /-! ### Right-introduction unfolds (nil worklist) -/
 
