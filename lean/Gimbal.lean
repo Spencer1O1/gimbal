@@ -31,6 +31,7 @@ import Gimbal.Equality.Opacity
 import Gimbal.Equality.Subformula
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Deduction
+import Gimbal.Equality.ReachSound
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.ICC
 import Gimbal.Equality.Compare
