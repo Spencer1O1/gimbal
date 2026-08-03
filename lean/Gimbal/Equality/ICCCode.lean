@@ -341,7 +341,34 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
                   | _, _ => none
                 else none
               else none
-          | none => none
+          | none =>
+              -- Left-η for `.unit`: synthesize the forced `case` and encode its
+              -- unit branches with the same fuel/worklist as a successful peel.
+              -- (Recursing through `encodeICCGo` on the expanded term would
+              -- burn an extra fuel unit and break domain agreement.)
+              match t with
+              | .unit =>
+                  match OriginEnv.find? ε e.origin with
+                  | some ⟨ty, x⟩ =>
+                      if hty : ty = (.coprod L R : Object sig.nBases) then
+                        if ε x == e.origin then
+                          let ws' := ws.tail
+                          let εL : OriginEnv (Γ ▻ L) :=
+                            OriginEnv.weaken (A := L) ε (.split e.origin false)
+                          let εR : OriginEnv (Γ ▻ R) :=
+                            OriginEnv.weaken (A := R) ε (.split e.origin true)
+                          let wsL := pushPos ws' (.split e.origin false) L
+                          let wsR := pushPos ws' (.split e.origin true) R
+                          match encodeICCGo fuel wsL εL domNest obsSlot
+                                  (.unit : InvTm (Γ ▻ L) .unit),
+                                encodeICCGo fuel wsR εR domNest obsSlot
+                                  (.unit : InvTm (Γ ▻ R) .unit) with
+                          | some cL, some cR => some (.case e.origin cL cR)
+                          | _, _ => none
+                        else none
+                      else none
+                  | none => none
+              | _ => none
       | .leftNever e =>
           match t with
           | .abort (.var x) =>
@@ -397,24 +424,84 @@ def encodeICCEq {Γ : Ctx sig} {A : Object sig.nBases}
 
 /-! ### Theorem interfaces -/
 
-/-- Primary M8F target once encode is total on well-focused saturated terms. -/
-def IccEqIffEncodeEqGoal : Prop :=
-  ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ) (t u : InvTm Γ A),
-    (encodeICC ε t).isSome ∧ (encodeICC ε u).isSome →
-      (ICCEq t u ↔ encodeICC ε t = encodeICC ε u)
+/-- Membership in the encoder domain (explicit; not a silent `isSome` guard). -/
+def EncodableICC {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (t : InvTm Γ A) : Prop :=
+  (encodeICC ε t).isSome
+
+theorem EncodableICC.iff_isSome {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (t : InvTm Γ A) :
+    EncodableICC ε t ↔ (encodeICC ε t).isSome := Iff.rfl
 
 /--
-ICC generators preserve codes whenever both sides encode.
+Strong ICC step on codes: encodability is preserved both ways, and codes agree
+whenever either side is encodable.
 
-Unguarded equality is too strong: e.g. `case_unit` relates a left-expanded
-form (encodes under a forced coprod) to bare `.unit` (fails that peel). The
-primary iff (`IccEqIffEncodeEqGoal`) already restricts to successful encodes.
+`encodeICC ε t = encodeICC ε u` (as `Option`) implies this. The published
+characterization must never treat `none = none` as ICC equality.
+-/
+def EncodeIccStep {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (t u : InvTm Γ A) : Prop :=
+  (EncodableICC ε t ↔ EncodableICC ε u) ∧
+    (EncodableICC ε t → encodeICC ε t = encodeICC ε u)
+
+theorem EncodeIccStep.of_option_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) {t u : InvTm Γ A}
+    (h : encodeICC ε t = encodeICC ε u) : EncodeIccStep ε t u := by
+  refine ⟨?_, fun _ => h⟩
+  simp only [EncodableICC, h]
+
+theorem EncodeIccStep.symm {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t u : InvTm Γ A}
+    (h : EncodeIccStep ε t u) : EncodeIccStep ε u t :=
+  ⟨h.1.symm, fun hu => by
+    have ht := h.1.mpr hu
+    exact (h.2 ht).symm⟩
+
+theorem EncodeIccStep.either {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t u : InvTm Γ A}
+    (h : EncodeIccStep ε t u)
+    (hex : EncodableICC ε t ∨ EncodableICC ε u) :
+    EncodableICC ε t ∧ EncodableICC ε u ∧ encodeICC ε t = encodeICC ε u := by
+  cases hex with
+  | inl ht => exact ⟨ht, h.1.mp ht, h.2 ht⟩
+  | inr hu =>
+      have ht := h.1.mpr hu
+      exact ⟨ht, hu, h.2 ht⟩
+
+/--
+Transitivity of code agreement requires the intermediate term to be encodable.
+Endpoint-only `isSome` hypotheses do not suffice to chain equalities.
+-/
+theorem EncodeIccStep.trans {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε : OriginEnv Γ} {t u v : InvTm Γ A}
+    (htu : EncodeIccStep ε t u) (huv : EncodeIccStep ε u v)
+    (hu : EncodableICC ε u) :
+    EncodeIccStep ε t v := by
+  have ht := htu.1.mpr hu
+  have hv := huv.1.mp hu
+  refine ⟨⟨fun _ => hv, fun _ => ht⟩, fun _ => ?_⟩
+  exact (htu.2 ht).trans (huv.2 hu)
+
+/--
+Every ICC conversion is an `EncodeIccStep`: domain preserved both ways, and
+codes agree if either endpoint encodes. Transitivity of the packaged relation
+requires the intermediate term to be encodable when chaining code equalities.
 -/
 def EncodeIccInvariantGoal : Prop :=
   ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ)
-    {t u : InvTm Γ A}, ICCEq t u →
-      (encodeICC ε t).isSome → (encodeICC ε u).isSome →
-      encodeICC ε t = encodeICC ε u
+    {t u : InvTm Γ A}, ICCEq t u → EncodeIccStep ε t u
+
+/--
+Primary characterization on the encoder domain.
+
+Both sides must be encodable — `none = none` is never read as ICC equality.
+On the valid fragment, `EncodeTotal` discharges the encodability hypotheses.
+-/
+def IccEqIffEncodeEqGoal : Prop :=
+  ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ) (t u : InvTm Γ A),
+    EncodableICC ε t → EncodableICC ε u →
+      (ICCEq t u ↔ encodeICC ε t = encodeICC ε u)
 
 end Equality
 end Gimbal

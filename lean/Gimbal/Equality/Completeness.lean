@@ -35,7 +35,7 @@ variable {sig : Signature}
 /-- Primary characterization — see also `IccEqIffEncodeEqGoal` in `ICCCode`. -/
 abbrev ICCCompleteness : Prop := IccEqIffEncodeEqGoal (sig := sig)
 
-/-- Generator-wise code invariance. -/
+/-- Generator-wise code invariance (`EncodeIccStep`: domain both ways). -/
 abbrev EncodeIccInvariant : Prop := EncodeIccInvariantGoal (sig := sig)
 
 /-- Legacy InvTm-canonicalizer completeness (frozen; not the active target). -/
@@ -65,22 +65,19 @@ def OriginCollisionFree : Prop := True
 /-! ### Totality of encode (no correctness-critical fuel) -/
 
 /--
-`encodeICC` must succeed on every well-focused saturated invertible term under
-a well-formed phase-entry origin environment.
+`encodeICC` must succeed on every term in the **valid fragment** consumed by
+the reference comparator: well-focused, saturated invertible terms under an
+adequate phase-entry origin environment.
 
-The present `encodeICCGo` recursion is bounded by candidate `encodeMeasure`.
-That bound is a proof device, not a semantic parameter: either
-
-* prove adequacy (`encodeMeasure` never hits zero on legal peels), then erase
-  the fuel in favour of well-founded recursion on the measure; or
-* refactor to structural/WF recursion over worklist + goal weight directly.
-
-`none` from fuel exhaustion must not appear in the proof-critical path.
+It is not required for arbitrary `InvTm`. The present `encodeICCGo` fuel is a
+proof device (`encodeMeasure`); prove adequacy on the valid fragment or switch
+to WF recursion. Fuel exhaustion must not appear on the proof-critical path.
 -/
 def EncodeTotal : Prop :=
   ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ) (t : InvTm Γ A),
-    -- eventual statement restricts to WellInv / saturated phase-entry ε
-    (encodeICC ε t).isSome
+    WellInv t →
+      -- TODO: add saturated / adequate-ε hypotheses for the reference fragment
+      EncodableICC ε t
 
 /-! ### Reference completeness and decidability (fuel-free) -/
 
@@ -154,7 +151,9 @@ Blocked / WIP:
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
 3. `EncodeTotal` / measure adequacy — no proof-critical fuel exhaustion
-4. `EncodeIccInvariant` / rigidity / `ICCCompleteness` (uses peel soundness)
+4. `EncodeIccInvariant` (`EncodeIccStep`: domain both ways) / rigidity /
+   `ICCCompleteness` (iff requires `EncodableICC` on both sides — never
+   `none = none` as ICC)
 5. `ReferenceCompareTotal` + iff — erase `2048` from decidability
 6. 8G packaging
 

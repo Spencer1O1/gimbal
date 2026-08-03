@@ -499,6 +499,22 @@ def encodeCasePairAgree : Bool :=
 
 example : encodeCasePairAgree = true := by native_decide
 
+/-- Left-η: bare `.unit` and `.case x unit unit` share a code under a forced coprod. -/
+def encodeCaseUnitAgree : Bool :=
+  let Sig : Signature := ⟨1, #[]⟩
+  let hyps : Array (Object 1) := #[.coprod (.base 0) (.base 0)]
+  let n : NegNeu (Ctx.ofHyps (sig := Sig) hyps) (.coprod (.base 0) (.base 0)) :=
+    .var .here
+  let expanded : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.unit : Object 1) :=
+    .case n .unit .unit
+  let contracted : InvTm (Ctx.ofHyps (sig := Sig) hyps) (.unit : Object 1) :=
+    .unit
+  match encodeICCHyps expanded, encodeICCHyps contracted with
+  | some c₁, some c₂ => ICCCode.beq c₁ c₂
+  | _, _ => false
+
+example : encodeCaseUnitAgree = true := by native_decide
+
 /--
 Frozen counterexample for the *old* bottom-up `NegNeu.blt` canonicalizer.
 Design E abandons repairing that path: do not re-canonicalize after exchange

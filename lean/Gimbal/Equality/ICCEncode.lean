@@ -201,6 +201,72 @@ theorem encodeICC_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
   simpa [hm] using
     encodeICCGo_case_case fuel e ws ε 0 0 xs xt t₁ t₂ u₁ u₂ hty hit miss
 
+/-! ### Package commute rules as `EncodeIccStep` -/
+
+theorem encodeIccStep_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (t₁ : InvTm (Γ ▻ A) C) (t₂ : InvTm (Γ ▻ B) C)
+    (u₁ : InvTm (Γ ▻ A) D) (u₂ : InvTm (Γ ▻ B) D)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    EncodeIccStep ε
+      (.case (.var x) (.pair t₁ u₁) (.pair t₂ u₂))
+      (.pair (.case (.var x) t₁ t₂) (.case (.var x) u₁ u₂)) :=
+  EncodeIccStep.of_option_eq ε (encodeICC_case_pair ε e ws x t₁ t₂ u₁ u₂ hws hty hit)
+
+theorem encodeIccStep_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    EncodeIccStep ε
+      (.case (.var x) (.lam t) (.lam u))
+      (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+        (InvTm.rename Rename.exchange t)
+        (InvTm.rename Rename.exchange u))) :=
+  EncodeIccStep.of_option_eq ε (encodeICC_case_lam ε e ws x t u hws hty hit)
+
+theorem encodeIccStep_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (xs : Var Γ (.coprod A B)) (xt : Var Γ (.coprod C D))
+    (t₁ : InvTm (Γ ▻ A ▻ C) E) (t₂ : InvTm (Γ ▻ A ▻ D) E)
+    (u₁ : InvTm (Γ ▻ B ▻ C) E) (u₂ : InvTm (Γ ▻ B ▻ D) E)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε xs = e.origin)
+    (miss : (ε xt == e.origin) = false) :
+    EncodeIccStep ε
+      (.case (.var xs)
+        (.case (NegNeu.weaken (B := A) (.var xt)) t₁ t₂)
+        (.case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂))
+      (.case (.var xt)
+        (.case (NegNeu.weaken (B := C) (.var xs))
+          (InvTm.rename Rename.exchange t₁)
+          (InvTm.rename Rename.exchange u₁))
+        (.case (NegNeu.weaken (B := D) (.var xs))
+          (InvTm.rename Rename.exchange t₂)
+          (InvTm.rename Rename.exchange u₂))) :=
+  EncodeIccStep.of_option_eq ε
+    (encodeICC_case_case ε e ws xs xt t₁ t₂ u₁ u₂ hws hty hit miss)
+
+/-! ### `case_unit` via left-η expansion -/
+
+theorem peelCaseOuter_unit_none {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin sig) :
+    peelCaseOuter ε o (.unit (Γ := Γ)) = none := by
+  unfold peelCaseOuter
+  cases InvTm.size (.unit (Γ := Γ) : InvTm Γ .unit)
+  · rfl
+  · simp [peelCaseOuterGo]
+
+/-!
+`case_unit` left-η is implemented in `encodeICCGo` (domain both ways at runtime).
+The general `encodeICC ε (.case x unit unit) = encodeICC ε .unit` Prop under a
+forced head is deferred: the peel-success path still carries `eq.rec` casts that
+block `rfl` against the η path despite identical pretty-printed goals.
+Executable agreement is pinned by `encodeCaseUnitAgree` in `Fixtures.lean`.
+-/
+
 /-! ### Right-introduction unfolds (nil worklist) -/
 
 theorem forcedRule_nil_prod (L R : Object sig.nBases) :
@@ -239,10 +305,13 @@ Tracked as goal Props in `Completeness.lean`:
 
 1. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom`, `obsSlot`/`domNest`)
 2. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done**
-3. `EncodeIccInvariant` / rigidity / `ICCCompleteness` — commute rules for
-   forced-head `case_pair`/`case_lam`/`case_case` landed; congruence + package remain
-4. `EncodeTotal` — measure adequacy; no proof-critical fuel exhaustion
-5. `ReferenceCompareTotal` + iff — total comparator; **no `2048` decidability**
+3. `EncodeIccInvariant` (`EncodeIccStep`: domain both ways + codes if either
+   encodes) — commute rules packaged; `case_unit` left-η executable + fixture;
+   congruence / full package remain. Iff requires `EncodableICC` on both sides
+   (never `none = none` as ICC). `EncodeIccStep.trans` needs intermediate
+   encodable.
+4. `EncodeTotal` — valid fragment only (WellInv + saturated/adequate ε)
+5. `ReferenceCompareTotal` + iff — erase `2048` from decidability
 6. Wire code equality into the total `referenceCompare`; resume 8G
 -/
 
