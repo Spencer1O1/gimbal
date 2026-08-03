@@ -1031,7 +1031,10 @@ theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
 `ICCEq.sat_body` unwraps `.foc (.sat _)` to the body. Encode of sat under
 `forcedRule = .focus` yields `.foc (.body c)` while encode of the body yields
 `c`, so codes are **not** equal: `EncodeIccStep` does not hold for `sat_body`
-in general (needs body-erasure on codes or a restricted domain).
+in general. No clean packaging-only fix via `ICCEq.sat_body` alone (would need
+code-level body erasure or a restricted `EncodeIccStep` domain). Status:
+`encodeICCGo_sat_body_codes` records the Go relationship; leave `EncodeIccStep`
+open.
 
 `ICCEq.case_letPos` peel agreement and Go/`EncodeIccStep` packaging are landed
 below (`encodeIccStep_case_letPos`).
@@ -3080,6 +3083,55 @@ theorem encodeReady_foc_neg_basesOnly {Γ : Ctx sig} {A : Object sig.nBases}
       exact .moveStable (forcedRule_cons_base_moveStable e ws hb A)
         (ih fun e' he' => hws e' (List.Mem.tail _ he'))
 
+/-- After stripping base heads, `.pair` is ready under `rightProd` on `[]`. -/
+theorem encodeReady_pair_basesOnly {Γ : Ctx sig} {L R : Object sig.nBases}
+    (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (t : InvTm Γ L) (u : InvTm Γ R)
+    (hws : worklistBasesOnly ws)
+    (ht : EncodeReady ([] : List (PosEntry sig)) ε domNest obsSlot t)
+    (hu : EncodeReady ([] : List (PosEntry sig)) ε domNest obsSlot u) :
+    EncodeReady ws ε domNest obsSlot (.pair t u) := by
+  induction ws with
+  | nil => exact .rightProd_pair rfl ht hu
+  | cons e ws ih =>
+      have ⟨b, hb⟩ := hws e (List.Mem.head _)
+      exact .moveStable
+        (forcedRule_cons_base_moveStable e ws hb (.prod L R))
+        (ih fun e' he' => hws e' (List.Mem.tail _ he'))
+
+/-- After stripping base heads, `.lam` is ready under `rightExp` on `[]`. -/
+theorem encodeReady_lam_basesOnly {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
+    (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (obsSlot : Nat) (body : InvTm (Γ ▻ Arg) Ret)
+    (hws : worklistBasesOnly ws)
+    (hb : EncodeReady
+      (pushPos ([] : List (PosEntry sig)) (.dom (sig := sig) 0) Arg)
+      (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) 0))
+      1 obsSlot body) :
+    EncodeReady ws ε 0 obsSlot (.lam body) := by
+  induction ws with
+  | nil => exact .rightExp_lam rfl hb
+  | cons e ws ih =>
+      have ⟨b, hb'⟩ := hws e (List.Mem.head _)
+      exact .moveStable
+        (forcedRule_cons_base_moveStable e ws hb' (.exp Arg Ret))
+        (ih fun e' he' => hws e' (List.Mem.tail _ he'))
+
+/-- After stripping base heads, `.foc (.sat _)` is ready under `focus` on `[]`. -/
+theorem encodeReady_foc_sat_basesOnly {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (s : Schedule sig.nBases) (t : InvTm Γ A)
+    (hws : worklistBasesOnly ws)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (ht : EncodeReady ([] : List (PosEntry sig)) ε domNest obsSlot t) :
+    EncodeReady ws ε domNest obsSlot (.foc (.sat (.mk s t))) := by
+  induction ws with
+  | nil => exact .focus hfr (.sat ht)
+  | cons e ws ih =>
+      have ⟨b, hb⟩ := hws e (List.Mem.head _)
+      exact .moveStable (forcedRule_cons_base_moveStable e ws hb A)
+        (ih fun e' he' => hws e' (List.Mem.tail _ he'))
+
 /--
 Branch worklist stays base-only when the parent tail is base-only and the
 split payload is either negative (not pushed) or itself a base.
@@ -3145,6 +3197,64 @@ theorem encodeReady_foc_neg_leftCoprodBranch
       0 0
       (.foc (.neg (.done n))) :=
   encodeReady_foc_neg_basesOnly _ _ 0 0 n hbr hfr
+
+/-- `.pair` under encode's left-coprod branch schedule (base-only tails). -/
+theorem encodeReady_pair_leftCoprodBranch
+    (hyps : Array (Object sig.nBases)) {L L' R' : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (t : InvTm (Ctx.ofHyps hyps ▻ L) L') (u : InvTm (Ctx.ofHyps hyps ▻ L) R')
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (ht : EncodeReady ([] : List (PosEntry sig))
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 t)
+    (hu : EncodeReady ([] : List (PosEntry sig))
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 u) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 (.pair t u) :=
+  encodeReady_pair_basesOnly _ _ 0 0 t u hbr ht hu
+
+/-- `.lam` under encode's left-coprod branch schedule (base-only tails). -/
+theorem encodeReady_lam_leftCoprodBranch
+    (hyps : Array (Object sig.nBases)) {L Arg Ret : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (body : InvTm (Ctx.ofHyps hyps ▻ L ▻ Arg) Ret)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hb : EncodeReady
+      (pushPos ([] : List (PosEntry sig)) (.dom (sig := sig) 0) Arg)
+      (OriginEnv.weaken (A := Arg)
+        (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+        (.dom (sig := sig) 0))
+      1 0 body) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 (.lam body) :=
+  encodeReady_lam_basesOnly _ _ 0 body hbr hb
+
+/-- `.foc (.sat _)` under encode's left-coprod branch schedule (base-only tails). -/
+theorem encodeReady_foc_sat_leftCoprodBranch
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (s : Schedule sig.nBases) (t : InvTm (Ctx.ofHyps hyps ▻ L) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (ht : EncodeReady ([] : List (PosEntry sig))
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 t) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 (.foc (.sat (.mk s t))) :=
+  encodeReady_foc_sat_basesOnly _ _ 0 0 s t hbr hfr ht
+
+/-!
+Same-term transport `EncodeReady` on `ofHyps.push` → `leftCoprodBranchWs` is
+**not** available: if the parent head is left-coprod, keeping that head forces
+peel/unit-η, while encode's branch schedule is `leftCoprodBranchWs` alone.
+Prove branch readiness under encode's schedule (see
+`encodeReady_*_leftCoprodBranch`), not by dropping the parent head.
+Status name reserved: `encodeReady_ofHyps_push_to_leftCoprodBranch` (blocked).
+-/
 
 /-- `castCtx` is the identity on `.unit`. -/
 theorem InvTm.castCtx_unit {Γ Δ : Ctx sig} (h : Γ = Δ) :
@@ -3955,20 +4065,25 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   → `e :: leftCoprodBranchWs`). Branch-schedule EncodeReady for base-only
   unit/foc shapes landed (`encodeReady_unit_leftCoprodBranch`,
   `encodeReady_*_leftCoprodBranch`, `encodeReady_applyObsNeu_coprod_var_cast_unit`).
-  Still need general branch EncodeReady (non-bases / non-unit) and induction
-  under encode schedule toward `encodeReady_of_rawReferenceProduced`.
+  Branch EncodeReady under `leftCoprodBranchWs` extended beyond unit/foc to
+  base-only pair/lam/sat (`encodeReady_pair/lam/foc_sat_leftCoprodBranch`).
+  Same-term `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (status
+  marker); induction motive must target encode branch schedule.
+  Still need non-base branch payloads and full `encodeReady_of_rawReferenceProduced`.
 * Empty-schedule: shape-directed unit / foc-done under nil or base-only+focus
   landed (`phaseEncodeReady_unit_nil_worklist`, `phaseEncodeReady_foc_*_bases_focus`);
-  general `WellInv`→ready without stash still open.
-* `sat_body`: code relationship landed (`encodeICCGo_sat_body_codes`); not
-  `EncodeIccStep` (`.foc (.body _)` wrapper).
+  narrow raw→ready slices for those shapes landed below; general
+  `WellInv`→ready without stash still open.
+* `sat_body`: Go codes landed (`encodeICCGo_sat_body_codes`); **no** clean
+  `EncodeIccStep` via packaging alone (`.foc (.body _)` vs body); leave open.
 -/
 
 /--
 Partial readiness from **extra** case data (not from raw alone): empty schedule
 with a ready continuation, inconsistent abort with never-on-worklist,
-base-only atom `letPos` from a full-ready push body, or var-scrutinee coprod
-`case` with split-ready branches.
+base-only atom `letPos` from a full-ready push body, var-scrutinee coprod
+`case` with split-ready branches, or base-only branch schedules with unit
+cast bodies (`encodeReady_applyObsNeu_coprod_var_cast_unit`).
 -/
 theorem phaseEncodeReady_of_applyPairObs_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -4018,7 +4133,25 @@ theorem phaseEncodeReady_of_applyPairObs_partial
           (pushPos ws (.split e.origin true) R)
           (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps)
             (.split e.origin true)) 0 0 tR ∧
-        t = .case (.var x) tL tR)) :
+        t = .case (.var x) tL tR) ∨
+      (∃ (L R : Object sig.nBases)
+          (pref : List (PosEntry sig)) (e : PosEntry sig)
+          (ws : List (PosEntry sig))
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+          (t' : InvTm (Ctx.ofHyps hyps) .unit)
+          (hA : A = .unit),
+        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        OriginEnv.ofHyps hyps x = e.origin ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+        t' = .case (.var x)
+          (InvTm.castCtx (Ctx.ofHyps_push hyps L)
+            (.unit : InvTm (Ctx.ofHyps (hyps.push L)) .unit))
+          (InvTm.castCtx (Ctx.ofHyps_push hyps R)
+            (.unit : InvTm (Ctx.ofHyps (hyps.push R)) .unit)) ∧
+        t = hA ▸ t')) :
     PhaseEncodeReady t := by
   cases hcase with
   | inl h =>
@@ -4037,8 +4170,16 @@ theorem phaseEncodeReady_of_applyPairObs_partial
               obtain ⟨P, n, body, hws, hfr, hbody, rfl⟩ := h
               exact encodeReady_applyObsNeu_atom_of_push_body_ready hws hfr hbody
           | inr h =>
-              obtain ⟨L, R, pref, e, ws, x, tL, tR, hws, hpref, hfr, hit, hL, hR, rfl⟩ := h
-              exact encodeReady_applyObsNeu_coprod_var x tL tR hws hpref hfr hit hL hR
+              cases h with
+              | inl h =>
+                  obtain ⟨L, R, pref, e, ws, x, tL, tR, hws, hpref, hfr, hit, hL, hR, rfl⟩ := h
+                  exact encodeReady_applyObsNeu_coprod_var x tL tR hws hpref hfr hit hL hR
+              | inr h =>
+                  obtain ⟨L, R, pref, e, ws, x, t', hA, hws, hpref, hfr, hit, hL, hR, rfl, ht⟩ := h
+                  cases hA
+                  cases ht
+                  exact encodeReady_applyObsNeu_coprod_var_cast_unit
+                    x hws hpref hfr hit hL hR
 
 /-- Partial certify when readiness is supplied by the partial cases above. -/
 theorem certifyReferenceProduced_of_partial
@@ -4048,6 +4189,31 @@ theorem certifyReferenceProduced_of_partial
     (hready : PhaseEncodeReady t) :
     CertifiedReferenceProduced t :=
   ⟨hraw, hready⟩
+
+/--
+Narrow `EncodeReadyOfRawGoal` slice: empty phase worklist + raw-produced `.unit`.
+Readiness follows from the schedule shape; raw is the production witness.
+-/
+theorem encodeReady_of_rawReferenceProduced_unit_nil
+    {hyps : Array (Object sig.nBases)}
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = [])
+    (_hr : RawReferenceProduced (.unit : InvTm (Ctx.ofHyps hyps) .unit)) :
+    PhaseEncodeReady (.unit : InvTm (Ctx.ofHyps hyps) .unit) :=
+  phaseEncodeReady_unit_nil_worklist hws
+
+/--
+Narrow `EncodeReadyOfRawGoal` slice: base-only phase worklist + focus + raw
+`.foc (.pos (.done _))`.
+-/
+theorem encodeReady_of_rawReferenceProduced_foc_pos_bases
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (p : PosNeu (Ctx.ofHyps hyps) A)
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (_hr : RawReferenceProduced (.foc (.pos (.done p)))) :
+    PhaseEncodeReady (.foc (.pos (.done p))) :=
+  phaseEncodeReady_foc_pos_bases_focus p hws hfr
 
 /-- Goal Prop: raw operational production implies phase encode readiness. -/
 def EncodeReadyOfRawGoal : Prop :=
