@@ -349,6 +349,98 @@ theorem weakenTerm_eq_rename {Γ : Ctx sig} {A B : Object sig.nBases}
     subst0 (.var (.there x)) n = .var x :=
   rfl
 
+/-- Renaming commutes with substitution for the newest binder. -/
+theorem rename_subst0 {Γ Δ : Ctx sig} {A B : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (t : Tm (Γ ▻ A) B) (n : Tm Γ A) :
+    rename ρ (subst0 t n) = subst0 (rename (Rename.ext ρ) t) (rename ρ n) := by
+  show rename ρ (subst (Subst.single n) t) =
+    subst (Subst.single (rename ρ n)) (rename (Rename.ext ρ) t)
+  rw [rename_subst, subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro C x
+  cases x <;> rfl
+
+/-! ### Erasure commutes with renaming
+
+Focused syntax is erased to ordinary terms before it is interpreted, so every
+re-indexing performed by focusing has to be visible on the erasure.
+-/
+
+mutual
+theorem NegNeu.erase_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (n : NegNeu Γ A) :
+    NegNeu.erase (NegNeu.rename ρ n) = rename ρ (NegNeu.erase n) :=
+  match n with
+  | .var _ => rfl
+  | .app m t => by
+      simp [NegNeu.rename, NegNeu.erase, rename, NegNeu.erase_rename ρ m,
+        InvTm.erase_rename ρ t]
+  | .fst m => by
+      simp [NegNeu.rename, NegNeu.erase, rename, NegNeu.erase_rename ρ m]
+  | .snd m => by
+      simp [NegNeu.rename, NegNeu.erase, rename, NegNeu.erase_rename ρ m]
+
+theorem PosNeu.erase_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (p : PosNeu Γ A) :
+    PosNeu.erase (PosNeu.rename ρ p) = rename ρ (PosNeu.erase p) :=
+  match p with
+  | .neu n => by
+      simp [PosNeu.rename, PosNeu.erase, NegNeu.erase_rename ρ n]
+  | .inl q => by
+      simp [PosNeu.rename, PosNeu.erase, rename, PosNeu.erase_rename ρ q]
+  | .inr q => by
+      simp [PosNeu.rename, PosNeu.erase, rename, PosNeu.erase_rename ρ q]
+  | .val t => by
+      simp [PosNeu.rename, PosNeu.erase, InvTm.erase_rename ρ t]
+
+theorem InvTm.erase_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (t : InvTm Γ A) :
+    InvTm.erase (InvTm.rename ρ t) = rename ρ (InvTm.erase t) :=
+  match t with
+  | .unit => rfl
+  | .pair t u => by
+      simp [InvTm.rename, InvTm.erase, rename, InvTm.erase_rename ρ t,
+        InvTm.erase_rename ρ u]
+  | .lam t => by
+      simp [InvTm.rename, InvTm.erase, rename,
+        InvTm.erase_rename (Rename.ext ρ) t]
+  | .case n t u => by
+      simp [InvTm.rename, InvTm.erase, rename, NegNeu.erase_rename ρ n,
+        InvTm.erase_rename (Rename.ext ρ) t,
+        InvTm.erase_rename (Rename.ext ρ) u]
+  | .abort n => by
+      simp [InvTm.rename, InvTm.erase, rename, NegNeu.erase_rename ρ n]
+  | .foc f => by
+      simp [InvTm.rename, InvTm.erase, FocTm.erase_rename ρ f]
+
+theorem FocTm.erase_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (f : FocTm Γ A) :
+    FocTm.erase (FocTm.rename ρ f) = rename ρ (FocTm.erase f) :=
+  match f with
+  | .pos (.done p) => by
+      simp [FocTm.rename, PosIntro.rename, FocTm.erase, PosIntro.erase,
+        PosNeu.erase_rename ρ p]
+  | .neg (.done n) => by
+      simp [FocTm.rename, NegElim.rename, FocTm.erase, NegElim.erase,
+        NegNeu.erase_rename ρ n]
+  | .letPos n t => by
+      simp [FocTm.rename, FocTm.erase, rename_subst0, NegNeu.erase_rename ρ n,
+        InvTm.erase_rename (Rename.ext ρ) t]
+  | .sat (.mk _ t) => by
+      simp [FocTm.rename, SatTm.rename, FocTm.erase, SatTm.erase,
+        InvTm.erase_rename ρ t]
+end
+
+@[simp] theorem InvTm.erase_weaken {Γ : Ctx sig} {A B : Object sig.nBases}
+    (t : InvTm Γ A) :
+    InvTm.erase (InvTm.weaken (B := B) t) = weakenTerm (InvTm.erase t) :=
+  InvTm.erase_rename _ t
+
+@[simp] theorem NegNeu.erase_weaken {Γ : Ctx sig} {A B : Object sig.nBases}
+    (n : NegNeu Γ A) :
+    NegNeu.erase (NegNeu.weaken (B := B) n) = weakenTerm (NegNeu.erase n) :=
+  NegNeu.erase_rename _ n
+
 /-! ### Decidable structural equality -/
 
 def Ctx.decidableEq : (Γ Δ : Ctx sig) → Decidable (Γ = Δ)
