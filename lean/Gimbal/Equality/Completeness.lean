@@ -241,15 +241,18 @@ Blocked / WIP:
    `CertifiedReferenceProduced`). Do not switch `referenceCompare` or claim
    characterization until the stash is eliminated. WIP: `encodeReady_applyPairObs`
    (~~ofHyps_push~~ / ~~peel rekey~~ / ~~full `encodeReady_rekeyHypToObs`~~ /
-   ~~leftCoprod under letPos via push-body ready~~ landed; coprod obs → outer
-   case + ready branches, and empty-schedule `WellInv`→ready, still open)
+   ~~leftCoprod under letPos via push-body ready~~ /
+   ~~coprod obs outer `case` (var) packaging~~ landed; still need
+   `ofHyps.push`→split branch transport, non-var scrutinees, and empty-schedule
+   `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
    full `ofHyps` induction and reflection beyond unit/abort remain.
    `ICCCompleteness` needs both + encodability — never `none = none` as ICC.
-   New gens `case_letPos` / `sat_body` need packaging when invariance runs
-   (`sat_body` wraps `.foc (.body _)` so raw code equality is not automatic).
+   New gens ~~`case_letPos`~~ packaged (`encodeIccStep_case_letPos`); `sat_body`
+   still needs packaging when invariance runs (`sat_body` wraps `.foc (.body _)`
+   so raw code equality is not automatic).
 5. Switch `referenceStructEq` / `referenceCompare` to `ICCCode` equality
    (`beq_iff_eq`) only after EncodeTotal + both characterization directions;
    erase public `2048` / fuel from the total API

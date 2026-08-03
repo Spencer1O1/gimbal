@@ -1033,10 +1033,25 @@ theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
 `c`, so raw `EncodeIccStep` needs either body-erasure on codes or a restricted
 domain — not claimed here.
 
-`ICCEq.case_letPos` is the peel-dig commute (parallel to `case_lam`). Go
-agreement under forced left-coprod is the next packaging step
-(`encodeIccStep_case_letPos`), once peel payloads on both sides are shown equal.
+`ICCEq.case_letPos` peel agreement and Go/`EncodeIccStep` packaging are landed
+below (`encodeIccStep_case_letPos`).
 -/
+
+theorem encodeIccStep_case_letPos {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hws : OriginEnv.posWorklist ε = e :: ws)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    EncodeIccStep ε
+      (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR)))
+      (.case (.var x)
+        (.foc (.letPos (NegNeu.weaken (B := A) n)
+          (InvTm.rename Rename.exchange tL)))
+        (.foc (.letPos (NegNeu.weaken (B := B) n)
+          (InvTm.rename Rename.exchange tR)))) :=
+  EncodeIccStep.of_go_eq ε (e :: ws) hws _ _
+    (fun fuel => encodeICCGo_case_letPos_any fuel e ws ε 0 0 x n tL tR hty hit)
 
 /-- Sat unwrap at the Go level under `focus` (fuel shifted by the sat shell). -/
 theorem encodeICCGo_foc_sat_eq {Γ : Ctx sig} {A : Object sig.nBases}
@@ -3126,6 +3141,115 @@ theorem encodeReady_applyPairObs_emptyEntries {hyps : Array (Object sig.nBases)}
       simp only [hempty] at hok
       exact encodeReady_applyPairObsGo_nil fuel σ cont hcont hok
 
+/-! ### Coprod `applyObsNeu` → outer `case` (var scrutinee) -/
+
+/--
+Outer `.case (.var x) …` is encode-ready under a forced left-coprod whose
+origin hits `x`, given ready branches under the split/`pushPos` contexts.
+-/
+theorem encodeReady_case_var_leftCoprod
+    {Γ : Ctx sig} {A L R : Object sig.nBases}
+    {e : PosEntry sig} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat}
+    (x : Var Γ (.coprod L R))
+    (tL : InvTm (Γ ▻ L) A) (tR : InvTm (Γ ▻ R) A)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : ε x = e.origin)
+    (hL : EncodeReady
+      (pushPos ws (.split e.origin false) L)
+      (OriginEnv.weaken (A := L) ε (.split e.origin false))
+      domNest obsSlot tL)
+    (hR : EncodeReady
+      (pushPos ws (.split e.origin true) R)
+      (OriginEnv.weaken (A := R) ε (.split e.origin true))
+      domNest obsSlot tR) :
+    EncodeReady (e :: ws) ε domNest obsSlot (.case (.var x) tL tR) :=
+  .leftCoprod_peel hfr (peelCaseOuter_case_var_hit ε e.origin x tL tR hit) hL hR
+
+/-- Same with a `moveStable` base prefix in front of the left-coprod head. -/
+theorem encodeReady_case_var_leftCoprod_of_base_prefix
+    {Γ : Ctx sig} {A L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    {ε : OriginEnv Γ} {domNest obsSlot : Nat}
+    (x : Var Γ (.coprod L R))
+    (tL : InvTm (Γ ▻ L) A) (tR : InvTm (Γ ▻ R) A)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : ε x = e.origin)
+    (hL : EncodeReady
+      (pushPos ws (.split e.origin false) L)
+      (OriginEnv.weaken (A := L) ε (.split e.origin false))
+      domNest obsSlot tL)
+    (hR : EncodeReady
+      (pushPos ws (.split e.origin true) R)
+      (OriginEnv.weaken (A := R) ε (.split e.origin true))
+      domNest obsSlot tR) :
+    EncodeReady (pref ++ e :: ws) ε domNest obsSlot (.case (.var x) tL tR) := by
+  induction pref with
+  | nil =>
+      exact encodeReady_case_var_leftCoprod x tL tR hfr hit hL hR
+  | cons e' pref ih =>
+      have ⟨b, hb⟩ := hpref e' (List.Mem.head _)
+      exact .moveStable (forcedRule_cons_base_moveStable e' _ hb A)
+        (ih fun e'' he'' => hpref e'' (List.Mem.tail _ he''))
+
+/--
+Phase packaging for `applyObsNeu` on a coprod whose scrutinee is a hyp var
+matching the forced left-coprod origin (exact / consistency witness shape).
+Branch readiness is under split/`pushPos` (encode schedule), not `ofHyps.push`.
+-/
+theorem encodeReady_applyObsNeu_coprod_var
+    {hyps : Array (Object sig.nBases)} {A L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    (tL : InvTm (Ctx.ofHyps hyps ▻ L) A)
+    (tR : InvTm (Ctx.ofHyps hyps ▻ R) A)
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : EncodeReady
+      (pushPos ws (.split e.origin false) L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin false))
+      0 0 tL)
+    (hR : EncodeReady
+      (pushPos ws (.split e.origin true) R)
+      (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps) (.split e.origin true))
+      0 0 tR) :
+    PhaseEncodeReady
+      (.case (.var x) tL tR : InvTm (Ctx.ofHyps hyps) A) := by
+  simpa [PhaseEncodeReady, hws] using
+    encodeReady_case_var_leftCoprod_of_base_prefix x tL tR hpref hfr hit hL hR
+
+/--
+Cast form used by `applyObsNeu` on `.coprod`: recursive bodies live under
+`ofHyps (hyps.push _)` and are cast onto `Γ ▻ L/R` before the outer case.
+-/
+theorem encodeReady_applyObsNeu_coprod_var_cast
+    {hyps : Array (Object sig.nBases)} {A L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    (bodyL : InvTm (Ctx.ofHyps (hyps.push L)) A)
+    (bodyR : InvTm (Ctx.ofHyps (hyps.push R)) A)
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : EncodeReady
+      (pushPos ws (.split e.origin false) L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin false))
+      0 0 (InvTm.castCtx (Ctx.ofHyps_push hyps L) bodyL))
+    (hR : EncodeReady
+      (pushPos ws (.split e.origin true) R)
+      (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps) (.split e.origin true))
+      0 0 (InvTm.castCtx (Ctx.ofHyps_push hyps R) bodyR)) :
+    PhaseEncodeReady
+      (.case (.var x)
+        (InvTm.castCtx (Ctx.ofHyps_push hyps L) bodyL)
+        (InvTm.castCtx (Ctx.ofHyps_push hyps R) bodyR) :
+        InvTm (Ctx.ofHyps hyps) A) :=
+  encodeReady_applyObsNeu_coprod_var x _ _ hws hpref hfr hit hL hR
+
 /-! ### Gaps (RawReferenceProduced → PhaseEncodeReady)
 
 Required: `encodeReady_of_rawReferenceProduced` /
@@ -3139,14 +3263,18 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   `encodeReady_applyObsNeu_atom_of_push_body_ready` package left-coprod-under-
   outer-`letPos` after peel-ready bodies on `ofHyps.push`.
 * ~~`Ctx.ofHyps_push` cast~~ **Landed**
-* Coprod observation → outer `case` + ready branches (still open).
-* Empty-schedule case needs cont readiness from `WellInv` (raw has no stash).
+* ~~Coprod observation → outer `case` (var hit) + ready split branches~~
+  **Landed** as packaging (`encodeReady_applyObsNeu_coprod_var`); still need
+  `ofHyps.push` → split/`pushPos` branch transport, and non-var scrutinees.
+* Empty-schedule case needs cont readiness from `WellInv` (raw has no stash);
+  `WellInv` alone remains insufficient for arbitrary continuations.
 -/
 
 /--
 Partial readiness from **extra** case data (not from raw alone): empty schedule
-with a ready continuation, inconsistent abort with never-on-worklist, or
-base-only atom `letPos` from a full-ready push body (peel / left-coprod allowed).
+with a ready continuation, inconsistent abort with never-on-worklist,
+base-only atom `letPos` from a full-ready push body, or var-scrutinee coprod
+`case` with split-ready branches.
 -/
 theorem phaseEncodeReady_of_applyPairObs_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -3177,7 +3305,26 @@ theorem phaseEncodeReady_of_applyPairObs_partial
         EncodeReady
           (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
           (OriginEnv.ofHyps (hyps.push P)) 0 0 body ∧
-        t = .foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body)))) :
+        t = .foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body))) ∨
+      (∃ (L R : Object sig.nBases)
+          (pref : List (PosEntry sig)) (e : PosEntry sig)
+          (ws : List (PosEntry sig))
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+          (tL : InvTm (Ctx.ofHyps hyps ▻ L) A)
+          (tR : InvTm (Ctx.ofHyps hyps ▻ R) A),
+        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+        forcedRule (e :: ws) A = .leftCoprod e L R ∧
+        OriginEnv.ofHyps hyps x = e.origin ∧
+        EncodeReady
+          (pushPos ws (.split e.origin false) L)
+          (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
+            (.split e.origin false)) 0 0 tL ∧
+        EncodeReady
+          (pushPos ws (.split e.origin true) R)
+          (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps)
+            (.split e.origin true)) 0 0 tR ∧
+        t = .case (.var x) tL tR)) :
     PhaseEncodeReady t := by
   cases hcase with
   | inl h =>
@@ -3191,8 +3338,13 @@ theorem phaseEncodeReady_of_applyPairObs_partial
           exact encodeReady_applyPairObs_inconsistent fuel σ entries cont hincons hok
             hws hpref hty
       | inr h =>
-          obtain ⟨P, n, body, hws, hfr, hbody, rfl⟩ := h
-          exact encodeReady_applyObsNeu_atom_of_push_body_ready hws hfr hbody
+          cases h with
+          | inl h =>
+              obtain ⟨P, n, body, hws, hfr, hbody, rfl⟩ := h
+              exact encodeReady_applyObsNeu_atom_of_push_body_ready hws hfr hbody
+          | inr h =>
+              obtain ⟨L, R, pref, e, ws, x, tL, tR, hws, hpref, hfr, hit, hL, hR, rfl⟩ := h
+              exact encodeReady_applyObsNeu_coprod_var x tL tR hws hpref hfr hit hL hR
 
 /-- Partial certify when readiness is supplied by the partial cases above. -/
 theorem certifyReferenceProduced_of_partial

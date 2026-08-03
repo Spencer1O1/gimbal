@@ -1048,6 +1048,134 @@ theorem peelCaseOuter_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
           peelCaseOuter_lam_cases ε o x t u hit],
     peelCaseOuter_case_var_hit ε o x (.lam t) (.lam u) hit⟩
 
+/-! ### Peel agreement for ICC `case_letPos` -/
+
+/-- One-step unfold of peel under outer `letPos` (body kept abstract). -/
+private theorem peelCaseOuterGo_letPos_eq {Γ : Ctx sig} {P C : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (n : NegNeu Γ P) (body : InvTm (Γ ▻ P) C) :
+    peelCaseOuterGo (fuel + 1) ε o (.foc (.letPos n body)) =
+      match peelCaseOuterGo fuel (OriginEnv.weaken (A := P) ε (.dom 0)) o body with
+      | some ⟨A, B, m, tL, tR⟩ =>
+          match NegNeu.unweaken? m with
+          | some m0 =>
+              some ⟨A, B, m0,
+                .foc (.letPos (NegNeu.weaken (B := A) n)
+                  (InvTm.rename Rename.exchange tL)),
+                .foc (.letPos (NegNeu.weaken (B := B) n)
+                  (InvTm.rename Rename.exchange tR))⟩
+          | none => none
+      | none => none := by
+  simp only [peelCaseOuterGo]
+  -- Match arms are definitionally the statement RHS; close by cases on the dig.
+  cases peelCaseOuterGo fuel (OriginEnv.weaken (A := P) ε (.dom 0)) o body with
+  | none => rfl
+  | some r =>
+      rcases r with ⟨A, B, m, tL, tR⟩
+      cases NegNeu.unweaken? m <;> rfl
+
+/--
+Dig under outer `letPos` whose body is already a hit case on the forced origin:
+peel returns the exchanged `letPos` branches (as in `ICCEq.case_letPos`).
+-/
+theorem peelCaseOuterGo_letPos_cases {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hit : ε x = o)
+    (hfuel : InvTm.size (.case (NegNeu.weaken (B := P) (.var x)) tL tR) ≤ fuel) :
+    peelCaseOuterGo (fuel + 1) ε o
+        (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR))) =
+      some ⟨A, B, .var x,
+        .foc (.letPos (NegNeu.weaken (B := A) n)
+          (InvTm.rename Rename.exchange tL)),
+        .foc (.letPos (NegNeu.weaken (B := B) n)
+          (InvTm.rename Rename.exchange tR))⟩ := by
+  have hit' : OriginEnv.weaken (A := P) ε (.dom 0) (.there x) = o := by
+    simpa [OriginEnv.weaken, OriginEnv.snoc] using hit
+  have hpos : 0 < InvTm.size
+      (.case (NegNeu.weaken (B := P) (.var x)) tL tR : InvTm (Γ ▻ P) C) := by
+    simp only [InvTm.size]; omega
+  have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hpos hfuel
+  obtain ⟨fuel', rfl⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+  have hbody :
+      peelCaseOuterGo (fuel' + 1) (OriginEnv.weaken (A := P) ε (.dom 0)) o
+          (.case (.var (.there x)) tL tR) =
+        some ⟨A, B, .var (.there x), tL, tR⟩ :=
+    peelCaseOuterGo_case_var_hit fuel'
+      (OriginEnv.weaken (A := P) ε (.dom 0)) o (.there x) tL tR hit'
+  have hbody' :
+      peelCaseOuterGo (fuel' + 1) (OriginEnv.weaken (A := P) ε (.dom 0)) o
+          (.case (NegNeu.weaken (B := P) (.var x)) tL tR) =
+        some ⟨A, B, .var (.there x), tL, tR⟩ := by
+    simpa [NegNeu.weaken, NegNeu.rename, Rename.weaken] using hbody
+  rw [peelCaseOuterGo_letPos_eq, hbody']
+  simp [NegNeu.unweaken?]
+
+theorem peelCaseOuter_letPos_cases {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hit : ε x = o) :
+    peelCaseOuter ε o
+        (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR))) =
+      some ⟨A, B, .var x,
+        .foc (.letPos (NegNeu.weaken (B := A) n)
+          (InvTm.rename Rename.exchange tL)),
+        .foc (.letPos (NegNeu.weaken (B := B) n)
+          (InvTm.rename Rename.exchange tR))⟩ := by
+  unfold peelCaseOuter
+  set body :=
+    (.case (NegNeu.weaken (B := P) (.var x)) tL tR : InvTm (Γ ▻ P) C)
+  set tm := (.foc (.letPos n body) : InvTm Γ C)
+  have hsz : InvTm.size tm = NegNeu.size n + InvTm.size body + 2 := by
+    simp only [tm, body, InvTm.size, FocTm.size]
+    try omega
+  have hfuel_body :
+      InvTm.size body ≤ NegNeu.size n + InvTm.size body + 1 := by omega
+  have hgo :=
+    peelCaseOuterGo_letPos_cases (NegNeu.size n + InvTm.size body + 1) ε o x n tL tR hit
+      (by simpa [body] using hfuel_body)
+  -- After `set`, `InvTm.size tm` may already reduce; rewrite if needed.
+  simpa [tm, body, hsz] using hgo
+
+/-- Both sides of `ICCEq.case_letPos` peel to the same outer case. -/
+theorem peelCaseOuter_case_letPos {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hit : ε x = o) :
+    peelCaseOuter ε o
+        (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR))) =
+      peelCaseOuter ε o
+        (.case (.var x)
+          (.foc (.letPos (NegNeu.weaken (B := A) n)
+            (InvTm.rename Rename.exchange tL)))
+          (.foc (.letPos (NegNeu.weaken (B := B) n)
+            (InvTm.rename Rename.exchange tR)))) ∧
+    peelCaseOuter ε o
+        (.case (.var x)
+          (.foc (.letPos (NegNeu.weaken (B := A) n)
+            (InvTm.rename Rename.exchange tL)))
+          (.foc (.letPos (NegNeu.weaken (B := B) n)
+            (InvTm.rename Rename.exchange tR)))) =
+      some ⟨A, B, .var x,
+        .foc (.letPos (NegNeu.weaken (B := A) n)
+          (InvTm.rename Rename.exchange tL)),
+        .foc (.letPos (NegNeu.weaken (B := B) n)
+          (InvTm.rename Rename.exchange tR))⟩ :=
+  ⟨by rw [peelCaseOuter_letPos_cases ε o x n tL tR hit,
+          peelCaseOuter_case_var_hit ε o x
+            (.foc (.letPos (NegNeu.weaken (B := A) n)
+              (InvTm.rename Rename.exchange tL)))
+            (.foc (.letPos (NegNeu.weaken (B := B) n)
+              (InvTm.rename Rename.exchange tR))) hit],
+    peelCaseOuter_case_var_hit ε o x
+      (.foc (.letPos (NegNeu.weaken (B := A) n)
+        (InvTm.rename Rename.exchange tL)))
+      (.foc (.letPos (NegNeu.weaken (B := B) n)
+        (InvTm.rename Rename.exchange tR))) hit⟩
+
 /-! ### Peel agreement for ICC `case_case` -/
 
 theorem NegNeu.beq_weaken_var_self {Γ : Ctx sig} {A B : Object sig.nBases}

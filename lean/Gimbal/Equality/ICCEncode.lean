@@ -146,6 +146,45 @@ theorem encodeICCGo_case_lam_any {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases
   | 0 => simp [encodeICCGo]
   | fuel + 1 => exact encodeICCGo_case_lam fuel e ws ε domNest obsSlot x t u hty hit
 
+/-- `ICCEq.case_letPos` at a successor fuel: shared peel under forced left-coprod. -/
+theorem encodeICCGo_case_letPos {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR))) =
+      encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.case (.var x)
+          (.foc (.letPos (NegNeu.weaken (B := A) n)
+            (InvTm.rename Rename.exchange tL)))
+          (.foc (.letPos (NegNeu.weaken (B := B) n)
+            (InvTm.rename Rename.exchange tR)))) := by
+  have hforce := forcedRule_cons_coprod e ws hty C
+  have hpeel := peelCaseOuter_case_letPos ε e.origin x n tL tR hit
+  simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
+
+/-- `ICCEq.case_letPos` preserves codes at every common fuel (Go level). -/
+theorem encodeICCGo_case_letPos_any {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B)) (n : NegNeu Γ P)
+    (tL : InvTm (Γ ▻ P ▻ A) C) (tR : InvTm (Γ ▻ P ▻ B) C)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.foc (.letPos n (.case (NegNeu.weaken (B := P) (.var x)) tL tR))) =
+      encodeICCGo fuel (e :: ws) ε domNest obsSlot
+        (.case (.var x)
+          (.foc (.letPos (NegNeu.weaken (B := A) n)
+            (InvTm.rename Rename.exchange tL)))
+          (.foc (.letPos (NegNeu.weaken (B := B) n)
+            (InvTm.rename Rename.exchange tR)))) := by
+  match fuel with
+  | 0 => simp [encodeICCGo]
+  | fuel + 1 =>
+      exact encodeICCGo_case_letPos fuel e ws ε domNest obsSlot x n tL tR hty hit
+
 /-- `ICCEq.case_case` at a successor fuel. -/
 theorem encodeICCGo_case_case {Γ : Ctx sig} {A B C D E : Object sig.nBases}
     (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
