@@ -5935,9 +5935,9 @@ theorem EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds :
 
 /--
 Restricted Raw→ready where atom/coprod push-body facts are derived from
-continuation shape (`emptyNeverOrDerivedNilRest`): foc-done / sat-of-foc-pos /
-sat-of-foc-pos for base atom; unit + bases-only branches for
-coprod-var. Unrestricted goal remains open. Residual: atom letPos conts.
+continuation shape (`emptyNeverOrDerivedNilRest` / `AtomDerivedContShape`):
+foc-done / sat-of-foc-pos / base-binder letPos around foc-pos for base atom;
+unit + bases-only branches for coprod-var. Unrestricted goal remains open.
 -/
 theorem encodeReady_of_rawReferenceProduced_emptyNeverOrDerivedNilRest
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
