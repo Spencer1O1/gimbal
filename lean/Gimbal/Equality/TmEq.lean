@@ -376,6 +376,20 @@ theorem cc_app_case {Γ : Ctx sig} {A B C D : Object sig.nBases}
   refine congrArg₂ ccase ?_ ?_ <;>
     (rw [← Category.assoc, cs_comp_pair]; simp)
 
+theorem cc_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) (t₁ : Tm (Γ ▻ A) C) (t₂ : Tm (Γ ▻ B) C)
+    (u₁ : Tm (Γ ▻ A) D) (u₂ : Tm (Γ ▻ B) D) :
+    TmEq (.case s (.pair t₁ u₁) (.pair t₂ u₂))
+      (.pair (.case s t₁ t₂) (.case s u₁ u₂)) := by
+  refine ⟨?_⟩
+  intro X ρ
+  simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib]
+  rw [← cs_comp_pair]
+  refine congrArg (fun k => cpair (𝟙 _) (qm (interpret ρ s)) ≫ k) ?_
+  rw [← cs_comp_pair]
+  refine congrArg (fun k => csDistrib _ _ _ ≫ k) ?_
+  refine (ccase_unique _ ?_ ?_).symm <;> simp [cs_comp_pair]
+
 theorem cc_case_case {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
     (s : Tm Γ (.coprod A B)) (l : Tm (Γ ▻ A) (.coprod C D))
     (r : Tm (Γ ▻ B) (.coprod C D))
@@ -478,6 +492,110 @@ theorem interpret_qm_injRight {X : Object sig.nBases} {Γ : Ctx sig}
             (.compose (IntrinsicMorphism.first X (.coprod A B)) (ρ y)))
       simp [IntrinsicMorphism.prodInr, ← Category.assoc]
 
+/-! ### Substitution idioms for the `case` commuting conversions
+
+Each of these cancels a renaming that inserted a binder against a substitution
+that immediately fills it.
+-/
+
+/-- Renaming that sends the newest binder to an existing variable. -/
+def Rename.subst0Var {Γ : Ctx sig} {A : Object sig.nBases} (x : Var Γ A) :
+    Rename sig (Γ ▻ A) Γ
+  | _, .here => x
+  | _, .there y => y
+
+/-- Substituting a variable is a renaming. -/
+theorem subst0_var {Γ : Ctx sig} {A C : Object sig.nBases}
+    (t : Tm (Γ ▻ A) C) (x : Var Γ A) :
+    subst0 t (.var x) = rename (Rename.subst0Var x) t := by
+  rw [subst0, ← subst_ids (rename (Rename.subst0Var x) t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  cases y <;> rfl
+
+/--
+Insert a binder under the newest one, then fill the newest binder with the
+inserted variable: the two operations exchange the binders.
+-/
+theorem subst0_rename_insert {Γ : Ctx sig} {A C D : Object sig.nBases}
+    (t : Tm (Γ ▻ A ▻ C) D) :
+    subst0 (rename (Rename.ext (Rename.ext (Rename.weaken (A := C)))) t)
+        (.var (.there .here)) =
+      rename Rename.exchange t := by
+  rw [subst0, subst_rename, ← subst_ids (rename Rename.exchange t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  match y with
+  | .here => rfl
+  | .there .here => rfl
+  | .there (.there _) => rfl
+
+/-- A body pushed under two inserted binders ignores a cut at the outer one. -/
+theorem subst_exts2_single_rename_insert {Γ : Ctx sig} {A C P D : Object sig.nBases}
+    (t : Tm (Γ ▻ A ▻ C) D) (m : Tm Γ P) :
+    subst (Subst.exts (Subst.exts (Subst.single m)))
+        (rename (Rename.ext (Rename.ext (Rename.weaken (A := P)))) t) = t := by
+  rw [subst_rename]
+  refine Eq.trans (subst_eq_of_pointwise (τ := fun {_} => Subst.ids) ?_ t)
+    (subst_ids t)
+  intro B y
+  match y with
+  | .here => rfl
+  | .there .here => rfl
+  | .there (.there _) => rfl
+
+/-- …and likewise ignores a commitment of the outer binder to an injection. -/
+theorem subst_exts2_injLeft_rename_insert {Γ : Ctx sig}
+    {A C L R D : Object sig.nBases} (t : Tm (Γ ▻ A ▻ C) D) :
+    subst (Subst.exts (Subst.exts (Subst.injLeft (A := L) (B := R))))
+        (rename (Rename.ext (Rename.ext
+          (Rename.weaken (A := .coprod L R)))) t) =
+      rename (Rename.ext (Rename.ext (Rename.weaken (A := L)))) t := by
+  rw [subst_rename, ← subst_ids
+    (rename (Rename.ext (Rename.ext (Rename.weaken (A := L)))) t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  match y with
+  | .here => rfl
+  | .there .here => rfl
+  | .there (.there _) => rfl
+
+theorem subst_exts2_injRight_rename_insert {Γ : Ctx sig}
+    {A C L R D : Object sig.nBases} (t : Tm (Γ ▻ A ▻ C) D) :
+    subst (Subst.exts (Subst.exts (Subst.injRight (A := L) (B := R))))
+        (rename (Rename.ext (Rename.ext
+          (Rename.weaken (A := .coprod L R)))) t) =
+      rename (Rename.ext (Rename.ext (Rename.weaken (A := R)))) t := by
+  rw [subst_rename, ← subst_ids
+    (rename (Rename.ext (Rename.ext (Rename.weaken (A := R)))) t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  match y with
+  | .here => rfl
+  | .there .here => rfl
+  | .there (.there _) => rfl
+
+/-- Committing the newest binder to an injection leaves a weakened term alone. -/
+theorem subst_injLeft_weakenTerm {Γ : Ctx sig} {L R D : Object sig.nBases}
+    (t : Tm Γ D) :
+    subst (Subst.injLeft (A := L) (B := R)) (weakenTerm t) =
+      weakenTerm (A := L) t := by
+  rw [weakenTerm_eq_rename, subst_rename, weakenTerm_eq_rename,
+    ← subst_ids (rename Rename.weaken t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  rfl
+
+theorem subst_injRight_weakenTerm {Γ : Ctx sig} {L R D : Object sig.nBases}
+    (t : Tm Γ D) :
+    subst (Subst.injRight (A := L) (B := R)) (weakenTerm t) =
+      weakenTerm (A := R) t := by
+  rw [weakenTerm_eq_rename, subst_rename, weakenTerm_eq_rename,
+    ← subst_ids (rename Rename.weaken t), subst_rename]
+  refine subst_eq_of_pointwise ?_ t
+  intro B y
+  rfl
+
 namespace TmEq
 
 /--
@@ -526,6 +644,82 @@ theorem case_weaken_self {Γ : Ctx sig} {A B C : Object sig.nBases}
       simp [csProdSnd]
   rw [key]
   simp
+
+/-! ### The remaining `case` commuting conversions
+
+Both are derived from laws already in the theory: `case`/`lam` from η for
+functions plus the application commuting conversion, and the exchange of two
+independent scrutinees from strong sum η.
+-/
+
+theorem cc_case_lam {Γ : Ctx sig} {A B C D : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) (t : Tm (Γ ▻ A ▻ C) D) (u : Tm (Γ ▻ B ▻ C) D) :
+    TmEq (.case s (.lam t) (.lam u))
+      (.lam (.case (weakenTerm s) (rename Rename.exchange t)
+        (rename Rename.exchange u))) := by
+  refine .trans (eta_lam (.case s (.lam t) (.lam u))).symm (TmEq.lam ?_)
+  show TmEq (.app (.case (weakenTerm s)
+      (.lam (rename (Rename.ext (Rename.ext Rename.weaken)) t))
+      (.lam (rename (Rename.ext (Rename.ext Rename.weaken)) u)))
+    (.var .here)) _
+  refine .trans (cc_app_case _ _ _ _) (TmEq.case (.refl _) ?_ ?_)
+  · exact .trans (beta_app _ _) (.of_eq (subst0_rename_insert t))
+  · exact .trans (beta_app _ _) (.of_eq (subst0_rename_insert u))
+
+/--
+Two independent scrutinees may be eliminated in either order. This is the
+saturation-schedule permutation law at the level of the theory.
+-/
+theorem cc_case_swap {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) (m : Tm Γ (.coprod C D))
+    (t₁ : Tm (Γ ▻ A ▻ C) Z) (t₂ : Tm (Γ ▻ A ▻ D) Z)
+    (u₁ : Tm (Γ ▻ B ▻ C) Z) (u₂ : Tm (Γ ▻ B ▻ D) Z) :
+    TmEq
+      (.case s (.case (weakenTerm m) t₁ t₂) (.case (weakenTerm m) u₁ u₂))
+      (.case m
+        (.case (weakenTerm s) (rename Rename.exchange t₁)
+          (rename Rename.exchange u₁))
+        (.case (weakenTerm s) (rename Rename.exchange t₂)
+          (rename Rename.exchange u₂))) := by
+  -- The common body: the left-hand side with the second scrutinee abstracted.
+  set w : Tm (Γ ▻ .coprod C D) Z :=
+    .case (weakenTerm s)
+      (.case (.var (.there .here))
+        (rename (Rename.ext (Rename.ext Rename.weaken)) t₁)
+        (rename (Rename.ext (Rename.ext Rename.weaken)) t₂))
+      (.case (.var (.there .here))
+        (rename (Rename.ext (Rename.ext Rename.weaken)) u₁)
+        (rename (Rename.ext (Rename.ext Rename.weaken)) u₂)) with hw
+  have hsubst0 : subst0 w m =
+      .case s (.case (weakenTerm m) t₁ t₂) (.case (weakenTerm m) u₁ u₂) := by
+    rw [hw]
+    show Tm.case _ (Tm.case _ _ _) (Tm.case _ _ _) = _
+    simp only [subst, Subst.exts, Subst.single, subst_exts2_single_rename_insert]
+    exact congrArg (fun x => Tm.case x _ _) (subst0_weakenTerm s m)
+  have hleft : TmEq (subst Subst.injLeft w)
+      (.case (weakenTerm s) (rename Rename.exchange t₁)
+        (rename Rename.exchange u₁)) := by
+    rw [hw]
+    show TmEq (Tm.case _ (Tm.case _ _ _) (Tm.case _ _ _)) _
+    rw [subst_injLeft_weakenTerm, subst_exts2_injLeft_rename_insert,
+      subst_exts2_injLeft_rename_insert, subst_exts2_injLeft_rename_insert,
+      subst_exts2_injLeft_rename_insert]
+    refine TmEq.case (.refl _) ?_ ?_
+    · exact .trans (beta_case_inl _ _ _) (.of_eq (subst0_rename_insert t₁))
+    · exact .trans (beta_case_inl _ _ _) (.of_eq (subst0_rename_insert u₁))
+  have hright : TmEq (subst Subst.injRight w)
+      (.case (weakenTerm s) (rename Rename.exchange t₂)
+        (rename Rename.exchange u₂)) := by
+    rw [hw]
+    show TmEq (Tm.case _ (Tm.case _ _ _) (Tm.case _ _ _)) _
+    rw [subst_injRight_weakenTerm, subst_exts2_injRight_rename_insert,
+      subst_exts2_injRight_rename_insert, subst_exts2_injRight_rename_insert,
+      subst_exts2_injRight_rename_insert]
+    refine TmEq.case (.refl _) ?_ ?_
+    · exact .trans (beta_case_inr _ _ _) (.of_eq (subst0_rename_insert t₂))
+    · exact .trans (beta_case_inr _ _ _) (.of_eq (subst0_rename_insert u₂))
+  refine .trans (.of_eq hsubst0.symm) (.trans (sum_eta m w).symm ?_)
+  exact TmEq.case (.refl _) hleft hright
 
 /-! ### Congruence for substitution -/
 

@@ -349,6 +349,14 @@ theorem weakenTerm_eq_rename {Γ : Ctx sig} {A B : Object sig.nBases}
     subst0 (.var (.there x)) n = .var x :=
   rfl
 
+@[simp] theorem subst0_weakenTerm {Γ : Ctx sig} {A B : Object sig.nBases}
+    (t : Tm Γ B) (n : Tm Γ A) : subst0 (weakenTerm t) n = t := by
+  rw [weakenTerm_eq_rename, subst0, subst_rename]
+  refine Eq.trans (subst_eq_of_pointwise (τ := fun {_} => Subst.ids) ?_ t)
+    (subst_ids t)
+  intro B x
+  rfl
+
 /-- Renaming commutes with substitution for the newest binder. -/
 theorem rename_subst0 {Γ Δ : Ctx sig} {A B : Object sig.nBases}
     (ρ : Rename sig Γ Δ) (t : Tm (Γ ▻ A) B) (n : Tm Γ A) :

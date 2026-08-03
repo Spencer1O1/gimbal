@@ -17,14 +17,6 @@ variable {sig : Signature}
 
 /-! ### Substitution idioms used by the hereditary operations -/
 
-@[simp] theorem subst0_weakenTerm {Γ : Ctx sig} {A B : Object sig.nBases}
-    (t : Tm Γ B) (n : Tm Γ A) : subst0 (weakenTerm t) n = t := by
-  rw [weakenTerm_eq_rename, subst0, subst_rename]
-  refine Eq.trans (subst_eq_of_pointwise (τ := fun {_} => Subst.ids) ?_ t)
-    (subst_ids t)
-  intro B x
-  rfl
-
 /-- Substituting the newest variable for itself contracts the two binders. -/
 theorem subst0_var_here {Γ : Ctx sig} {A C : Object sig.nBases}
     (t : Tm (Γ ▻ A ▻ A) C) :
