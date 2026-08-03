@@ -528,7 +528,7 @@ theorem typeRule_le (σ : ReachState n) (ti : Nat) :
   · exact coprodTypeRule_le σ ti _ _
   · exact ReachState.Le.refl σ
 
-private theorem foldl_le {α : Type} (f : ReachState n → α → ReachState n)
+theorem foldl_le {α : Type} (f : ReachState n → α → ReachState n)
     (hf : ∀ σ a, ReachState.Le σ (f σ a)) :
     ∀ (l : List α) (σ : ReachState n), ReachState.Le σ (l.foldl f σ)
   | [], σ => ReachState.Le.refl σ
