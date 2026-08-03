@@ -4185,6 +4185,186 @@ def atomPushCont {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
     (InvTm.abstr (P := P) .here (NegNeu.weaken (B := P) nP)
       (InvTm.weaken (B := P) cont))
 
+/-- Pushing a base hyp onto a bases-only ofHyps worklist stays bases-only. -/
+theorem worklistBasesOnly_ofHyps_push_base
+    (hyps : Array (Object sig.nBases)) (b : Fin sig.nBases)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))) :
+    worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push (.base b)))) := by
+  intro e he
+  have hpc :
+      OriginEnv.posCollect
+          (OriginEnv.weaken (A := .base b) (OriginEnv.ofHyps hyps)
+            (.hyp (sig := sig) hyps.size)) =
+        ({ origin := .hyp (sig := sig) hyps.size, ty := .base b } : PosEntry sig) ::
+          OriginEnv.posCollect (OriginEnv.ofHyps hyps) := by
+    simpa [objectPolarity_base] using posCollect_weaken_hyp hyps (.base b)
+  have he' :
+      e ∈
+        ({ origin := .hyp (sig := sig) hyps.size, ty := (.base b : Object sig.nBases) } :
+            PosEntry sig) ::
+          OriginEnv.posCollect (OriginEnv.ofHyps hyps) := by
+    have : e ∈ OriginEnv.posWorklist
+        (OriginEnv.weaken (A := .base b) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) := by
+      simpa [posWorklist_ofHyps_push] using he
+    simpa [OriginEnv.posWorklist, hpc, List.mem_mergeSort] using this
+  cases he' with
+  | head => exact ⟨b, rfl⟩
+  | tail _ hmem =>
+      exact hws e (List.mem_mergeSort.mpr hmem)
+
+theorem InvTm.abstr_unit {Γ : Ctx sig} {P : Object sig.nBases}
+    (x : Var Γ P) (m : NegNeu Γ P) :
+    InvTm.abstr x m (.unit : InvTm Γ .unit) = .unit := by
+  rw [InvTm.abstr]
+
+theorem InvTm.weaken_unit {Γ : Ctx sig} {B : Object sig.nBases} :
+    InvTm.weaken (B := B) (.unit : InvTm Γ .unit) = .unit := by
+  rfl
+
+theorem atomPushCont_unit {hyps : Array (Object sig.nBases)}
+    {P : Object sig.nBases} (nP : NegNeu (Ctx.ofHyps hyps) P) :
+    atomPushCont nP (.unit : InvTm (Ctx.ofHyps hyps) .unit) =
+      (.unit : InvTm (Ctx.ofHyps (hyps.push P)) .unit) := by
+  simp only [atomPushCont, InvTm.weaken_unit, InvTm.abstr_unit, InvTm.castCtx_unit]
+
+/--
+Nil-rest atom push body readiness from a unit continuation (no external
+`atomPushCont` hypothesis): bases-only parent + base observation ⇒ unit under
+`ofHyps.push`.
+-/
+theorem encodeReady_atomPushCont_unit
+    {hyps : Array (Object sig.nBases)} {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))) :
+    EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push (.base b))))
+      (OriginEnv.ofHyps (hyps.push (.base b))) 0 0
+      (atomPushCont nP (.unit : InvTm (Ctx.ofHyps hyps) .unit)) := by
+  rw [atomPushCont_unit]
+  exact encodeReady_unit_basesOnly _
+    (OriginEnv.ofHyps (hyps.push (.base b))) 0 0
+    (worklistBasesOnly_ofHyps_push_base hyps b hws)
+
+/-- Atom push of foc-pos is again foc-pos (under `ofHyps.push`). -/
+theorem InvTm.castCtx_foc_pos {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (p : PosNeu Γ A) :
+    InvTm.castCtx h (.foc (.pos (.done p))) =
+      .foc (.pos (.done (h ▸ p))) := by
+  cases h
+  rfl
+
+theorem InvTm.castCtx_foc_neg {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (n : NegNeu Γ A) :
+    InvTm.castCtx h (.foc (.neg (.done n))) =
+      .foc (.neg (.done (h ▸ n))) := by
+  cases h
+  rfl
+
+/-- Atom push of foc-pos is again foc-pos (under `ofHyps.push`). -/
+theorem atomPushCont_is_foc_pos {hyps : Array (Object sig.nBases)}
+    {P A : Object sig.nBases} (nP : NegNeu (Ctx.ofHyps hyps) P)
+    (p : PosNeu (Ctx.ofHyps hyps) A) :
+    ∃ p' : PosNeu (Ctx.ofHyps (hyps.push P)) A,
+      atomPushCont nP (.foc (.pos (.done p))) = .foc (.pos (.done p')) := by
+  let q : PosNeu (Ctx.ofHyps hyps ▻ P) A :=
+    PosNeu.abstr (P := P) .here (NegNeu.weaken (B := P) nP)
+      (PosNeu.rename (Rename.weaken (A := P)) p)
+  refine ⟨(Ctx.ofHyps_push hyps P).symm ▸ q, ?_⟩
+  simp only [atomPushCont, InvTm.weaken]
+  change
+    InvTm.castCtx (Ctx.ofHyps_push hyps P).symm
+        (InvTm.abstr (P := P) .here (NegNeu.weaken (B := P) nP)
+          (.foc (FocTm.rename (Rename.weaken (A := P)) (.pos (.done p))))) =
+      .foc (.pos (.done ((Ctx.ofHyps_push hyps P).symm ▸ q)))
+  rw [FocTm.rename, PosIntro.rename, InvTm.abstr, FocTm.abstr]
+  exact InvTm.castCtx_foc_pos _ _
+
+theorem atomPushCont_is_foc_neg {hyps : Array (Object sig.nBases)}
+    {P A : Object sig.nBases} (nP : NegNeu (Ctx.ofHyps hyps) P)
+    (n : NegNeu (Ctx.ofHyps hyps) A) :
+    ∃ n' : NegNeu (Ctx.ofHyps (hyps.push P)) A,
+      atomPushCont nP (.foc (.neg (.done n))) = .foc (.neg (.done n')) := by
+  let q : NegNeu (Ctx.ofHyps hyps ▻ P) A :=
+    NegNeu.abstr (P := P) .here (NegNeu.weaken (B := P) nP)
+      (NegNeu.rename (Rename.weaken (A := P)) n)
+  refine ⟨(Ctx.ofHyps_push hyps P).symm ▸ q, ?_⟩
+  simp only [atomPushCont, InvTm.weaken]
+  change
+    InvTm.castCtx (Ctx.ofHyps_push hyps P).symm
+        (InvTm.abstr (P := P) .here (NegNeu.weaken (B := P) nP)
+          (.foc (FocTm.rename (Rename.weaken (A := P)) (.neg (.done n))))) =
+      .foc (.neg (.done ((Ctx.ofHyps_push hyps P).symm ▸ q)))
+  rw [FocTm.rename, NegElim.rename, InvTm.abstr, FocTm.abstr]
+  exact InvTm.castCtx_foc_neg _ _
+
+/-- Push-body ready for foc-pos continuation under bases-only + focus. -/
+theorem encodeReady_atomPushCont_foc_pos
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (p : PosNeu (Ctx.ofHyps hyps) A)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push (.base b))))
+      (OriginEnv.ofHyps (hyps.push (.base b))) 0 0
+      (atomPushCont nP (.foc (.pos (.done p)))) := by
+  obtain ⟨p', hp'⟩ := atomPushCont_is_foc_pos nP p
+  rw [hp']
+  exact encodeReady_foc_pos_basesOnly _
+    (OriginEnv.ofHyps (hyps.push (.base b))) 0 0 p'
+    (worklistBasesOnly_ofHyps_push_base hyps b hws) hfr
+
+theorem encodeReady_atomPushCont_foc_neg
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (n : NegNeu (Ctx.ofHyps hyps) A)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push (.base b))))
+      (OriginEnv.ofHyps (hyps.push (.base b))) 0 0
+      (atomPushCont nP (.foc (.neg (.done n)))) := by
+  obtain ⟨n', hn'⟩ := atomPushCont_is_foc_neg nP n
+  rw [hn']
+  exact encodeReady_foc_neg_basesOnly _
+    (OriginEnv.ofHyps (hyps.push (.base b))) 0 0 n'
+    (worklistBasesOnly_ofHyps_push_base hyps b hws) hfr
+
+/--
+Push-body readiness from foc-done continuation shapes (empty-Go IH input under
+`hyps.push`), without an external `atomPushCont` hypothesis.
+-/
+theorem encodeReady_atomPushCont_of_focDone
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hshape :
+      (∃ p : PosNeu (Ctx.ofHyps hyps) A, cont = .foc (.pos (.done p))) ∨
+      (∃ n : NegNeu (Ctx.ofHyps hyps) A, cont = .foc (.neg (.done n)))) :
+    EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push (.base b))))
+      (OriginEnv.ofHyps (hyps.push (.base b))) 0 0
+      (atomPushCont nP cont) := by
+  match hshape with
+  | .inl ⟨p, hp⟩ =>
+      cases hp
+      exact encodeReady_atomPushCont_foc_pos nP p hws hfr
+  | .inr ⟨n, hn⟩ =>
+      cases hn
+      exact encodeReady_atomPushCont_foc_neg nP n hws hfr
+
 /-- From a successful atom nil-rest observation, recover the `letPos` shape and
 push body (`atomPushCont`). `fuel` is the inner empty-Go fuel
 (`applyObsNeu (fuel+1)`); success requires `fuel ≥ 1`. -/
@@ -4293,6 +4473,50 @@ theorem encodeReady_applyPairObsGo_exact_atom_nil_rest_of_go
   exact encodeReady_applyObsNeu_atom_nil_rest_of_go fuel σ n cont hne hnotSum hok
     hws hfr hbody
 
+/--
+Atom nil-rest readiness deriving push-body EncodeReady from foc-done
+continuation shape (empty recursive Go input), not an external `atomPushCont`
+hypothesis. Observation type is a base (exact-schedule atom).
+-/
+theorem encodeReady_applyObsNeu_atom_nil_rest_of_focDone
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyObsNeu (fuel + 1) σ hyps (.base b) nP [] cont = .ok t')
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hshape :
+      (∃ p : PosNeu (Ctx.ofHyps hyps) A, cont = .foc (.pos (.done p))) ∨
+      (∃ n : NegNeu (Ctx.ofHyps hyps) A, cont = .foc (.neg (.done n)))) :
+    PhaseEncodeReady t' := by
+  have hbody := encodeReady_atomPushCont_of_focDone nP cont hws hfr hshape
+  exact encodeReady_applyObsNeu_atom_nil_rest_of_go fuel σ nP cont
+    (by simp) (fun L R h => nomatch h) hok hws hfr hbody
+
+theorem encodeReady_applyPairObsGo_exact_atom_nil_rest_of_focDone
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (n : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyPairObsGo (fuel + 2) σ hyps [.exact (.base b) n] cont = .ok t')
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hshape :
+      (∃ p : PosNeu (Ctx.ofHyps hyps) A, cont = .foc (.pos (.done p))) ∨
+      (∃ n : NegNeu (Ctx.ofHyps hyps) A, cont = .foc (.neg (.done n)))) :
+    PhaseEncodeReady t' := by
+  rw [applyPairObsGo.eq_def] at hok
+  dsimp only at hok
+  exact encodeReady_applyObsNeu_atom_nil_rest_of_focDone fuel σ n cont hok
+    hws hfr hshape
+
 /-- Left branch continuation after coprod observation (empty remainder). -/
 def coprodPushContL {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBases}
     (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
@@ -4314,6 +4538,25 @@ def coprodPushContR {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBase
     InvTm.abstr .here (NegNeu.weaken n) (InvTm.weaken cont)
   InvTm.castCtx hR.symm
     (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInr L R))
+
+theorem coprodPushContL_unit {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R)) :
+    coprodPushContL n (.unit : InvTm (Ctx.ofHyps hyps) .unit) =
+      (.unit : InvTm (Ctx.ofHyps (hyps.push L)) .unit) := by
+  simp only [coprodPushContL, InvTm.weaken_unit, InvTm.abstr_unit]
+  -- rename skip1 unit = unit; hsubstInv unit = unit; castCtx unit = unit
+  change InvTm.castCtx _ (hsubstInv (InvTm.rename _ .unit) _) = _
+  simp only [InvTm.rename, hsubstInv, InvTm.castCtx_unit]
+
+theorem coprodPushContR_unit {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R)) :
+    coprodPushContR n (.unit : InvTm (Ctx.ofHyps hyps) .unit) =
+      (.unit : InvTm (Ctx.ofHyps (hyps.push R)) .unit) := by
+  simp only [coprodPushContR, InvTm.weaken_unit, InvTm.abstr_unit]
+  change InvTm.castCtx _ (hsubstInv (InvTm.rename _ .unit) _) = _
+  simp only [InvTm.rename, hsubstInv, InvTm.castCtx_unit]
 
 /--
 Coprod `applyObsNeu` with empty remainder: recover outer `.case` and both
@@ -4634,6 +4877,53 @@ theorem encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_go
     hws hpref hfr hit hL hR
 
 /--
+Coprod-var nil-rest with unit continuation: branch bodies reduce to `.unit`;
+readiness from branch `worklistBasesOnly` (no external push-cont EncodeReady).
+-/
+theorem encodeReady_applyObsNeu_coprod_var_nil_rest_of_unit
+    {hyps : Array (Object sig.nBases)} {L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    {t' : InvTm (Ctx.ofHyps hyps) .unit}
+    (hok : applyObsNeu (fuel + 1) σ hyps (.coprod L R) (.var x) []
+      (.unit : InvTm (Ctx.ofHyps hyps) .unit) = .ok t')
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : worklistBasesOnly (leftCoprodBranchWs ws e false L))
+    (hR : worklistBasesOnly (leftCoprodBranchWs ws e true R)) :
+    PhaseEncodeReady t' := by
+  obtain ⟨ht, _, _⟩ :=
+    applyObsNeu_coprod_nil_rest_ok_inv fuel σ (.var x)
+      (.unit : InvTm (Ctx.ofHyps hyps) .unit) hok
+  cases ht
+  simp only [coprodPushContL_unit, coprodPushContR_unit]
+  exact encodeReady_applyObsNeu_coprod_var_cast_unit x hws hpref hfr hit hL hR
+
+theorem encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_unit
+    {hyps : Array (Object sig.nBases)} {L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    {t' : InvTm (Ctx.ofHyps hyps) .unit}
+    (hok : applyPairObsGo (fuel + 2) σ hyps
+      [.exact (.coprod L R) (.var x)]
+      (.unit : InvTm (Ctx.ofHyps hyps) .unit) = .ok t')
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : worklistBasesOnly (leftCoprodBranchWs ws e false L))
+    (hR : worklistBasesOnly (leftCoprodBranchWs ws e true R)) :
+    PhaseEncodeReady t' := by
+  rw [applyPairObsGo.eq_def] at hok
+  dsimp only at hok
+  exact encodeReady_applyObsNeu_coprod_var_nil_rest_of_unit fuel σ x hok
+    hws hpref hfr hit hL hR
+
+/--
 `applyPairObsGo` under the **empty / exact-never-only / single exact atom
 nil-rest / single exact coprod-var nil-rest** discipline.
 -/
@@ -4709,6 +4999,75 @@ theorem encodeReady_applyPairObsGo_emptyNeverOrNilRestObs
               exact encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_go
                 fuel σ x cont hok hws hpref hfr hit hL hR
 
+/--
+Go readiness when atom/coprod push-body facts are **derived** from continuation
+shape (foc-done / unit) rather than assumed: empty ∪ exact-never-only ∪ single
+exact base atom with foc-done cont ∪ single exact coprod-var with unit cont and
+bases-only branch schedules.
+-/
+theorem encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (entries : List (PairEntry sig hyps))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyPairObsGo (fuel + 1) σ hyps entries cont = .ok t')
+    (hdisc :
+      (exactNeverEntriesOnly entries ∧
+        (entries = [] → PhaseEncodeReady cont) ∧
+        (entries ≠ [] →
+          ∃ (pref : List (PosEntry sig)) (e : PosEntry sig) (suf : List (PosEntry sig)),
+            OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+            (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+            e.ty = .never)) ∨
+      (∃ (b : Fin sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) (.base b)),
+        entries = [.exact (.base b) n] ∧
+        worklistBasesOnly (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) ∧
+        forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+        ((∃ p : PosNeu (Ctx.ofHyps hyps) A, cont = .foc (.pos (.done p))) ∨
+          (∃ n' : NegNeu (Ctx.ofHyps hyps) A, cont = .foc (.neg (.done n'))))) ∨
+      (∃ (L R : Object sig.nBases)
+          (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+          (hA : A = .unit),
+        entries = [.exact (.coprod L R) (.var x)] ∧
+        cont = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
+        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        OriginEnv.ofHyps hyps x = e.origin ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e true R))) :
+    PhaseEncodeReady t' := by
+  cases hdisc with
+  | inl h =>
+      obtain ⟨hent, hempty, hnever⟩ := h
+      exact encodeReady_applyPairObsGo_exactNeverOnly fuel σ entries cont hent hok
+        hempty hnever
+  | inr h =>
+      cases h with
+      | inl h =>
+          obtain ⟨b, n, heq, hws, hfr, hshape⟩ := h
+          cases heq
+          cases fuel with
+          | zero =>
+              simp [applyPairObsGo, applyObsNeu] at hok
+          | succ fuel =>
+              exact encodeReady_applyPairObsGo_exact_atom_nil_rest_of_focDone
+                fuel σ n cont hok hws hfr hshape
+      | inr h =>
+          obtain ⟨L, R, pref, e, ws, x, hA, heq, hcont, hws, hpref, hfr, hit,
+            hL, hR⟩ := h
+          cases heq
+          cases hA
+          cases hcont
+          cases fuel with
+          | zero =>
+              simp [applyPairObsGo, applyObsNeu] at hok
+          | succ fuel =>
+              exact encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_unit
+                fuel σ x hok hws hpref hfr hit hL hR
+
 /-! ### Gaps (RawReferenceProduced → PhaseEncodeReady)
 
 Required: `encodeReady_of_rawReferenceProduced` /
@@ -4734,13 +5093,19 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   nil-rest Go packaging + inversion landed
   (`applyObsNeu_*_nil_rest_ok_inv`, `applyPairObsGo_exact_*_nil_rest_ok_inv`,
   `encodeReady_applyPairObsGo_exact_atom/coprod_var_nil_rest_of_go`,
-  `encodeReady_applyPairObsGo_emptyNeverOrNilRestObs`). See `EncodeReadyRawCase`.
+  `encodeReady_applyPairObsGo_emptyNeverOrNilRestObs`). Push-body /
+  branch readiness **derived** for foc-done atom (`*_of_focDone`) and unit
+  coprod-var (`*_of_unit`) via
+  `encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest`. See
+  `EncodeReadyRawCase`.
 * Restricted Raw→ready:
-  `EncodeReadyOfRawGoal_emptyOrExactNever_holds` (empty or exact-never) and
-  enlarged `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds` (also single
-  exact atom nil-rest with `atomPushCont` ready, or single exact coprod-var
-  nil-rest with cast branch readiness). Unrestricted `EncodeReadyOfRawGoal`
-  open.
+  `EncodeReadyOfRawGoal_emptyOrExactNever_holds`,
+  `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds` (assumes push/branch
+  ready), and `EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds`
+  (foc-done atom / unit coprod-var without those assumptions). Unrestricted
+  `EncodeReadyOfRawGoal` open. Residual: letPos/sat conts, non-unit coprod
+  branches, consistency entries, mixed multi-entry schedules,
+  `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked.
 * `sat_body`: Go codes landed (`encodeICCGo_sat_body_codes`); `EncodeIccStep`
   packaging blocked (sticky encode would need to drop `.foc (.body _)`).
 -/
@@ -5212,6 +5577,175 @@ theorem EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds :
   obtain ⟨newFrom, goal, fuel, entries, σ, t₀, u₀,
     hold, ht₀, hu₀, hobs, hcons, hok, hdisc_t₀, hdisc_u₀⟩ := hex
   exact encodeReady_of_rawReferenceProduced_emptyNeverOrNilRestObs
+    hold ht₀ hu₀ hobs hcons hok hdisc_t₀ hdisc_u₀
+
+/--
+Restricted Raw→ready where atom/coprod push-body facts are derived from
+continuation shape (`emptyNeverOrDerivedNilRest`): foc-done for base atom,
+unit + bases-only branches for coprod-var. Unrestricted goal remains open.
+-/
+theorem encodeReady_of_rawReferenceProduced_emptyNeverOrDerivedNilRest
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {t : InvTm (Ctx.ofHyps hyps) A}
+    {newFrom : Nat} {goal : Object sig.nBases} {fuel : Nat}
+    {entries : Array (PairEntry sig hyps)} {σ : ReachState sig.nBases}
+    {t₀ u₀ : InvTm (Ctx.ofHyps hyps) A}
+    (_hold : checkOldInvariant (ReachCtx.oldPrefix ⟨hyps, newFrom⟩) goal = true)
+    (_ht₀ : WellInv t₀) (_hu₀ : WellInv u₀)
+    (_hobs : pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries σ)
+    (hcons : σ.inconsistent = false)
+    (hok : applyPairObs (saturationBudget fuel entries.size) σ hyps entries t₀ = .ok t ∨
+      applyPairObs (saturationBudget fuel entries.size) σ hyps entries u₀ = .ok t)
+    (hdisc_t₀ :
+      (exactNeverEntriesOnly entries.toList ∧
+        (entries.toList = [] → PhaseEncodeReady t₀) ∧
+        (entries.toList ≠ [] →
+          ∃ (pref : List (PosEntry sig)) (e : PosEntry sig) (suf : List (PosEntry sig)),
+            OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+            (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+            e.ty = .never)) ∨
+      (∃ (b : Fin sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) (.base b)),
+        entries.toList = [.exact (.base b) n] ∧
+        worklistBasesOnly (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) ∧
+        forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+        ((∃ p : PosNeu (Ctx.ofHyps hyps) A, t₀ = .foc (.pos (.done p))) ∨
+          (∃ n' : NegNeu (Ctx.ofHyps hyps) A, t₀ = .foc (.neg (.done n'))))) ∨
+      (∃ (L R : Object sig.nBases)
+          (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+          (hA : A = .unit),
+        entries.toList = [.exact (.coprod L R) (.var x)] ∧
+        t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
+        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        OriginEnv.ofHyps hyps x = e.origin ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e true R)))
+    (hdisc_u₀ :
+      (exactNeverEntriesOnly entries.toList ∧
+        (entries.toList = [] → PhaseEncodeReady u₀) ∧
+        (entries.toList ≠ [] →
+          ∃ (pref : List (PosEntry sig)) (e : PosEntry sig) (suf : List (PosEntry sig)),
+            OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+            (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+            e.ty = .never)) ∨
+      (∃ (b : Fin sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) (.base b)),
+        entries.toList = [.exact (.base b) n] ∧
+        worklistBasesOnly (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) ∧
+        forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+        ((∃ p : PosNeu (Ctx.ofHyps hyps) A, u₀ = .foc (.pos (.done p))) ∨
+          (∃ n' : NegNeu (Ctx.ofHyps hyps) A, u₀ = .foc (.neg (.done n'))))) ∨
+      (∃ (L R : Object sig.nBases)
+          (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+          (hA : A = .unit),
+        entries.toList = [.exact (.coprod L R) (.var x)] ∧
+        u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
+        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        OriginEnv.ofHyps hyps x = e.origin ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+        worklistBasesOnly (leftCoprodBranchWs ws e true R))) :
+    PhaseEncodeReady t := by
+  cases hok with
+  | inl h =>
+      simp only [applyPairObs, hcons] at h
+      match hfuel : saturationBudget fuel entries.size with
+      | 0 =>
+          rw [hfuel] at h
+          simp [applyPairObsGo] at h
+      | fuel' + 1 =>
+          have hgo :
+              applyPairObsGo (fuel' + 1) σ hyps entries.toList t₀ = .ok t := by
+            simpa [hfuel] using h
+          exact encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest fuel' σ
+            entries.toList t₀ hgo hdisc_t₀
+  | inr h =>
+      simp only [applyPairObs, hcons] at h
+      match hfuel : saturationBudget fuel entries.size with
+      | 0 =>
+          rw [hfuel] at h
+          simp [applyPairObsGo] at h
+      | fuel' + 1 =>
+          have hgo :
+              applyPairObsGo (fuel' + 1) σ hyps entries.toList u₀ = .ok t := by
+            simpa [hfuel] using h
+          exact encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest fuel' σ
+            entries.toList u₀ hgo hdisc_u₀
+
+def EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest : Prop :=
+  ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A),
+    RawReferenceProduced t →
+    (∃ (newFrom : Nat) (goal : Object sig.nBases) (fuel : Nat)
+        (entries : Array (PairEntry sig hyps)) (σ : ReachState sig.nBases)
+        (t₀ u₀ : InvTm (Ctx.ofHyps hyps) A),
+      checkOldInvariant (ReachCtx.oldPrefix ⟨hyps, newFrom⟩) goal = true ∧
+        WellInv t₀ ∧ WellInv u₀ ∧
+        pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries σ ∧
+        σ.inconsistent = false ∧
+        (applyPairObs (saturationBudget fuel entries.size) σ hyps entries t₀ = .ok t ∨
+          applyPairObs (saturationBudget fuel entries.size) σ hyps entries u₀ = .ok t) ∧
+        ((exactNeverEntriesOnly entries.toList ∧
+            (entries.toList = [] → PhaseEncodeReady t₀) ∧
+            (entries.toList ≠ [] →
+              ∃ (pref : List (PosEntry sig)) (e : PosEntry sig) (suf : List (PosEntry sig)),
+                OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+                (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+                e.ty = .never)) ∨
+          (∃ (b : Fin sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) (.base b)),
+            entries.toList = [.exact (.base b) n] ∧
+            worklistBasesOnly (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) ∧
+            forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+            ((∃ p : PosNeu (Ctx.ofHyps hyps) A, t₀ = .foc (.pos (.done p))) ∨
+              (∃ n' : NegNeu (Ctx.ofHyps hyps) A, t₀ = .foc (.neg (.done n'))))) ∨
+          (∃ (L R : Object sig.nBases)
+              (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
+              (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+              (hA : A = .unit),
+            entries.toList = [.exact (.coprod L R) (.var x)] ∧
+            t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
+            OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+            (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+            forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+            OriginEnv.ofHyps hyps x = e.origin ∧
+            worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+            worklistBasesOnly (leftCoprodBranchWs ws e true R))) ∧
+        ((exactNeverEntriesOnly entries.toList ∧
+            (entries.toList = [] → PhaseEncodeReady u₀) ∧
+            (entries.toList ≠ [] →
+              ∃ (pref : List (PosEntry sig)) (e : PosEntry sig) (suf : List (PosEntry sig)),
+                OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+                (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+                e.ty = .never)) ∨
+          (∃ (b : Fin sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) (.base b)),
+            entries.toList = [.exact (.base b) n] ∧
+            worklistBasesOnly (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)) ∧
+            forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+            ((∃ p : PosNeu (Ctx.ofHyps hyps) A, u₀ = .foc (.pos (.done p))) ∨
+              (∃ n' : NegNeu (Ctx.ofHyps hyps) A, u₀ = .foc (.neg (.done n'))))) ∨
+          (∃ (L R : Object sig.nBases)
+              (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
+              (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+              (hA : A = .unit),
+            entries.toList = [.exact (.coprod L R) (.var x)] ∧
+            u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
+            OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+            (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+            forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+            OriginEnv.ofHyps hyps x = e.origin ∧
+            worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+            worklistBasesOnly (leftCoprodBranchWs ws e true R)))) →
+    PhaseEncodeReady t
+
+theorem EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds :
+    EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest (sig := sig) := by
+  intro hyps A t _hr hex
+  obtain ⟨newFrom, goal, fuel, entries, σ, t₀, u₀,
+    hold, ht₀, hu₀, hobs, hcons, hok, hdisc_t₀, hdisc_u₀⟩ := hex
+  exact encodeReady_of_rawReferenceProduced_emptyNeverOrDerivedNilRest
     hold ht₀ hu₀ hobs hcons hok hdisc_t₀ hdisc_u₀
 
 end Equality
