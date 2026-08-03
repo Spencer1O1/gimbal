@@ -6,7 +6,7 @@
   Full completeness of the canonicalizer is deferred to Milestone 8.
 -/
 
-import Gimbal.Equality.Hereditary
+import Gimbal.Equality.Beq
 
 namespace Gimbal
 namespace Equality
@@ -69,10 +69,19 @@ inductive ICCEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
             (InvTm.rename Rename.exchange u₂)))
   | abort_eq {Γ A} (n m : NegNeu Γ .never) :
       ICCEq (.abort (A := A) n) (.abort m)
+  /-- Coproduct η: a `case` returning the two injections of its own binder. -/
+  | coprod_eta {Γ A B} (n : NegNeu Γ (.coprod A B)) :
+      ICCEq
+        (.case n
+          (.foc (.pos (.done (.inl (.neu (.var .here))))))
+          (.foc (.pos (.done (.inr (.neu (.var .here)))))))
+        (.foc (.pos (.done (.neu n))))
 
 inductive ICCFocEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
     FocTm Γ A → FocTm Γ A → Prop where
   | refl {Γ A} (f : FocTm Γ A) : ICCFocEq f f
+  | symm {Γ A} {f g : FocTm Γ A} : ICCFocEq f g → ICCFocEq g f
+  | trans {Γ A} {f g h : FocTm Γ A} : ICCFocEq f g → ICCFocEq g h → ICCFocEq f h
   | letPos_cong {Γ P A} {n : NegNeu Γ P}
       {t u : InvTm (Γ ▻ P) A} :
       ICCEq t u → ICCFocEq (.letPos n t) (.letPos n u)
@@ -80,8 +89,12 @@ inductive ICCFocEq : {Γ : Ctx sig} → {A : Object sig.nBases} →
       p = q → ICCFocEq (.pos p) (.pos q)
   | neg_cong {Γ A} {p q : NegElim Γ A} :
       p = q → ICCFocEq (.neg p) (.neg q)
+  /-- Schedules are operational metadata: they do not affect the class. -/
   | sat_cong {Γ A} {s₁ s₂ : Schedule sig.nBases} {t u : InvTm Γ A} :
-      s₁ = s₂ → ICCEq t u → ICCFocEq (.sat (.mk s₁ t)) (.sat (.mk s₂ u))
+      ICCEq t u → ICCFocEq (.sat (.mk s₁ t)) (.sat (.mk s₂ u))
+  /-- A saturation phase whose body is already focused is that focus. -/
+  | sat_foc {Γ A} (s : Schedule sig.nBases) (f : FocTm Γ A) :
+      ICCFocEq (.sat (.mk s (.foc f))) f
 end
 
 /-! ### Deterministic canonicalizer
@@ -118,7 +131,7 @@ def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
             if hR : R = R' then
               match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
               | some m₁, some m₂ =>
-                if NegNeu.toRaw m₁ == NegNeu.toRaw m₂ then
+                if NegNeu.beq m₁ m₂ then
                   let t₂' : InvTm (Γ ▻ B ▻ L) _ := hL.symm ▸ t₂
                   let u₂' : InvTm (Γ ▻ B ▻ R) _ := hR.symm ▸ u₂
                   .case m₁
@@ -142,18 +155,19 @@ decreasing_by
 
 /--
 Coproduct η: `case n (x. inl x) (y. inr y) = n` when the result type is the sum.
-Checked via raw spines so the mutual canonicalizer stays structurally recursive.
+
+The dependent match does the type reasoning: a branch of the shape
+`inl (var here)` in `Γ ▻ A` forces the result type to be `A + _`, and the
+matching right branch forces the summand to be `B`.
 -/
 def tryCoprodEta {Γ : Ctx sig} {A B C : Object sig.nBases}
     (n : NegNeu Γ (.coprod A B))
     (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) : Option (InvTm Γ C) :=
-  if h : C = (.coprod A B : Object sig.nBases) then
-    match InvTm.toRaw t, InvTm.toRaw u with
-    | .pos (.inl (.neu (.var 0))), .pos (.inr (.neu (.var 0))) =>
-        some (h ▸ .foc (.pos (.done (.neu n))))
-    | _, _ => none
-  else
-    none
+  match t, u with
+  | .foc (.pos (.done (.inl (.neu (.var .here))))),
+    .foc (.pos (.done (.inr (.neu (.var .here))))) =>
+      some (.foc (.pos (.done (.neu n))))
+  | _, _ => none
 
 mutual
 /-- Push `case` outward past invertible introductions. -/
