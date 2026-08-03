@@ -540,6 +540,13 @@ theorem OriginEnv.find?_snoc {Δ : Ctx sig} {A : Object sig.nBases}
           fun p => ⟨p.1, .there p.2⟩) :=
   rfl
 
+/-- Newest binder is recovered by `find?` at the origin assigned by `weaken`. -/
+theorem OriginEnv.find?_weaken_here {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig) :
+    OriginEnv.find? (OriginEnv.weaken (A := A) ε o) o = some ⟨A, .here⟩ := by
+  rw [OriginEnv.find?_snoc]
+  simp [OriginEnv.weaken, OriginEnv.snoc, BEq.rfl]
+
 /-- `find?` is invariant under simultaneous rekey of the environment and query. -/
 theorem OriginEnv.find?_rekeyHypToObs {Γ : Ctx sig} (ε : OriginEnv Γ)
     (hypIdx k : Nat) (o : Origin sig) :

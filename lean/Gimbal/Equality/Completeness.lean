@@ -254,13 +254,15 @@ Blocked / WIP:
    ~~narrow raw→ready slices (`encodeReady_of_rawReferenceProduced_unit_nil`,
    `*_foc_pos_bases`)~~ /
    ~~never-payload branch abort (`encodeReady_abort_leftCoprodBranch_never`)~~ /
+   ~~nested-coprod unit-η/peel under branch schedule
+   (`encodeReady_unit_leftCoprodBranch_nested`, `*_case_here_*`)~~ /
    ~~`EncodeReadyRawCase` + `certifyReferenceProduced_of_EncodeReadyRawCase`~~ /
-   ~~exact-never Go step (`encodeReady_applyPairObsGo_exact_never`)~~ /
+   ~~exact-never / exactNeverOnly / atom-nil-rest Go steps~~ /
+   ~~restricted Raw→ready `EncodeReadyOfRawGoal_emptyOrExactNever_holds`~~ /
    ~~empty-schedule unit/foc-done shapes~~ landed; same-term
    `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
-   head); nested-coprod branch payloads still need peel/unit-η; still need full
-   `encodeReady_of_rawReferenceProduced` (atom+coprod Go induction), and general
-   `WellInv`→ready)
+   head); still need full unrestricted `encodeReady_of_rawReferenceProduced`
+   (atom+coprod Go inversion), and general `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
