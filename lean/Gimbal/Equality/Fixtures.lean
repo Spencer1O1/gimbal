@@ -4,6 +4,7 @@
 -/
 
 import Gimbal.Equality.Focus
+import Gimbal.Equality.Opacity
 import Gimbal.Equality.Translate
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
@@ -1051,5 +1052,62 @@ example :
       (IntrinsicMorphism.id (sig := NumSig) Number) =
       CandidateResult.exhausted .saturate := by
   native_decide
+
+/-! ### M8 8C: hereditary focusing invariants
+
+`two` is the generator `q : Unit ⟶ Number`, so its translation is a spine
+headed by a generator variable. These fixtures pin the properties that
+Milestone 8C proves in general: focusing is total and phase-legal, its erasure
+is `TmEq` to the input, and the generator spine comes through untouched.
+-/
+
+/-- Raw shape of the focused form of `two = q`. -/
+def focusTwoRaw : RawFocused :=
+  (focus (translateMorphism two)).toRaw
+
+/--
+Opacity, concretely. Focusing `q x` eta-expands the generator variable and then
+contracts the expansion again, leaving the spine `app (var 3) unit`: the
+argument is eta-expanded to the unit value, while the generator head — de
+Bruijn index `3`, generator `0` seen through the source binder — is neither
+reduced nor inspected.
+-/
+example : focusTwoRaw = .pos (.neu (.app (.var 3) .unit)) := by
+  native_decide
+
+/-- The focused output is phase-legal. -/
+example : WellInv (focus (translateMorphism two)) :=
+  focus_wellInv _
+
+/-- The executable phase check agrees. -/
+example : (focus (translateMorphism two)).wellFocused = true :=
+  focus_wellFocused _
+
+/-- Focusing preserves meaning: the erasure is `TmEq` to the term it came from. -/
+example :
+    TmEq (focus (translateMorphism two)).erase (translateMorphism two) :=
+  focus_tmEq _
+
+/-- Focusing a translated morphism recovers that morphism categorically. -/
+example :
+    IntrinsicDefEq
+      (interpret (rootEnv (sig := NumSig) (.unit : Object 1))
+        (focus (translate (ofMorphism two))).erase)
+      (ofMorphism two) :=
+  (focus_translate (ofMorphism two)).2
+
+/--
+Opacity in general: a spine headed by the generator variable is never
+contracted by hereditary substitution for a later binder, and the result is
+still headed by that same generator variable.
+-/
+example {A C : Object 1}
+    (n : NegNeu (translateCtx (sig := NumSig) (.unit : Object 1) ▻ A) C)
+    (h : n.HeadVar (.there (.there (genVar NumSig ⟨0, by decide⟩))))
+    (v : InvTm (translateCtx (sig := NumSig) (.unit : Object 1)) A) :
+    ∃ n' : NegNeu (translateCtx (sig := NumSig) (.unit : Object 1)) C,
+      hsubstNeu n v = .neu n' ∧
+        n'.HeadVar (.there (genVar NumSig ⟨0, by decide⟩)) :=
+  hsubstNeu_opaque h v
 
 end Gimbal.Equality.Fixtures
