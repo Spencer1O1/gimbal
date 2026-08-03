@@ -263,14 +263,15 @@ Blocked / WIP:
    ~~enlarged restricted Raw→ready
    `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds`~~ /
    ~~derived nil-rest push/branch readiness (foc-done / sat / base-letPos atom,
-   unit coprod-var)
+   unit + foc-done/sat `CoprodDerivedBranchShape` coprod-var)
    `EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds`~~ /
    ~~empty-schedule WellInv intro→ready (no stash) + combined Raw fragment
    `EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived_holds`~~ /
    ~~empty-schedule unit/foc-done shapes~~ landed; same-term
    `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
    head); still need full unrestricted `encodeReady_of_rawReferenceProduced`
-   (non-unit coprod branches, consistency / mixed multi-entry, general
+   (derive branch shape from non-unit parent `coprodPushCont`; pair/lam /
+   abort-never branches; consistency / mixed multi-entry; general
    WellInv→ready / deeper letPos bodies))
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).

@@ -3458,6 +3458,34 @@ theorem InvTm.castCtx_unit {Γ Δ : Ctx sig} (h : Γ = Δ) :
   cases h
   rfl
 
+theorem InvTm.castCtx_foc_pos {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (p : PosNeu Γ A) :
+    InvTm.castCtx h (.foc (.pos (.done p))) =
+      .foc (.pos (.done (h ▸ p))) := by
+  cases h
+  rfl
+
+theorem InvTm.castCtx_foc_neg {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (n : NegNeu Γ A) :
+    InvTm.castCtx h (.foc (.neg (.done n))) =
+      .foc (.neg (.done (h ▸ n))) := by
+  cases h
+  rfl
+
+theorem InvTm.castCtx_foc_sat {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (h : Γ = Δ) (s : Schedule sig.nBases) (t : InvTm Γ A) :
+    InvTm.castCtx h (.foc (.sat (.mk s t))) =
+      .foc (.sat (.mk s (InvTm.castCtx h t))) := by
+  cases h
+  rfl
+
+theorem InvTm.castCtx_foc_letPos {Γ Δ : Ctx sig} {P A : Object sig.nBases}
+    (h : Γ = Δ) (n : NegNeu Γ P) (t : InvTm (Γ ▻ P) A) :
+    InvTm.castCtx h (.foc (.letPos n t)) =
+      .foc (.letPos (h ▸ n) (congrArg (fun Γ => Γ ▻ P) h ▸ t)) := by
+  cases h
+  rfl
+
 /-- Cast `ofHyps.push` unit onto the encode branch schedule (base-only). -/
 theorem encodeReady_unit_leftCoprodBranch_cast
     (hyps : Array (Object sig.nBases)) (L : Object sig.nBases)
@@ -3470,6 +3498,57 @@ theorem encodeReady_unit_leftCoprodBranch_cast
         (.unit : InvTm (Ctx.ofHyps (hyps.push L)) .unit)) := by
   rw [InvTm.castCtx_unit]
   exact encodeReady_unit_leftCoprodBranch hyps L e ws side hbr
+
+/-- Cast `ofHyps.push` foc-pos onto the encode branch schedule (base-only). -/
+theorem encodeReady_foc_pos_leftCoprodBranch_cast
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (p : PosNeu (Ctx.ofHyps (hyps.push L)) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps L) (.foc (.pos (.done p)))) := by
+  rw [InvTm.castCtx_foc_pos]
+  exact encodeReady_foc_pos_leftCoprodBranch hyps e ws side
+    ((Ctx.ofHyps_push hyps L) ▸ p) hbr hfr
+
+/-- Cast `ofHyps.push` foc-neg onto the encode branch schedule (base-only). -/
+theorem encodeReady_foc_neg_leftCoprodBranch_cast
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (n : NegNeu (Ctx.ofHyps (hyps.push L)) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps L) (.foc (.neg (.done n)))) := by
+  rw [InvTm.castCtx_foc_neg]
+  exact encodeReady_foc_neg_leftCoprodBranch hyps e ws side
+    ((Ctx.ofHyps_push hyps L) ▸ n) hbr hfr
+
+/-- Cast `ofHyps.push` sat-of-foc-pos onto the encode branch schedule. -/
+theorem encodeReady_foc_sat_focPos_leftCoprodBranch_cast
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (s : Schedule sig.nBases) (p : PosNeu (Ctx.ofHyps (hyps.push L)) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps L)
+        (.foc (.sat (.mk s (.foc (.pos (.done p))))))) := by
+  rw [InvTm.castCtx_foc_sat, InvTm.castCtx_foc_pos]
+  have ht :
+      EncodeReady ([] : List (PosEntry sig))
+        (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+        0 0
+        (.foc (.pos (.done ((Ctx.ofHyps_push hyps L) ▸ p)))) :=
+    encodeReady_foc_pos_nil _ 0 0 _ hfr
+  exact encodeReady_foc_sat_leftCoprodBranch hyps e ws side s _ hbr hfr ht
 
 /-- Empty phase worklist: `.unit` is phase-encode-ready. -/
 theorem phaseEncodeReady_unit_nil_worklist
@@ -4422,35 +4501,6 @@ theorem encodeReady_atomPushCont_unit
     (worklistBasesOnly_ofHyps_push_base hyps b hws)
 
 /-- Atom push of foc-pos is again foc-pos (under `ofHyps.push`). -/
-theorem InvTm.castCtx_foc_pos {Γ Δ : Ctx sig} {A : Object sig.nBases}
-    (h : Γ = Δ) (p : PosNeu Γ A) :
-    InvTm.castCtx h (.foc (.pos (.done p))) =
-      .foc (.pos (.done (h ▸ p))) := by
-  cases h
-  rfl
-
-theorem InvTm.castCtx_foc_neg {Γ Δ : Ctx sig} {A : Object sig.nBases}
-    (h : Γ = Δ) (n : NegNeu Γ A) :
-    InvTm.castCtx h (.foc (.neg (.done n))) =
-      .foc (.neg (.done (h ▸ n))) := by
-  cases h
-  rfl
-
-theorem InvTm.castCtx_foc_sat {Γ Δ : Ctx sig} {A : Object sig.nBases}
-    (h : Γ = Δ) (s : Schedule sig.nBases) (t : InvTm Γ A) :
-    InvTm.castCtx h (.foc (.sat (.mk s t))) =
-      .foc (.sat (.mk s (InvTm.castCtx h t))) := by
-  cases h
-  rfl
-
-theorem InvTm.castCtx_foc_letPos {Γ Δ : Ctx sig} {P A : Object sig.nBases}
-    (h : Γ = Δ) (n : NegNeu Γ P) (t : InvTm (Γ ▻ P) A) :
-    InvTm.castCtx h (.foc (.letPos n t)) =
-      .foc (.letPos (h ▸ n) (congrArg (fun Γ => Γ ▻ P) h ▸ t)) := by
-  cases h
-  rfl
-
-/-- Atom push of foc-pos is again foc-pos (under `ofHyps.push`). -/
 theorem atomPushCont_is_foc_pos {hyps : Array (Object sig.nBases)}
     {P A : Object sig.nBases} (nP : NegNeu (Ctx.ofHyps hyps) P)
     (p : PosNeu (Ctx.ofHyps hyps) A) :
@@ -4907,6 +4957,80 @@ theorem coprodPushContR_unit {hyps : Array (Object sig.nBases)}
   change InvTm.castCtx _ (hsubstInv (InvTm.rename _ .unit) _) = _
   simp only [InvTm.rename, hsubstInv, InvTm.castCtx_unit]
 
+/-! ### Derived coprod branch shapes (non-unit beyond unit η) -/
+
+/--
+Branch bodies under `ofHyps.push` from which left-coprod `EncodeReady` follows
+after cast onto `Γ ▻ Side` (parallel to `AtomDerivedContShape`).
+-/
+def CoprodDerivedBranchShape {hyps : Array (Object sig.nBases)}
+    {Side A : Object sig.nBases}
+    (body : InvTm (Ctx.ofHyps (hyps.push Side)) A) : Prop :=
+  (∃ hA : A = (.unit : Object sig.nBases),
+      HEq body (.unit : InvTm (Ctx.ofHyps (hyps.push Side)) .unit)) ∨
+  (∃ p : PosNeu (Ctx.ofHyps (hyps.push Side)) A,
+      body = .foc (.pos (.done p)) ∧
+      forcedRule ([] : List (PosEntry sig)) A = .focus) ∨
+  (∃ n : NegNeu (Ctx.ofHyps (hyps.push Side)) A,
+      body = .foc (.neg (.done n)) ∧
+      forcedRule ([] : List (PosEntry sig)) A = .focus) ∨
+  (∃ (s : Schedule sig.nBases) (p : PosNeu (Ctx.ofHyps (hyps.push Side)) A),
+      body = .foc (.sat (.mk s (.foc (.pos (.done p))))) ∧
+      forcedRule ([] : List (PosEntry sig)) A = .focus)
+
+/-- Cast branch body ready under encode's left-coprod schedule from shape. -/
+theorem encodeReady_coprodBranch_cast_of_shape
+    (hyps : Array (Object sig.nBases)) {Side A : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (body : InvTm (Ctx.ofHyps (hyps.push Side)) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side Side))
+    (hshape : CoprodDerivedBranchShape body) :
+    EncodeReady (leftCoprodBranchWs ws e side Side)
+      (OriginEnv.weaken (A := Side) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps Side) body) := by
+  match hshape with
+  | .inl ⟨hA, hEq⟩ =>
+      cases hA
+      cases hEq
+      exact encodeReady_unit_leftCoprodBranch_cast hyps Side e ws side hbr
+  | .inr (.inl ⟨p, hp, hfr⟩) =>
+      cases hp
+      exact encodeReady_foc_pos_leftCoprodBranch_cast hyps e ws side p hbr hfr
+  | .inr (.inr (.inl ⟨n, hn, hfr⟩)) =>
+      cases hn
+      exact encodeReady_foc_neg_leftCoprodBranch_cast hyps e ws side n hbr hfr
+  | .inr (.inr (.inr ⟨s, p, hp, hfr⟩)) =>
+      cases hp
+      exact encodeReady_foc_sat_focPos_leftCoprodBranch_cast hyps e ws side s p
+        hbr hfr
+
+/--
+Parent continuation shapes that determine both `coprodPushContL/R` bodies
+without an external branch-ready stash: unit (branches collapse to unit).
+Non-unit branch bodies use `CoprodDerivedBranchShape` on the push conts.
+-/
+def CoprodDerivedContShape {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (cont : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  ∃ hA : A = (.unit : Object sig.nBases),
+    HEq cont (.unit : InvTm (Ctx.ofHyps hyps) .unit)
+
+theorem CoprodDerivedBranchShape_coprodPushContL_unit
+    {hyps : Array (Object sig.nBases)} {L R : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R)) :
+    CoprodDerivedBranchShape
+      (coprodPushContL n (.unit : InvTm (Ctx.ofHyps hyps) .unit)) := by
+  refine .inl ⟨rfl, ?_⟩
+  rw [coprodPushContL_unit]
+
+theorem CoprodDerivedBranchShape_coprodPushContR_unit
+    {hyps : Array (Object sig.nBases)} {L R : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R)) :
+    CoprodDerivedBranchShape
+      (coprodPushContR n (.unit : InvTm (Ctx.ofHyps hyps) .unit)) := by
+  refine .inl ⟨rfl, ?_⟩
+  rw [coprodPushContR_unit]
+
 /--
 Coprod `applyObsNeu` with empty remainder: recover outer `.case` and both
 push bodies (`coprodPushContL/R`). Success requires `fuel ≥ 1`.
@@ -5273,6 +5397,84 @@ theorem encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_unit
     hws hpref hfr hit hL hR
 
 /--
+Coprod-var nil-rest from **derived branch shapes** under `ofHyps.push`
+(`CoprodDerivedBranchShape`): unit / foc-done / sat-of-foc-pos after push,
+cast onto encode's `leftCoprodBranchWs` — no external branch EncodeReady stash.
+-/
+theorem encodeReady_applyObsNeu_coprod_var_nil_rest_of_branchShape
+    {hyps : Array (Object sig.nBases)} {A L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyObsNeu (fuel + 1) σ hyps (.coprod L R) (.var x) [] cont = .ok t')
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : worklistBasesOnly (leftCoprodBranchWs ws e false L))
+    (hR : worklistBasesOnly (leftCoprodBranchWs ws e true R))
+    (hshapeL : CoprodDerivedBranchShape (coprodPushContL (.var x) cont))
+    (hshapeR : CoprodDerivedBranchShape (coprodPushContR (.var x) cont)) :
+    PhaseEncodeReady t' := by
+  obtain ⟨ht, _, _⟩ := applyObsNeu_coprod_nil_rest_ok_inv fuel σ (.var x) cont hok
+  cases ht
+  exact encodeReady_applyObsNeu_coprod_var_cast x _ _ hws hpref hfr hit
+    (by
+      simpa [leftCoprodBranchWs] using
+        encodeReady_coprodBranch_cast_of_shape hyps e ws false
+          (coprodPushContL (.var x) cont) hL hshapeL)
+    (by
+      simpa [leftCoprodBranchWs] using
+        encodeReady_coprodBranch_cast_of_shape hyps e ws true
+          (coprodPushContR (.var x) cont) hR hshapeR)
+
+theorem encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_branchShape
+    {hyps : Array (Object sig.nBases)} {A L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyPairObsGo (fuel + 2) σ hyps
+      [.exact (.coprod L R) (.var x)] cont = .ok t')
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) A = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : worklistBasesOnly (leftCoprodBranchWs ws e false L))
+    (hR : worklistBasesOnly (leftCoprodBranchWs ws e true R))
+    (hshapeL : CoprodDerivedBranchShape (coprodPushContL (.var x) cont))
+    (hshapeR : CoprodDerivedBranchShape (coprodPushContR (.var x) cont)) :
+    PhaseEncodeReady t' := by
+  rw [applyPairObsGo.eq_def] at hok
+  dsimp only at hok
+  exact encodeReady_applyObsNeu_coprod_var_nil_rest_of_branchShape fuel σ x cont
+    hok hws hpref hfr hit hL hR hshapeL hshapeR
+
+/-- Unit cont is the special case of branch-shape packaging. -/
+theorem encodeReady_applyObsNeu_coprod_var_nil_rest_of_unit_via_shape
+    {hyps : Array (Object sig.nBases)} {L R : Object sig.nBases}
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {ws : List (PosEntry sig)}
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+    {t' : InvTm (Ctx.ofHyps hyps) .unit}
+    (hok : applyObsNeu (fuel + 1) σ hyps (.coprod L R) (.var x) []
+      (.unit : InvTm (Ctx.ofHyps hyps) .unit) = .ok t')
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hfr : forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R)
+    (hit : OriginEnv.ofHyps hyps x = e.origin)
+    (hL : worklistBasesOnly (leftCoprodBranchWs ws e false L))
+    (hR : worklistBasesOnly (leftCoprodBranchWs ws e true R)) :
+    PhaseEncodeReady t' :=
+  encodeReady_applyObsNeu_coprod_var_nil_rest_of_branchShape fuel σ x _
+    hok hws hpref hfr hit hL hR
+    (CoprodDerivedBranchShape_coprodPushContL_unit (.var x))
+    (CoprodDerivedBranchShape_coprodPushContR_unit (.var x))
+
+/--
 `applyPairObsGo` under the **empty / exact-never-only / single exact atom
 nil-rest / single exact coprod-var nil-rest** discipline.
 -/
@@ -5349,11 +5551,11 @@ theorem encodeReady_applyPairObsGo_emptyNeverOrNilRestObs
                 fuel σ x cont hok hws hpref hfr hit hL hR
 
 /--
-Go readiness when atom/coprod push-body facts are **derived** from continuation
-shape (foc-done / sat-of-foc-pos / base-binder letPos around foc-pos / unit)
+Go readiness when atom/coprod push-body facts are **derived** from shapes
 rather than assumed: empty ∪ exact-never-only ∪ single exact base atom with
-derived cont ∪ single exact coprod-var with unit cont and bases-only branch
-schedules.
+`AtomDerivedContShape` ∪ single exact coprod-var with
+`CoprodDerivedBranchShape` on both push bodies (unit cont is the special case
+via `CoprodDerivedBranchShape_coprodPushCont*_unit`).
 -/
 theorem encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -5377,16 +5579,16 @@ theorem encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest
         AtomDerivedContShape cont) ∨
       (∃ (L R : Object sig.nBases)
           (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-          (hA : A = .unit),
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
         entries = [.exact (.coprod L R) (.var x)] ∧
-        cont = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
         OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
         (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        forcedRule (e :: ws) A = .leftCoprod e L R ∧
         OriginEnv.ofHyps hyps x = e.origin ∧
         worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-        worklistBasesOnly (leftCoprodBranchWs ws e true R))) :
+        worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+        CoprodDerivedBranchShape (coprodPushContL (.var x) cont) ∧
+        CoprodDerivedBranchShape (coprodPushContR (.var x) cont))) :
     PhaseEncodeReady t' := by
   cases hdisc with
   | inl h =>
@@ -5405,17 +5607,15 @@ theorem encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest
               exact encodeReady_applyPairObsGo_exact_atom_nil_rest_of_focDone
                 fuel σ n cont hok hws hfr hshape
       | inr h =>
-          obtain ⟨L, R, pref, e, ws, x, hA, heq, hcont, hws, hpref, hfr, hit,
-            hL, hR⟩ := h
+          obtain ⟨L, R, pref, e, ws, x, heq, hws, hpref, hfr, hit, hL, hR,
+            hshapeL, hshapeR⟩ := h
           cases heq
-          cases hA
-          cases hcont
           cases fuel with
           | zero =>
               simp [applyPairObsGo, applyObsNeu] at hok
           | succ fuel =>
-              exact encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_unit
-                fuel σ x hok hws hpref hfr hit hL hR
+              exact encodeReady_applyPairObsGo_exact_coprod_var_nil_rest_of_branchShape
+                fuel σ x cont hok hws hpref hfr hit hL hR hshapeL hshapeR
 
 /-! ### Gaps (RawReferenceProduced → PhaseEncodeReady)
 
@@ -5444,22 +5644,28 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   `encodeReady_applyPairObsGo_exact_atom/coprod_var_nil_rest_of_go`,
   `encodeReady_applyPairObsGo_emptyNeverOrNilRestObs`). Push-body /
   branch readiness **derived** for `AtomDerivedContShape` (foc-done /
-  sat-of-foc-pos / base-binder letPos around foc-pos; `*_of_focDone`) and unit
-  coprod-var (`*_of_unit`) via
+  sat-of-foc-pos / base-binder letPos around foc-pos; `*_of_focDone`) and
+  `CoprodDerivedBranchShape` on push bodies (unit / foc-done / sat;
+  `*_of_branchShape`, unit via `*_of_unit`) via
   `encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest`. Empty schedule:
   `WellInv` intro/focus shapes under bases-only discharge cont readiness
   (`phaseEncodeReady_of_wellInv_*`,
   `encodeReady_applyPairObs_emptyEntries_of_wellInv_intro`) — no ready stash.
-  See `EncodeReadyRawCase`.
+  See `EncodeReadyRawCase`. Coprod branches: `CoprodDerivedBranchShape`
+  (unit / foc-done / sat-of-foc-pos under `ofHyps.push`) + cast onto
+  `leftCoprodBranchWs` (`*_of_branchShape`). Parent
+  `CoprodDerivedContShape` still unit-only.
 * Restricted Raw→ready:
   `EncodeReadyOfRawGoal_emptyOrExactNever_holds`,
   `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds` (assumes push/branch
   ready), `EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds`, and
   `EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived_holds` (empty + WellInv
   intro shapes, or derived nil-rest). Unrestricted `EncodeReadyOfRawGoal`
-  open. Residual: non-unit coprod branches, consistency / mixed multi-entry,
-  general WellInv→ready / letPos bodies beyond foc-pos,
-  `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked.
+  open. Residual: derive `CoprodDerivedBranchShape` from non-unit parent
+  cont (`coprodPushCont` through foc-pos/sat/letPos); pair/lam / abort-never
+  branch bodies; consistency / mixed multi-entry; general WellInv→ready /
+  letPos bodies beyond foc-pos; `encodeReady_ofHyps_push_to_leftCoprodBranch`
+  blocked.
 * `sat_body`: Go codes landed (`encodeICCGo_sat_body_codes`); `EncodeIccStep`
   packaging blocked (sticky encode would need to drop `.foc (.body _)`).
 -/
@@ -5966,16 +6172,16 @@ theorem encodeReady_of_rawReferenceProduced_emptyNeverOrDerivedNilRest
         AtomDerivedContShape t₀) ∨
       (∃ (L R : Object sig.nBases)
           (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-          (hA : A = .unit),
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
         entries.toList = [.exact (.coprod L R) (.var x)] ∧
-        t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
         OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
         (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        forcedRule (e :: ws) A = .leftCoprod e L R ∧
         OriginEnv.ofHyps hyps x = e.origin ∧
         worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-        worklistBasesOnly (leftCoprodBranchWs ws e true R)))
+        worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+        CoprodDerivedBranchShape (coprodPushContL (.var x) t₀) ∧
+        CoprodDerivedBranchShape (coprodPushContR (.var x) t₀)))
     (hdisc_u₀ :
       (exactNeverEntriesOnly entries.toList ∧
         (entries.toList = [] → PhaseEncodeReady u₀) ∧
@@ -5991,16 +6197,16 @@ theorem encodeReady_of_rawReferenceProduced_emptyNeverOrDerivedNilRest
         AtomDerivedContShape u₀) ∨
       (∃ (L R : Object sig.nBases)
           (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-          (hA : A = .unit),
+          (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
         entries.toList = [.exact (.coprod L R) (.var x)] ∧
-        u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
         OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
         (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+        forcedRule (e :: ws) A = .leftCoprod e L R ∧
         OriginEnv.ofHyps hyps x = e.origin ∧
         worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-        worklistBasesOnly (leftCoprodBranchWs ws e true R))) :
+        worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+        CoprodDerivedBranchShape (coprodPushContL (.var x) u₀) ∧
+        CoprodDerivedBranchShape (coprodPushContR (.var x) u₀))) :
     PhaseEncodeReady t := by
   cases hok with
   | inl h =>
@@ -6055,16 +6261,16 @@ def EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest : Prop :=
             AtomDerivedContShape t₀) ∨
           (∃ (L R : Object sig.nBases)
               (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-              (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-              (hA : A = .unit),
+              (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
             entries.toList = [.exact (.coprod L R) (.var x)] ∧
-            t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
             OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
             (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-            forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+            forcedRule (e :: ws) A = .leftCoprod e L R ∧
             OriginEnv.ofHyps hyps x = e.origin ∧
             worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-            worklistBasesOnly (leftCoprodBranchWs ws e true R))) ∧
+            worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+            CoprodDerivedBranchShape (coprodPushContL (.var x) t₀) ∧
+            CoprodDerivedBranchShape (coprodPushContR (.var x) t₀))) ∧
         ((exactNeverEntriesOnly entries.toList ∧
             (entries.toList = [] → PhaseEncodeReady u₀) ∧
             (entries.toList ≠ [] →
@@ -6079,16 +6285,16 @@ def EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest : Prop :=
             AtomDerivedContShape u₀) ∨
           (∃ (L R : Object sig.nBases)
               (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-              (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-              (hA : A = .unit),
+              (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
             entries.toList = [.exact (.coprod L R) (.var x)] ∧
-            u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
             OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
             (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-            forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+            forcedRule (e :: ws) A = .leftCoprod e L R ∧
             OriginEnv.ofHyps hyps x = e.origin ∧
             worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-            worklistBasesOnly (leftCoprodBranchWs ws e true R)))) →
+            worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+            CoprodDerivedBranchShape (coprodPushContL (.var x) u₀) ∧
+            CoprodDerivedBranchShape (coprodPushContR (.var x) u₀)))) →
     PhaseEncodeReady t
 
 theorem EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds :
@@ -6157,16 +6363,16 @@ theorem encodeReady_of_rawReferenceProduced_emptyWellInvIntroOrDerived
           AtomDerivedContShape t₀) ∨
         (∃ (L R : Object sig.nBases)
             (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-            (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-            (hA : A = .unit),
+            (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
           entries.toList = [.exact (.coprod L R) (.var x)] ∧
-          t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
           OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
           (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-          forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+          forcedRule (e :: ws) A = .leftCoprod e L R ∧
           OriginEnv.ofHyps hyps x = e.origin ∧
           worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-          worklistBasesOnly (leftCoprodBranchWs ws e true R))) ∧
+          worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+          CoprodDerivedBranchShape (coprodPushContL (.var x) t₀) ∧
+          CoprodDerivedBranchShape (coprodPushContR (.var x) t₀))) ∧
       ((exactNeverEntriesOnly entries.toList ∧
           (entries.toList = [] → PhaseEncodeReady u₀) ∧
           (entries.toList ≠ [] →
@@ -6181,16 +6387,16 @@ theorem encodeReady_of_rawReferenceProduced_emptyWellInvIntroOrDerived
           AtomDerivedContShape u₀) ∨
         (∃ (L R : Object sig.nBases)
             (pref : List (PosEntry sig)) (e : PosEntry sig) (ws : List (PosEntry sig))
-            (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-            (hA : A = .unit),
+            (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
           entries.toList = [.exact (.coprod L R) (.var x)] ∧
-          u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
           OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
           (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-          forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+          forcedRule (e :: ws) A = .leftCoprod e L R ∧
           OriginEnv.ofHyps hyps x = e.origin ∧
           worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-          worklistBasesOnly (leftCoprodBranchWs ws e true R)))) :
+          worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+          CoprodDerivedBranchShape (coprodPushContL (.var x) u₀) ∧
+          CoprodDerivedBranchShape (coprodPushContR (.var x) u₀)))) :
     PhaseEncodeReady t := by
   cases hdisc with
   | inl h =>
@@ -6243,18 +6449,18 @@ def EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived : Prop :=
               (∃ (L R : Object sig.nBases)
                   (pref : List (PosEntry sig)) (e : PosEntry sig)
                   (ws : List (PosEntry sig))
-                  (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-                  (hA : A = .unit),
+                  (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
                 entries.toList = [.exact (.coprod L R) (.var x)] ∧
-                t₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
                 OriginEnv.posWorklist (OriginEnv.ofHyps hyps) =
                   pref ++ e :: ws ∧
                 (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-                forcedRule (e :: ws) (.unit : Object sig.nBases) =
+                forcedRule (e :: ws) A =
                   .leftCoprod e L R ∧
                 OriginEnv.ofHyps hyps x = e.origin ∧
                 worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-                worklistBasesOnly (leftCoprodBranchWs ws e true R))) ∧
+                worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+                CoprodDerivedBranchShape (coprodPushContL (.var x) t₀) ∧
+                CoprodDerivedBranchShape (coprodPushContR (.var x) t₀))) ∧
             ((exactNeverEntriesOnly entries.toList ∧
                 (entries.toList = [] → PhaseEncodeReady u₀) ∧
                 (entries.toList ≠ [] →
@@ -6273,18 +6479,18 @@ def EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived : Prop :=
               (∃ (L R : Object sig.nBases)
                   (pref : List (PosEntry sig)) (e : PosEntry sig)
                   (ws : List (PosEntry sig))
-                  (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-                  (hA : A = .unit),
+                  (x : Var (Ctx.ofHyps hyps) (.coprod L R)),
                 entries.toList = [.exact (.coprod L R) (.var x)] ∧
-                u₀ = hA ▸ (.unit : InvTm (Ctx.ofHyps hyps) .unit) ∧
                 OriginEnv.posWorklist (OriginEnv.ofHyps hyps) =
                   pref ++ e :: ws ∧
                 (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-                forcedRule (e :: ws) (.unit : Object sig.nBases) =
+                forcedRule (e :: ws) A =
                   .leftCoprod e L R ∧
                 OriginEnv.ofHyps hyps x = e.origin ∧
                 worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-                worklistBasesOnly (leftCoprodBranchWs ws e true R)))))) →
+                worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+                CoprodDerivedBranchShape (coprodPushContL (.var x) u₀) ∧
+                CoprodDerivedBranchShape (coprodPushContR (.var x) u₀)))))) →
     PhaseEncodeReady t
 
 theorem EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived_holds :
