@@ -394,6 +394,35 @@ theorem cc_case_case {Γ : Ctx sig} {A B C D Z : Object sig.nBases}
   refine congrArg₂ ccase ?_ ?_ <;>
     rw [cs_pair_fst_eq, Category.assoc, cs_frame_case]
 
+/-! ### Sum η -/
+
+/--
+A `case` whose two branches ignore the bound variable is that branch.
+This is the semantic content of a saturation split that has not yet used the
+observation: the context grows, the meaning does not.
+-/
+theorem case_weaken_self {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (s : Tm Γ (.coprod A B)) (t : Tm Γ C) :
+    TmEq (.case s (weakenTerm t) (weakenTerm t)) t := by
+  refine ⟨?_⟩
+  intro X ρ
+  simp only [interpret, qm_compose, qm_pair, qm_case, qm_id, qm_distrib,
+    interpret_qm_weakenTerm]
+  have key :
+      csDistrib (quotientObject X) (quotientObject A) (quotientObject B) ≫
+          ccase (cfst (quotientObject X) (quotientObject A) ≫ qm (interpret ρ t))
+            (cfst (quotientObject X) (quotientObject B) ≫ qm (interpret ρ t)) =
+        cfst (quotientObject X)
+            («CΣ».coprodObj (quotientObject A) (quotientObject B)) ≫
+          qm (interpret ρ t) := by
+    refine cs_hom_ext_prod_coprod ?_ ?_
+    · rw [← Category.assoc, csProdSnd_left_csDistrib, cinl_ccase]
+      simp [csProdSnd]
+    · rw [← Category.assoc, csProdSnd_right_csDistrib, cinr_ccase]
+      simp [csProdSnd]
+  rw [key]
+  simp
+
 /-! ### Congruence for substitution -/
 
 theorem subst0_congr {Γ : Ctx sig} {A C : Object sig.nBases}

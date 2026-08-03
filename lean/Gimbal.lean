@@ -29,6 +29,7 @@ import Gimbal.Equality.Focus
 import Gimbal.Equality.Preserve
 import Gimbal.Equality.Opacity
 import Gimbal.Equality.Abstract
+import Gimbal.Equality.Plan
 import Gimbal.Equality.Subformula
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Deduction
