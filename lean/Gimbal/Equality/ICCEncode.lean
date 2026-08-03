@@ -68,6 +68,22 @@ theorem encodeICCGo_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
   -- Both peels yield the same outer case; encode follows that shared peel.
   simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
 
+theorem encodeICCGo_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.case (.var x) (.lam t) (.lam u)) =
+      encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot
+        (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+          (InvTm.rename Rename.exchange t)
+          (InvTm.rename Rename.exchange u))) := by
+  have hforce := forcedRule_cons_coprod e ws hty (.exp Arg Ret)
+  have hpeel := peelCaseOuter_case_lam ε e.origin x t u hit
+  simp [encodeICCGo, hforce, hpeel.1, hpeel.2]
+
 /-! ### Open obligations (design E remaining work)
 
 Tracked as goal Props in `Completeness.lean`:

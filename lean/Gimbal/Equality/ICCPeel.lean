@@ -528,5 +528,121 @@ theorem peelCaseOuter_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
           peelCaseOuter_pair_cases ε o x t₁ t₂ u₁ u₂ hit],
     peelCaseOuter_case_var_hit ε o x (.pair t₁ u₁) (.pair t₂ u₂) hit⟩
 
+/-! ### Peel agreement for ICC `case_lam` -/
+
+theorem NegNeu.unweaken_weaken_var {Γ : Ctx sig} {Arg A : Object sig.nBases}
+    (x : Var Γ A) :
+    NegNeu.unweaken? (B := Arg) (NegNeu.weaken (.var x)) = some (.var x) := by
+  simp [NegNeu.unweaken?, NegNeu.weaken, NegNeu.rename, Rename.weaken]
+
+private theorem peelCaseOuterGo_lam_eq {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (body : InvTm (Γ ▻ Arg) Ret) :
+    peelCaseOuterGo (fuel + 1) ε o (.lam body) =
+      match peelCaseOuterGo fuel (OriginEnv.weaken (A := Arg) ε (.dom 0)) o body with
+      | some ⟨A, B, n, tL, tR⟩ =>
+          match NegNeu.unweaken? n with
+          | some n0 =>
+              some ⟨A, B, n0,
+                .lam (InvTm.rename Rename.exchange tL),
+                .lam (InvTm.rename Rename.exchange tR)⟩
+          | none => none
+      | none => none :=
+  rfl
+
+theorem peelCaseOuterGo_lam_cases {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (fuel : Nat) (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hit : ε x = o)
+    (hfuel : InvTm.size (.case (NegNeu.weaken (B := Arg) (.var x))
+        (InvTm.rename Rename.exchange t)
+        (InvTm.rename Rename.exchange u)) ≤ fuel) :
+    peelCaseOuterGo (fuel + 1) ε o
+        (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+          (InvTm.rename Rename.exchange t)
+          (InvTm.rename Rename.exchange u))) =
+      some ⟨A, B, .var x,
+        .lam (InvTm.rename Rename.exchange (InvTm.rename Rename.exchange t)),
+        .lam (InvTm.rename Rename.exchange (InvTm.rename Rename.exchange u))⟩ := by
+  have hit' : OriginEnv.weaken (A := Arg) ε (.dom 0) (.there x) = o := by
+    simpa [OriginEnv.weaken, OriginEnv.snoc] using hit
+  have hpos : 0 < InvTm.size
+      (.case (NegNeu.weaken (B := Arg) (.var x))
+        (InvTm.rename Rename.exchange t)
+        (InvTm.rename Rename.exchange u) : InvTm (Γ ▻ Arg) Ret) := by
+    simp only [InvTm.size]; omega
+  have hfuel_pos : 0 < fuel := Nat.lt_of_lt_of_le hpos hfuel
+  obtain ⟨fuel', rfl⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hfuel_pos)
+  have hbody :
+      peelCaseOuterGo (fuel' + 1) (OriginEnv.weaken (A := Arg) ε (.dom 0)) o
+          (.case (.var (.there x))
+            (InvTm.rename Rename.exchange t)
+            (InvTm.rename Rename.exchange u)) =
+        some ⟨A, B, .var (.there x),
+          InvTm.rename Rename.exchange t,
+          InvTm.rename Rename.exchange u⟩ :=
+    peelCaseOuterGo_case_var_hit fuel'
+      (OriginEnv.weaken (A := Arg) ε (.dom 0)) o (.there x)
+      (InvTm.rename Rename.exchange t) (InvTm.rename Rename.exchange u) hit'
+  rw [peelCaseOuterGo_lam_eq]
+  have hbody' :
+      peelCaseOuterGo (fuel' + 1) (OriginEnv.weaken (A := Arg) ε (.dom 0)) o
+          (.case (NegNeu.weaken (B := Arg) (.var x))
+            (InvTm.rename Rename.exchange t)
+            (InvTm.rename Rename.exchange u)) =
+        some ⟨A, B, .var (.there x),
+          InvTm.rename Rename.exchange t,
+          InvTm.rename Rename.exchange u⟩ := by
+    simpa [NegNeu.weaken, NegNeu.rename, Rename.weaken] using hbody
+  rw [hbody']
+  simp [NegNeu.unweaken?]
+
+theorem peelCaseOuter_lam_cases {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hit : ε x = o) :
+    peelCaseOuter ε o
+        (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+          (InvTm.rename Rename.exchange t)
+          (InvTm.rename Rename.exchange u))) =
+      some ⟨A, B, .var x, .lam t, .lam u⟩ := by
+  unfold peelCaseOuter
+  set body :=
+    (.case (NegNeu.weaken (B := Arg) (.var x))
+      (InvTm.rename Rename.exchange t)
+      (InvTm.rename Rename.exchange u) : InvTm (Γ ▻ Arg) Ret)
+  set tm := (.lam body : InvTm Γ (.exp Arg Ret))
+  have hsz : InvTm.size tm = InvTm.size body + 1 := by simp [tm, body, InvTm.size]
+  have hpos : 0 < InvTm.size tm := by
+    have : 0 < InvTm.size body := by simp only [body, InvTm.size]; omega
+    omega
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  have hfuel : InvTm.size body ≤ fuel := by omega
+  have hgo := peelCaseOuterGo_lam_cases fuel ε o x t u hit (by simpa [body] using hfuel)
+  have ht : InvTm.rename Rename.exchange (InvTm.rename Rename.exchange t) = t :=
+    InvTm.rename_exchange_exchange t
+  have hu : InvTm.rename Rename.exchange (InvTm.rename Rename.exchange u) = u :=
+    InvTm.rename_exchange_exchange u
+  simpa [tm, body, hm, ht, hu] using hgo
+
+/-- Both sides of `ICCEq.case_lam` peel to the same outer case. -/
+theorem peelCaseOuter_case_lam {Γ : Ctx sig} {A B Arg Ret : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (x : Var Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A ▻ Arg) Ret) (u : InvTm (Γ ▻ B ▻ Arg) Ret)
+    (hit : ε x = o) :
+    peelCaseOuter ε o (.case (.var x) (.lam t) (.lam u)) =
+      peelCaseOuter ε o
+        (.lam (.case (NegNeu.weaken (B := Arg) (.var x))
+          (InvTm.rename Rename.exchange t)
+          (InvTm.rename Rename.exchange u))) ∧
+    peelCaseOuter ε o (.case (.var x) (.lam t) (.lam u)) =
+      some ⟨A, B, .var x, .lam t, .lam u⟩ :=
+  ⟨by rw [peelCaseOuter_case_var_hit ε o x (.lam t) (.lam u) hit,
+          peelCaseOuter_lam_cases ε o x t u hit],
+    peelCaseOuter_case_var_hit ε o x (.lam t) (.lam u) hit⟩
+
 end Equality
 end Gimbal
