@@ -246,9 +246,11 @@ Blocked / WIP:
    ~~branch schedule algebra (`rekeyHypToSplit`,
    `posWorklist_rekey_weaken_hyp_to_split`, `pushPos_cons_of_blt_head`,
    `leftCoprod_branch_schedule_gap` → `e :: leftCoprodBranchWs`)~~ /
-   ~~empty-schedule unit/foc-done shapes~~ landed; still need
-   EncodeReady under encode branch schedule (not ofHyps drop-`e`), and general
-   `WellInv`→ready)
+   ~~branch EncodeReady unit/foc under `leftCoprodBranchWs`
+   (`encodeReady_unit_leftCoprodBranch`, `*_cast_unit`)~~ /
+   ~~empty-schedule unit/foc-done shapes~~ landed; still need general
+   EncodeReady under encode branch schedule (non-bases) toward
+   `encodeReady_of_rawReferenceProduced`, and general `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
