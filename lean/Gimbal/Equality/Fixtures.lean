@@ -413,6 +413,44 @@ def iccCaseCaseOriented : Bool :=
 
 example : iccCaseCaseOriented = true := by native_decide
 
+/--
+Known gap (8F uniqueness): after `Rename.exchange`, `caseCommute` on the
+raw exchange-images and `caseCommute` on their canonical forms can yield two
+*different* `canonicalize`-fixed points. `NegNeu.blt` flips under exchange, so
+re-orienting during `caseCommute` is not the same as canonicalizing first.
+Pins current behaviour until the rewriter re-canonicalizes after exchange (or
+gains an exchange-invariant orientation).
+-/
+def iccExchangeCanonNotUnique : Bool :=
+  let Sig : Signature := ⟨1, #[]⟩
+  let X : Object 1 := .base 0
+  let S : Object 1 := .coprod X X
+  let SS : Object 1 := .coprod S S
+  let Γ : Ctx Sig := Ctx.empty ▻ X ▻ SS
+  let Δ : Ctx Sig := Γ ▻ S ▻ S
+  let x0 : NegNeu Γ X := .var (.there .here)
+  let x1 := NegNeu.weaken (B := S) x0
+  let x2 := NegNeu.weaken (B := S) x1
+  let x3 := NegNeu.weaken (B := X) x2
+  let x4 := NegNeu.weaken (B := X) x3
+  let lf : InvTm (Δ ▻ X ▻ X) X := .foc (.pos (.done (.neu x4)))
+  let body : InvTm Δ X :=
+    .case (.var .here : NegNeu Δ S)
+      (.case (NegNeu.weaken (.var (.there .here) : NegNeu Δ S)) lf lf)
+      (.case (NegNeu.weaken (.var (.there .here) : NegNeu Δ S)) lf lf)
+  let bodyEx :=
+    InvTm.rename (Rename.exchange (sig := Sig) (Γ := Γ) (A := S) (B := S)) body
+  let nW : NegNeu (Γ ▻ S) SS := NegNeu.weaken (.var .here : NegNeu Γ SS)
+  let r := caseCommute nW bodyEx bodyEx
+  let r2 := caseCommute nW (canonicalize bodyEx) (canonicalize bodyEx)
+  InvTm.beq body (canonicalize body) &&
+    !InvTm.beq bodyEx (canonicalize bodyEx) &&
+    InvTm.beq r (canonicalize r) &&
+    InvTm.beq r2 (canonicalize r2) &&
+    !InvTm.beq r r2
+
+example : iccExchangeCanonNotUnique = true := by native_decide
+
 /-- Focusing produces well-focused terms (phase polarity OK). -/
 def focusIdWellFocused : Bool :=
   match focus! (translate (sig := NumSig) (.id Number)) with
