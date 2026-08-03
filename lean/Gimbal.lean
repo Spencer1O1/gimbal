@@ -38,6 +38,7 @@ import Gimbal.Equality.ReachSound
 import Gimbal.Equality.ReachComplete
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.SatPreserve
+import Gimbal.Equality.SatWell
 import Gimbal.Equality.ExactObs
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
