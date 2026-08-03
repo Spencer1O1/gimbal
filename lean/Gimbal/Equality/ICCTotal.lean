@@ -1030,11 +1030,10 @@ theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
 
 `ICCEq.sat_body` unwraps `.foc (.sat _)` to the body. Encode of sat under
 `forcedRule = .focus` yields `.foc (.body c)` while encode of the body yields
-`c`, so codes are **not** equal: `EncodeIccStep` does not hold for `sat_body`
-in general. No clean packaging-only fix via `ICCEq.sat_body` alone (would need
-code-level body erasure or a restricted `EncodeIccStep` domain). Status:
-`encodeICCGo_sat_body_codes` records the Go relationship; leave `EncodeIccStep`
-open.
+`c`, so codes are **not** equal: `EncodeIccStep` does **not** hold for
+`sat_body` whenever the body encodes (proved below). Bridging via
+`ICCEq.sat_body` alone cannot repair this without changing encode (sticky:
+drop the `.foc (.body _)` shell) or weakening `EncodeIccStep`.
 
 `ICCEq.case_letPos` peel agreement and Go/`EncodeIccStep` packaging are landed
 below (`encodeIccStep_case_letPos`).
@@ -1080,6 +1079,13 @@ theorem encodeICCGo_sat_body_codes {Γ : Ctx sig} {A : Object sig.nBases}
       (encodeICCGo fuel ws ε domNest obsSlot t).map fun c => .foc (.body c) := by
   rw [encodeICCGo_foc_sat_eq fuel ws ε domNest obsSlot s t hfr]
   cases encodeICCGo fuel ws ε domNest obsSlot t <;> rfl
+
+/-!
+`EncodeIccStep` for `ICCEq.sat_body` is **blocked** under the current encoder:
+`encodeICCGo_sat_body_codes` shows sat maps to `.foc (.body c)` while the body
+maps to `c`. Packaging as `EncodeIccStep` would require sticky encode erasure
+(return `c` for sat) or a weaker step relation. Not claimed.
+-/
 
 /-! ### EncodeTotal base witnesses -/
 
@@ -3248,6 +3254,95 @@ theorem encodeReady_foc_sat_leftCoprodBranch
   encodeReady_foc_sat_basesOnly _ _ 0 0 s t hbr hfr ht
 
 /-!
+Non-base `pushPos` payloads under branch schedules: the only positive non-base
+objects are `.never` and `.coprod _ _`. Negative payloads are not inserted
+(schedule stays bases-only if the parent tail was). Nested coprod still needs
+`leftCoprod_peel` / `leftCoprod_unitEta` under the inserted split entry.
+Never payloads are discharged below via `worklistBasesOrNever`.
+-/
+
+/-- Worklist entries are bases or `never` (abort-capable after stripping bases). -/
+def worklistBasesOrNever (ws : List (PosEntry sig)) : Prop :=
+  ∀ e ∈ ws, (∃ b : Fin sig.nBases, e.ty = .base b) ∨ e.ty = .never
+
+/-- Abort is encode-ready on a bases/`never` worklist that actually contains `never`. -/
+theorem encodeReady_abort_basesOrNever {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (n : NegNeu Γ .never)
+    (hws : worklistBasesOrNever ws)
+    (hne : ∃ e ∈ ws, e.ty = .never) :
+    EncodeReady ws ε domNest obsSlot (.abort (A := A) n) := by
+  induction ws with
+  | nil =>
+      obtain ⟨_, he, _⟩ := hne
+      cases he
+  | cons e ws ih =>
+      match hws e (List.Mem.head _) with
+      | .inl ⟨b, hb⟩ =>
+          refine .moveStable (forcedRule_cons_base_moveStable e ws hb A)
+            (ih (fun e' he' => hws e' (List.Mem.tail _ he')) ?_)
+          obtain ⟨e', he', hty⟩ := hne
+          cases he' with
+          | head =>
+              cases hty ▸ hb
+          | tail _ hmem =>
+              exact ⟨e', hmem, hty⟩
+      | .inr hnever =>
+          exact .leftNever hnever
+
+theorem leftCoprodBranchWs_basesOrNever_never
+    (ws : List (PosEntry sig)) (e : PosEntry sig) (side : Bool)
+    (hws : worklistBasesOnly ws) :
+    worklistBasesOrNever (leftCoprodBranchWs ws e side .never) := by
+  intro e' he'
+  have he'' :
+      e' ∈ ({ origin := .split e.origin side, ty := (.never : Object sig.nBases) } :: ws).mergeSort
+        fun a b => Origin.ble a.origin b.origin := by
+    simpa [leftCoprodBranchWs, pushPos, objectPolarity_never] using he'
+  have he_mem :
+      e' ∈ { origin := .split e.origin side, ty := (.never : Object sig.nBases) } :: ws :=
+    List.mem_mergeSort.mp he''
+  cases he_mem with
+  | head => exact Or.inr rfl
+  | tail _ hmem => exact Or.inl (hws e' hmem)
+
+theorem mem_never_of_leftCoprodBranchWs_never
+    (ws : List (PosEntry sig)) (e : PosEntry sig) (side : Bool) :
+    ∃ e' ∈ leftCoprodBranchWs ws e side .never, e'.ty = .never := by
+  refine ⟨⟨.split e.origin side, .never⟩, ?_, rfl⟩
+  dsimp only [leftCoprodBranchWs, pushPos]
+  simp only [objectPolarity_never, BEq.rfl, ↓reduceIte]
+  exact List.mem_mergeSort.mpr (List.Mem.head _)
+
+/-- Abort under a never-payload encode branch schedule (parent tail bases-only). -/
+theorem encodeReady_abort_leftCoprodBranch_never
+    (hyps : Array (Object sig.nBases)) {A : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (hws : worklistBasesOnly ws)
+    (n : NegNeu (Ctx.ofHyps hyps ▻ .never) .never) :
+    EncodeReady (leftCoprodBranchWs ws e side .never)
+      (OriginEnv.weaken (A := .never) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0 (.abort (A := A) n) :=
+  encodeReady_abort_basesOrNever _ _ 0 0 n
+    (leftCoprodBranchWs_basesOrNever_never ws e side hws)
+    (mem_never_of_leftCoprodBranchWs_never ws e side)
+
+/-- Bases-only fails as soon as a `never` or nested `coprod` sits on the worklist. -/
+theorem not_worklistBasesOnly_of_never_or_coprod
+    {ws : List (PosEntry sig)}
+    (hne : ∃ e ∈ ws,
+      e.ty = .never ∨ ∃ L R : Object sig.nBases, e.ty = .coprod L R) :
+    ¬ worklistBasesOnly ws := by
+  intro hws
+  obtain ⟨e, he, hty⟩ := hne
+  obtain ⟨b, hb⟩ := hws e he
+  cases hty with
+  | inl hnever => cases hnever ▸ hb
+  | inr h =>
+      obtain ⟨L, R, hcoprod⟩ := h
+      cases hcoprod ▸ hb
+
+/-!
 Same-term transport `EncodeReady` on `ofHyps.push` → `leftCoprodBranchWs` is
 **not** available: if the parent head is left-coprod, keeping that head forces
 peel/unit-η, while encode's branch schedule is `leftCoprodBranchWs` alone.
@@ -3907,6 +4002,46 @@ theorem encodeReady_applyPairObs_emptyEntries {hyps : Array (Object sig.nBases)}
       simp only [hempty] at hok
       exact encodeReady_applyPairObsGo_nil fuel σ cont hcont hok
 
+/--
+`applyObsNeu` on `.never` returns abort. Phase-ready when the ofHyps worklist
+exposes a `never` head after a bases/`moveStable` prefix.
+-/
+theorem encodeReady_applyObsNeu_never {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (fuel : Nat) (σ : ReachState sig.nBases)
+    (nP : NegNeu (Ctx.ofHyps hyps) .never)
+    (rest : List (PairEntry sig hyps))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyObsNeu (fuel + 1) σ hyps .never nP rest cont = .ok t')
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {suf : List (PosEntry sig)}
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hty : e.ty = .never) :
+    PhaseEncodeReady t' := by
+  simp [applyObsNeu] at hok
+  subst t'
+  exact encodeReady_abort_of_posWorklist_never nP hws hpref hty
+
+/-- Exact `.never` schedule head: `applyPairObsGo` steps to abort packaging. -/
+theorem encodeReady_applyPairObsGo_exact_never {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (fuel : Nat) (σ : ReachState sig.nBases)
+    (n : NegNeu (Ctx.ofHyps hyps) .never)
+    (rest : List (PairEntry sig hyps))
+    (cont : InvTm (Ctx.ofHyps hyps) A)
+    {t' : InvTm (Ctx.ofHyps hyps) A}
+    (hok : applyPairObsGo (fuel + 1) σ hyps (.exact .never n :: rest) cont = .ok t')
+    {pref : List (PosEntry sig)} {e : PosEntry sig} {suf : List (PosEntry sig)}
+    (hws : OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf)
+    (hpref : ∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b)
+    (hty : e.ty = .never) :
+    PhaseEncodeReady t' := by
+  rw [applyPairObsGo.eq_def] at hok
+  dsimp only at hok
+  cases fuel with
+  | zero => simp [applyObsNeu] at hok
+  | succ fuel =>
+      exact encodeReady_applyObsNeu_never fuel σ n rest cont hok hws hpref hty
+
 /-! ### Coprod `applyObsNeu` → outer `case` (var scrutinee) -/
 
 /--
@@ -4062,96 +4197,97 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
 * ~~Coprod observation → outer `case` (var hit) + ready split branches~~
   **Landed** as packaging (`encodeReady_applyObsNeu_coprod_var`); schedule
   algebra closed (`pushPos_cons_of_blt_head`, `leftCoprod_branch_schedule_gap`
-  → `e :: leftCoprodBranchWs`). Branch-schedule EncodeReady for base-only
-  unit/foc shapes landed (`encodeReady_unit_leftCoprodBranch`,
-  `encodeReady_*_leftCoprodBranch`, `encodeReady_applyObsNeu_coprod_var_cast_unit`).
-  Branch EncodeReady under `leftCoprodBranchWs` extended beyond unit/foc to
-  base-only pair/lam/sat (`encodeReady_pair/lam/foc_sat_leftCoprodBranch`).
-  Same-term `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (status
-  marker); induction motive must target encode branch schedule.
-  Still need non-base branch payloads and full `encodeReady_of_rawReferenceProduced`.
-* Empty-schedule: shape-directed unit / foc-done under nil or base-only+focus
-  landed (`phaseEncodeReady_unit_nil_worklist`, `phaseEncodeReady_foc_*_bases_focus`);
-  narrow raw→ready slices for those shapes landed below; general
-  `WellInv`→ready without stash still open.
-* `sat_body`: Go codes landed (`encodeICCGo_sat_body_codes`); **no** clean
-  `EncodeIccStep` via packaging alone (`.foc (.body _)` vs body); leave open.
+  → `e :: leftCoprodBranchWs`). Branch EncodeReady: bases-only shapes +
+  never-payload abort (`encodeReady_abort_leftCoprodBranch_never`). Nested
+  coprod payloads still need peel/unit-η under the inserted split entry.
+  Same-term `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked.
+* Empty / inconsistent / exact-never schedule steps packaged
+  (`encodeReady_applyPairObsGo_nil`, `encodeReady_applyPairObs_inconsistent`,
+  `encodeReady_applyObsNeu_never`, `encodeReady_applyPairObsGo_exact_never`).
+  Full Go induction for atom+coprod-var still open; see `EncodeReadyRawCase`.
+* `sat_body`: Go codes landed (`encodeICCGo_sat_body_codes`); `EncodeIccStep`
+  packaging blocked (sticky encode would need to drop `.foc (.body _)`).
 -/
 
 /--
-Partial readiness from **extra** case data (not from raw alone): empty schedule
-with a ready continuation, inconsistent abort with never-on-worklist,
-base-only atom `letPos` from a full-ready push body, var-scrutinee coprod
-`case` with split-ready branches, or base-only branch schedules with unit
-cast bodies (`encodeReady_applyObsNeu_coprod_var_cast_unit`).
+Named fragment of phase-ready case data toward `EncodeReadyOfRawGoal`: empty
+schedule + ready cont, inconsistent never, base-only atom `letPos`,
+coprod-var with split-ready branches, or bases-only unit cast branches.
+Does **not** alone imply the case data from raw production.
+-/
+def EncodeReadyRawCase {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
+  (∃ (fuel : Nat) (σ : ReachState sig.nBases)
+      (entries : Array (PairEntry sig hyps))
+      (cont : InvTm (Ctx.ofHyps hyps) A),
+    PhaseEncodeReady cont ∧
+    entries.toList = [] ∧
+    σ.inconsistent = false ∧
+    (applyPairObs fuel σ hyps entries cont = .ok t)) ∨
+  (∃ (fuel : Nat) (σ : ReachState sig.nBases)
+      (entries : Array (PairEntry sig hyps))
+      (cont : InvTm (Ctx.ofHyps hyps) A)
+      (pref : List (PosEntry sig)) (e : PosEntry sig)
+      (suf : List (PosEntry sig)),
+    σ.inconsistent = true ∧
+    OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
+    (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+    e.ty = .never ∧
+    applyPairObs fuel σ hyps entries cont = .ok t) ∨
+  (∃ (P : Object sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) P)
+      (body : InvTm (Ctx.ofHyps (hyps.push P)) A),
+    (∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b) ∧
+    forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+    EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 body ∧
+    t = .foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body))) ∨
+  (∃ (L R : Object sig.nBases)
+      (pref : List (PosEntry sig)) (e : PosEntry sig)
+      (ws : List (PosEntry sig))
+      (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+      (tL : InvTm (Ctx.ofHyps hyps ▻ L) A)
+      (tR : InvTm (Ctx.ofHyps hyps ▻ R) A),
+    OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+    (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+    forcedRule (e :: ws) A = .leftCoprod e L R ∧
+    OriginEnv.ofHyps hyps x = e.origin ∧
+    EncodeReady
+      (pushPos ws (.split e.origin false) L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
+        (.split e.origin false)) 0 0 tL ∧
+    EncodeReady
+      (pushPos ws (.split e.origin true) R)
+      (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps)
+        (.split e.origin true)) 0 0 tR ∧
+    t = .case (.var x) tL tR) ∨
+  (∃ (L R : Object sig.nBases)
+      (pref : List (PosEntry sig)) (e : PosEntry sig)
+      (ws : List (PosEntry sig))
+      (x : Var (Ctx.ofHyps hyps) (.coprod L R))
+      (t' : InvTm (Ctx.ofHyps hyps) .unit)
+      (hA : A = .unit),
+    OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
+    (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
+    forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
+    OriginEnv.ofHyps hyps x = e.origin ∧
+    worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
+    worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
+    t' = .case (.var x)
+      (InvTm.castCtx (Ctx.ofHyps_push hyps L)
+        (.unit : InvTm (Ctx.ofHyps (hyps.push L)) .unit))
+      (InvTm.castCtx (Ctx.ofHyps_push hyps R)
+        (.unit : InvTm (Ctx.ofHyps (hyps.push R)) .unit)) ∧
+    t = hA ▸ t')
+
+/--
+Partial readiness from `EncodeReadyRawCase` (extra case data, not from raw alone).
 -/
 theorem phaseEncodeReady_of_applyPairObs_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     {t : InvTm (Ctx.ofHyps hyps) A}
-    (hcase :
-      (∃ (fuel : Nat) (σ : ReachState sig.nBases)
-          (entries : Array (PairEntry sig hyps))
-          (cont : InvTm (Ctx.ofHyps hyps) A),
-        PhaseEncodeReady cont ∧
-        entries.toList = [] ∧
-        σ.inconsistent = false ∧
-        (applyPairObs fuel σ hyps entries cont = .ok t)) ∨
-      (∃ (fuel : Nat) (σ : ReachState sig.nBases)
-          (entries : Array (PairEntry sig hyps))
-          (cont : InvTm (Ctx.ofHyps hyps) A)
-          (pref : List (PosEntry sig)) (e : PosEntry sig)
-          (suf : List (PosEntry sig)),
-        σ.inconsistent = true ∧
-        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
-        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        e.ty = .never ∧
-        applyPairObs fuel σ hyps entries cont = .ok t) ∨
-      (∃ (P : Object sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) P)
-          (body : InvTm (Ctx.ofHyps (hyps.push P)) A),
-        (∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
-          ∃ b : Fin sig.nBases, e.ty = .base b) ∧
-        forcedRule ([] : List (PosEntry sig)) A = .focus ∧
-        EncodeReady
-          (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
-          (OriginEnv.ofHyps (hyps.push P)) 0 0 body ∧
-        t = .foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body))) ∨
-      (∃ (L R : Object sig.nBases)
-          (pref : List (PosEntry sig)) (e : PosEntry sig)
-          (ws : List (PosEntry sig))
-          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-          (tL : InvTm (Ctx.ofHyps hyps ▻ L) A)
-          (tR : InvTm (Ctx.ofHyps hyps ▻ R) A),
-        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
-        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        forcedRule (e :: ws) A = .leftCoprod e L R ∧
-        OriginEnv.ofHyps hyps x = e.origin ∧
-        EncodeReady
-          (pushPos ws (.split e.origin false) L)
-          (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
-            (.split e.origin false)) 0 0 tL ∧
-        EncodeReady
-          (pushPos ws (.split e.origin true) R)
-          (OriginEnv.weaken (A := R) (OriginEnv.ofHyps hyps)
-            (.split e.origin true)) 0 0 tR ∧
-        t = .case (.var x) tL tR) ∨
-      (∃ (L R : Object sig.nBases)
-          (pref : List (PosEntry sig)) (e : PosEntry sig)
-          (ws : List (PosEntry sig))
-          (x : Var (Ctx.ofHyps hyps) (.coprod L R))
-          (t' : InvTm (Ctx.ofHyps hyps) .unit)
-          (hA : A = .unit),
-        OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: ws ∧
-        (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
-        forcedRule (e :: ws) (.unit : Object sig.nBases) = .leftCoprod e L R ∧
-        OriginEnv.ofHyps hyps x = e.origin ∧
-        worklistBasesOnly (leftCoprodBranchWs ws e false L) ∧
-        worklistBasesOnly (leftCoprodBranchWs ws e true R) ∧
-        t' = .case (.var x)
-          (InvTm.castCtx (Ctx.ofHyps_push hyps L)
-            (.unit : InvTm (Ctx.ofHyps (hyps.push L)) .unit))
-          (InvTm.castCtx (Ctx.ofHyps_push hyps R)
-            (.unit : InvTm (Ctx.ofHyps (hyps.push R)) .unit)) ∧
-        t = hA ▸ t')) :
+    (hcase : EncodeReadyRawCase t) :
     PhaseEncodeReady t := by
   cases hcase with
   | inl h =>
@@ -4181,7 +4317,16 @@ theorem phaseEncodeReady_of_applyPairObs_partial
                   exact encodeReady_applyObsNeu_coprod_var_cast_unit
                     x hws hpref hfr hit hL hR
 
-/-- Partial certify when readiness is supplied by the partial cases above. -/
+/-- Raw + `EncodeReadyRawCase` ⇒ certified (fragment certify, not full Raw→ready). -/
+theorem certifyReferenceProduced_of_EncodeReadyRawCase
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {t : InvTm (Ctx.ofHyps hyps) A}
+    (hraw : RawReferenceProduced t)
+    (hcase : EncodeReadyRawCase t) :
+    CertifiedReferenceProduced t :=
+  ⟨hraw, phaseEncodeReady_of_applyPairObs_partial hcase⟩
+
+/-- Partial certify when readiness is already known. -/
 theorem certifyReferenceProduced_of_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     {t : InvTm (Ctx.ofHyps hyps) A}

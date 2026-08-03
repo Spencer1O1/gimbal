@@ -253,18 +253,22 @@ Blocked / WIP:
    ~~partial enlarged with bases-only unit cast arm~~ /
    ~~narrow raw→ready slices (`encodeReady_of_rawReferenceProduced_unit_nil`,
    `*_foc_pos_bases`)~~ /
+   ~~never-payload branch abort (`encodeReady_abort_leftCoprodBranch_never`)~~ /
+   ~~`EncodeReadyRawCase` + `certifyReferenceProduced_of_EncodeReadyRawCase`~~ /
+   ~~exact-never Go step (`encodeReady_applyPairObsGo_exact_never`)~~ /
    ~~empty-schedule unit/foc-done shapes~~ landed; same-term
    `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
-   head); still need non-base branch payloads + full
-   `encodeReady_of_rawReferenceProduced`, and general `WellInv`→ready)
+   head); nested-coprod branch payloads still need peel/unit-η; still need full
+   `encodeReady_of_rawReferenceProduced` (atom+coprod Go induction), and general
+   `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
    full `ofHyps` induction and reflection beyond unit/abort remain.
    `ICCCompleteness` needs both + encodability — never `none = none` as ICC.
    New gens ~~`case_letPos`~~ packaged (`encodeIccStep_case_letPos`); `sat_body`
-   has Go code relationship (`encodeICCGo_sat_body_codes`) but **no** clean
-   `EncodeIccStep` via packaging (`.foc (.body _)` vs body); leave open.
+   **blocked** as `EncodeIccStep` (`encodeICCGo_sat_body_codes`; encode keeps
+   `.foc (.body _)` shell — sticky to erase).
 5. Switch `referenceStructEq` / `referenceCompare` to `ICCCode` equality
    (`beq_iff_eq`) only after EncodeTotal + both characterization directions;
    erase public `2048` / fuel from the total API
