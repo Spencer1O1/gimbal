@@ -40,6 +40,7 @@ import Gimbal.Equality.Saturation
 import Gimbal.Equality.SatPreserve
 import Gimbal.Equality.SatWell
 import Gimbal.Equality.ExactObs
+import Gimbal.Equality.SatSchedule
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon

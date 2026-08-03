@@ -64,7 +64,8 @@ theorem caseCommute_icc {Γ : Ctx sig} {A B C : Object sig.nBases}
       rename_i hn₂ _t₁ _t₂' _u₁ _u₂' n₁ m₁ hn₁ hbeq ih2 ih1
       have h₁ := NegNeu.eq_weaken_of_unweaken? n₁ m₁ hn₁
       have h₂ := NegNeu.eq_weaken_of_unweaken? _ _ hn₂
-      obtain ⟨_, hm⟩ := NegNeu.eq_of_beq _ _ hbeq
+      rw [Bool.and_eq_true] at hbeq
+      obtain ⟨_, hm⟩ := NegNeu.eq_of_beq _ _ hbeq.1
       cases eq_of_heq hm
       subst h₁
       subst h₂

@@ -128,7 +128,11 @@ def caseCommute {Γ : Ctx sig} {A B C : Object sig.nBases}
             if hR : R = R' then
               match NegNeu.unweaken? n₁, NegNeu.unweaken? n₂ with
               | some m₁, some m₂ =>
-                if NegNeu.beq m₁ m₂ then
+                -- The conversion is symmetric, so it is only applied in the
+                -- direction that puts the smaller scrutinee outermost;
+                -- otherwise canonicalization would oscillate between the two
+                -- nestings instead of being idempotent.
+                if NegNeu.beq m₁ m₂ && NegNeu.blt m₁ n then
                   let t₂' : InvTm (Γ ▻ B ▻ L) _ := hL.symm ▸ t₂
                   let u₂' : InvTm (Γ ▻ B ▻ R) _ := hR.symm ▸ u₂
                   .case m₁

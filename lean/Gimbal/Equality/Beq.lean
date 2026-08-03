@@ -77,6 +77,75 @@ def FocTm.beq : {Γ Δ : Ctx sig} → {A B : Object sig.nBases} →
   | _, _, _, _, _, _ => false
 end
 
+/-! ### A total structural order on raw focused syntax
+
+The nested `case`/`case` commuting conversion is symmetric: it can move either
+scrutinee outward. Orienting it needs a total order on scrutinees, and the order
+has to be stable under weakening, since the conversion re-weakens the scrutinee
+it pushes inward. Comparing raw syntax lexicographically, with de Bruijn indices
+compared numerically, is such an order: weakening shifts free indices by a
+strictly monotone map and leaves the tree shape alone.
+-/
+
+mutual
+def RawNeu.cmp : RawNeu → RawNeu → Ordering
+  | .var i, .var j => compare i j
+  | .var _, _ => .lt
+  | _, .var _ => .gt
+  | .app n a, .app m b => (RawNeu.cmp n m).then (RawFocused.cmp a b)
+  | .app .., _ => .lt
+  | _, .app .. => .gt
+  | .fst n, .fst m => RawNeu.cmp n m
+  | .fst _, _ => .lt
+  | _, .fst _ => .gt
+  | .snd n, .snd m => RawNeu.cmp n m
+
+def RawPos.cmp : RawPos → RawPos → Ordering
+  | .neu n, .neu m => RawNeu.cmp n m
+  | .neu _, _ => .lt
+  | _, .neu _ => .gt
+  | .inl p, .inl q => RawPos.cmp p q
+  | .inl _, _ => .lt
+  | _, .inl _ => .gt
+  | .inr p, .inr q => RawPos.cmp p q
+  | .inr _, _ => .lt
+  | _, .inr _ => .gt
+  | .val t, .val u => RawFocused.cmp t u
+
+def RawFocused.cmp : RawFocused → RawFocused → Ordering
+  | .unit, .unit => .eq
+  | .unit, _ => .lt
+  | _, .unit => .gt
+  | .pair t₁ t₂, .pair u₁ u₂ => (RawFocused.cmp t₁ u₁).then (RawFocused.cmp t₂ u₂)
+  | .pair .., _ => .lt
+  | _, .pair .. => .gt
+  | .lam t, .lam u => RawFocused.cmp t u
+  | .lam _, _ => .lt
+  | _, .lam _ => .gt
+  | .case n t₁ t₂, .case m u₁ u₂ =>
+      ((RawNeu.cmp n m).then (RawFocused.cmp t₁ u₁)).then (RawFocused.cmp t₂ u₂)
+  | .case .., _ => .lt
+  | _, .case .. => .gt
+  | .abort n, .abort m => RawNeu.cmp n m
+  | .abort _, _ => .lt
+  | _, .abort _ => .gt
+  | .pos p, .pos q => RawPos.cmp p q
+  | .pos _, _ => .lt
+  | _, .pos _ => .gt
+  | .neg n, .neg m => RawNeu.cmp n m
+  | .neg _, _ => .lt
+  | _, .neg _ => .gt
+  | .letPos n t, .letPos m u => (RawNeu.cmp n m).then (RawFocused.cmp t u)
+  | .letPos .., _ => .lt
+  | _, .letPos .. => .gt
+  | .sat k t, .sat l u => (compare k l).then (RawFocused.cmp t u)
+end
+
+/-- Strict order on typed neutrals, via their raw form. -/
+def NegNeu.blt {Γ Δ : Ctx sig} {A B : Object sig.nBases}
+    (n : NegNeu Γ A) (m : NegNeu Δ B) : Bool :=
+  RawNeu.cmp (NegNeu.toRaw n) (NegNeu.toRaw m) == .lt
+
 /-!
 Soundness of the typed comparison. For neutrals it also returns the type
 equality: that is what makes replacing an occurrence by the abstraction
