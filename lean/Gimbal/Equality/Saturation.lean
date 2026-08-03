@@ -766,14 +766,61 @@ def pairObsOrderIndices {sig : Signature} {hyps : Array (Object sig.nBases)}
     pure out
 
 /--
+The positions emitted by `pairObsOrderIndices`, cleaned up into a genuine
+permutation of `[0, entries.size)`: out-of-range and repeated positions are
+dropped, and any position the topological pass failed to emit is appended in
+index order. The traversal order is therefore only ever a heuristic, never a
+way to lose or duplicate an observation.
+-/
+def pairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+    (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) :
+    Array Nat :=
+  let seen :=
+    (pairObsOrderIndices σ entries).foldl (init := #[]) fun acc i =>
+      if i < entries.size && !acc.contains i then acc.push i else acc
+  seen ++ (Array.range entries.size).filter (fun i => !seen.contains i)
+
+private theorem mem_append_filter_range {seen : Array Nat} {n i : Nat} (hi : i < n) :
+    i ∈ seen ++ (Array.range n).filter (fun j => !seen.contains j) := by
+  by_cases hseen : seen.contains i = true
+  · exact Array.mem_append.2 (.inl (by simpa using hseen))
+  · exact Array.mem_append.2
+      (.inr (Array.mem_filter.2 ⟨Array.mem_range.2 hi, by simpa using hseen⟩))
+
+/-- Every position of the input is scheduled somewhere in the order. -/
+theorem mem_pairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+    {σ : ReachState sig.nBases} {entries : Array (PairEntry sig hyps)} {i : Nat}
+    (hi : i < entries.size) : i ∈ pairObsOrder σ entries :=
+  mem_append_filter_range hi
+
+/-- Only positions of the input are scheduled. -/
+theorem lt_of_mem_pairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
+    {σ : ReachState sig.nBases} {entries : Array (PairEntry sig hyps)} {i : Nat}
+    (h : i ∈ pairObsOrder σ entries) : i < entries.size := by
+  rw [pairObsOrder] at h
+  rcases Array.mem_append.1 h with h | h
+  · refine Array.foldl_induction (as := pairObsOrderIndices σ entries)
+      (motive := fun _ acc => i ∈ acc → i < entries.size) (by simp) ?_ h
+    intro j acc hacc
+    split
+    · rename_i hcond
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+      intro hmem
+      rcases Array.mem_push.1 hmem with h1 | h1
+      · exact hacc h1
+      · exact h1 ▸ hcond.1
+    · exact hacc
+  · exact Array.mem_range.1 (Array.mem_filter.1 h).1
+
+/--
 Topological order of observations: dependencies first, then `sortKey`
-tie-break. The order is chosen as a list of positions into the input, so the
-result is visibly a selection of the entries it was given.
+tie-break. The order is chosen as a permutation of positions into the input, so
+the result is visibly a rearrangement of the entries it was given.
 -/
 def canonicalizePairObsOrder {sig : Signature} {hyps : Array (Object sig.nBases)}
     (σ : ReachState sig.nBases) (entries : Array (PairEntry sig hyps)) :
     Array (PairEntry sig hyps) :=
-  (pairObsOrderIndices σ entries).filterMap (fun i => entries[i]?)
+  (pairObsOrder σ entries).filterMap (fun i => entries[i]?)
 
 /-- Ordering only ever emits entries it was given. -/
 theorem mem_of_mem_canonicalizePairObsOrder {sig : Signature}
@@ -783,6 +830,14 @@ theorem mem_of_mem_canonicalizePairObsOrder {sig : Signature}
   rw [canonicalizePairObsOrder, Array.mem_filterMap] at h
   obtain ⟨i, _, hi⟩ := h
   exact Array.getElem?_eq_some_iff.1 hi |>.elim fun hlt hval => hval ▸ entries.getElem_mem hlt
+
+/-- Ordering never drops an entry either: it is a rearrangement. -/
+theorem mem_canonicalizePairObsOrder {sig : Signature}
+    {hyps : Array (Object sig.nBases)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig hyps)} {e : PairEntry sig hyps}
+    (h : e ∈ entries) : e ∈ canonicalizePairObsOrder σ entries := by
+  obtain ⟨i, hi, rfl⟩ := Array.getElem_of_mem h
+  exact Array.mem_filterMap.2 ⟨i, mem_pairObsOrder hi, by simp [hi]⟩
 
 /--
 Union consistency witnesses with exact term-demanded neutrals, then

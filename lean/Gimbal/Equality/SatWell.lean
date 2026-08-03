@@ -9,7 +9,7 @@
   remapping all preserve phase legality.
 -/
 
-import Gimbal.Equality.Saturation
+import Gimbal.Equality.ExactObs
 
 namespace Gimbal
 namespace Equality
@@ -405,6 +405,36 @@ theorem wellEntries_pairObs {Γ : ReachCtx sig.nBases} {goal : Object sig.nBases
       (exactOk_selectExactObs
         (exactOk_unionExact (exactOk_collectExact ht) (exactOk_collectExact hu)))
       (Array.mem_def.2 he)
+
+/-- Exact demands survive the merge and the ordering unchanged. -/
+theorem mem_mergePairObs_of_mem_exact {σ : ReachState sig.nBases}
+    {hyps : Array (Object sig.nBases)} {consistency : Schedule sig.nBases}
+    {exactSrc : Array ((P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P)}
+    {e : (P : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) P} (he : e ∈ exactSrc) :
+    PairEntry.exact e.1 e.2 ∈ mergePairObs σ hyps consistency exactSrc := by
+  simp only [mergePairObs]
+  exact mem_canonicalizePairObsOrder
+    (Array.mem_append.2 (.inl (Array.mem_map.2 ⟨e, he, rfl⟩)))
+
+/--
+Completeness of the shared schedule: every exact demand of *either* term that
+is eligible for observation is scheduled, up to spine identity. Both sides feed
+the same list, so saturation cannot favour one argument over the other.
+-/
+theorem exact_complete_pairObs {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
+    {t u : InvTm (Ctx.ofHyps Γ.hyps) A} {entries : Array (PairEntry sig Γ.hyps)}
+    {σ : ReachState sig.nBases} (h : pairObs Γ goal t u = .ok entries σ)
+    {e : Exact (Ctx.ofHyps Γ.hyps)}
+    (he : MemI (collectExact t) e ∨ MemI (collectExact u) e)
+    (hpol : objectPolarity e.1 = .pos) (hvar : e.2.isVar = false) :
+    ∃ e', exactIdEq e e' = true ∧ PairEntry.exact e'.1 e'.2 ∈ entries := by
+  rw [pairObs] at h
+  split at h
+  · exact absurd h (by simp)
+  · simp only [PairObsResult.ok.injEq] at h
+    obtain ⟨rfl, -⟩ := h
+    obtain ⟨e', he', hid⟩ := memI_iff.1 (memI_pairSelection t u he hpol hvar)
+    exact ⟨e', hid, mem_mergePairObs_of_mem_exact he'⟩
 
 /-! ### Applying an admissible schedule stays well focused -/
 
