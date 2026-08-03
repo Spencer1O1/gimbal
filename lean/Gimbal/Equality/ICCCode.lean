@@ -319,13 +319,70 @@ theorem worklistWeight_mergeSort (ws : List (PosEntry sig))
     worklistWeight (ws.mergeSort le) = worklistWeight ws :=
   worklistWeight_of_perm (List.mergeSort_perm ws le)
 
+/-! ### Adequate encode fuel (input-dependent; no fixed public bound)
+
+`encodeMeasure` alone is **not** adequate: a positive `letPos` strictly
+increases worklist weight (`encodeMeasure_lt_pushPos_of_pos`). The term-derived
+`posPushBudget` pre-pays every `objectWeight P` that encode may insert via
+observation binders. Together with structural size (for `sat` unwrap and
+ordinary peeling), this yields a single derived fuel for every recursive path.
+-/
+
+mutual
+/-- Extra formula weight encode may push via positive `letPos` binders. -/
+def InvTm.posPushBudget {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → Nat
+  | .unit => 0
+  | .pair t u => InvTm.posPushBudget t + InvTm.posPushBudget u
+  | .lam t => InvTm.posPushBudget t
+  | .case _ t u => InvTm.posPushBudget t + InvTm.posPushBudget u
+  | .abort _ => 0
+  | .foc f => FocTm.posPushBudget f
+
+def FocTm.posPushBudget {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → Nat
+  | .pos _ => 0
+  | .neg _ => 0
+  | .letPos (P := P) _ t => objectWeight P + InvTm.posPushBudget t
+  | .sat (.mk _ t) => InvTm.posPushBudget t
+end
+
 /--
-Fuel for `encodeICC` must also cover term-shaped recursion (`sat` unwrap,
-`letPos` observation push). Candidate: formula measure plus invertible size.
+Derived adequate fuel (design target for `encodeICC`).
+
+`encodeMeasure` alone fails on positive `letPos`. This bound adds:
+* `posPushBudget` — pre-pays every positive observation push;
+* `2 * InvTm.size` — pays `sat`/focus unwrap and ensures strict decrease on
+  term-shaped recursion.
+
+Commute pairs may have unequal sizes (so unequal fuels); lifting Go-level
+agreement to `encodeICC` equality needs fuel monotonicity. Until that lands,
+`encodeICC` still runs on `encodeFuel` and commute proofs use shared-fuel
+lemmas where budgets match and size is replaced by a common max, or Go-level
+packaging.
+
+No fixed public constant (e.g. 2048).
 -/
 def encodeFuel {Γ : Ctx sig} {A : Object sig.nBases}
     (ws : List (PosEntry sig)) (t : InvTm Γ A) : Nat :=
-  encodeMeasure ws A + InvTm.size t
+  encodeMeasure ws A + InvTm.posPushBudget t + 2 * InvTm.size t
+
+/-- Focused counterpart. -/
+def encodeFuelFoc {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (f : FocTm Γ A) : Nat :=
+  encodeMeasure ws A + FocTm.posPushBudget f + 2 * FocTm.size f
+
+theorem encodeFuel_foc {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (f : FocTm Γ A) :
+    encodeFuel ws (.foc f) = encodeFuelFoc ws f + 2 := by
+  simp only [encodeFuel, encodeFuelFoc, InvTm.size, InvTm.posPushBudget]
+  omega
+
+theorem encodeFuel_pos {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (t : InvTm Γ A) :
+    0 < encodeFuel ws t := by
+  have hs : 0 < InvTm.size t := by
+    cases t <;> simp [InvTm.size, FocTm.size] <;> try omega
+  simp only [encodeFuel]
+  omega
 
 /-! ### Forced next rule -/
 
@@ -541,14 +598,8 @@ theorem encodeMeasure_pushPos_of_pos (ws : List (PosEntry sig)) (o : Origin sig)
 /--
 A positive insertion strictly increases the measure. In particular, a
 positive `letPos` observation cannot be justified by `encodeMeasure` alone
-— use `encodeFuel` (measure + term size) or WF recursion for that path.
+— use `encodeFuel` (measure + size + posPushBudget).
 -/
-theorem encodeMeasure_lt_pushPos_of_pos (ws : List (PosEntry sig)) (o : Origin sig)
-    (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
-    encodeMeasure ws goal < encodeMeasure (pushPos ws o ty) goal :=
-  encodeMeasure_pushPos_pos_lt ws o ty goal hpos
-
-/-- Pushing a positive formula onto the worklist strictly increases weight. -/
 theorem encodeMeasure_pushPos_pos_lt (ws : List (PosEntry sig)) (o : Origin sig)
     (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
     encodeMeasure ws goal < encodeMeasure (pushPos ws o ty) goal := by
@@ -561,6 +612,11 @@ theorem encodeMeasure_pushPos_pos_lt (ws : List (PosEntry sig)) (o : Origin sig)
     worklistWeight ws + objectWeight goal <
       objectWeight ty + worklistWeight ws + objectWeight goal
   omega
+
+theorem encodeMeasure_lt_pushPos_of_pos (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty goal : Object sig.nBases) (hpos : objectPolarity ty = .pos) :
+    encodeMeasure ws goal < encodeMeasure (pushPos ws o ty) goal :=
+  encodeMeasure_pushPos_pos_lt ws o ty goal hpos
 
 /--
 Left-coprod recursion: after consuming a `.coprod L R` head, each branch
@@ -627,6 +683,104 @@ theorem encodeMeasure_exp_push_lt (ws : List (PosEntry sig)) (o : Origin sig)
       objectWeight Arg + worklistWeight ws + objectWeight Ret <
         worklistWeight ws + (objectWeight Arg + objectWeight Ret + 1)
     omega
+
+/-! ### `encodeFuel` decreases on recursive encode paths -/
+
+/-- `moveStable`: same term, lighter worklist. -/
+theorem encodeFuel_moveStable_lt {Γ : Ctx sig} {A : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (t : InvTm Γ A) :
+    encodeFuel ws t < encodeFuel (e :: ws) t := by
+  have he := objectWeight_pos e.ty
+  simp only [encodeFuel, encodeMeasure, worklistWeight_cons]
+  omega
+
+/-- Right-product: each component has strictly smaller fuel than the pair. -/
+theorem encodeFuel_pair_fst_lt {Γ : Ctx sig} {L R : Object sig.nBases}
+    (ws : List (PosEntry sig)) (t : InvTm Γ L) (u : InvTm Γ R) :
+    encodeFuel ws t < encodeFuel ws (.pair t u) := by
+  have hR := objectWeight_pos R
+  simp only [encodeFuel, encodeMeasure, objectWeight, InvTm.size, InvTm.posPushBudget]
+  omega
+
+theorem encodeFuel_pair_snd_lt {Γ : Ctx sig} {L R : Object sig.nBases}
+    (ws : List (PosEntry sig)) (t : InvTm Γ L) (u : InvTm Γ R) :
+    encodeFuel ws u < encodeFuel ws (.pair t u) := by
+  have hL := objectWeight_pos L
+  simp only [encodeFuel, encodeMeasure, objectWeight, InvTm.size, InvTm.posPushBudget]
+  omega
+
+/-- Right-λ: body under `pushPos` of the domain has smaller fuel than the λ. -/
+theorem encodeFuel_lam_lt {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
+    (ws : List (PosEntry sig)) (o : Origin sig) (body : InvTm (Γ ▻ Arg) Ret) :
+    encodeFuel (pushPos ws o Arg) body < encodeFuel ws (.lam body) := by
+  have hmeas := encodeMeasure_exp_push_lt ws o Arg Ret
+  simp only [encodeFuel, InvTm.size, InvTm.posPushBudget] at *
+  omega
+
+/--
+Positive `letPos`: after two outer steps, the child under `pushPos` fits.
+Budget pre-pays `objectWeight P`; size pays the dual unwrap.
+-/
+theorem encodeFuel_letPos_le {Γ : Ctx sig} {P A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (o : Origin sig)
+    (_n : NegNeu Γ P) (t : InvTm (Γ ▻ P) A) :
+    encodeFuel (pushPos ws o P) t + 2 ≤ encodeFuel ws (.foc (.letPos _n t)) := by
+  have hmeas : encodeMeasure (pushPos ws o P) A ≤
+      objectWeight P + encodeMeasure ws A := by
+    simp only [encodeMeasure]
+    have := worklistWeight_pushPos_le ws o P
+    omega
+  simp only [encodeFuel, InvTm.size, InvTm.posPushBudget, FocTm.size,
+    FocTm.posPushBudget]
+  omega
+
+/-- `sat` unwrap: two outer steps; size of the `foc`/`sat` shell pays. -/
+theorem encodeFuel_sat_le {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (_s : Schedule sig.nBases) (t : InvTm Γ A) :
+    encodeFuel ws t + 2 ≤ encodeFuel ws (.foc (.sat (.mk _s t))) := by
+  simp only [encodeFuel, InvTm.size, InvTm.posPushBudget, FocTm.size,
+    FocTm.posPushBudget]
+  omega
+
+/-- Focus fuel vs `.foc` fuel. -/
+theorem encodeFuel_focus_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (ws : List (PosEntry sig)) (f : FocTm Γ A) :
+    encodeFuel ws (.foc f) = encodeFuelFoc ws f + 2 :=
+  encodeFuel_foc ws f
+
+/--
+Left-coprod branch: after consuming `.coprod L R`, each peeled branch under
+`pushPos` has strictly smaller fuel than the parent case.
+-/
+theorem encodeFuel_leftCoprod_lt {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (o : Origin sig)
+    (hty : e.ty = .coprod A B)
+    (n : NegNeu Γ (.coprod A B))
+    (tL : InvTm (Γ ▻ A) C) (tR : InvTm (Γ ▻ B) C) :
+    encodeFuel (pushPos ws o A) tL <
+      encodeFuel (e :: ws) (.case n tL tR) := by
+  have hpush := worklistWeight_pushPos_le ws o A
+  have hB := objectWeight_pos B
+  have hn : 0 < NegNeu.size n := by
+    cases n <;> simp [NegNeu.size] <;> omega
+  simp only [encodeFuel, encodeMeasure, worklistWeight_cons, hty, objectWeight,
+    InvTm.size, InvTm.posPushBudget]
+  omega
+
+theorem encodeFuel_leftCoprod_right_lt {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (o : Origin sig)
+    (hty : e.ty = .coprod A B)
+    (n : NegNeu Γ (.coprod A B))
+    (tL : InvTm (Γ ▻ A) C) (tR : InvTm (Γ ▻ B) C) :
+    encodeFuel (pushPos ws o B) tR <
+      encodeFuel (e :: ws) (.case n tL tR) := by
+  have hpush := worklistWeight_pushPos_le ws o B
+  have hA := objectWeight_pos A
+  have hn : 0 < NegNeu.size n := by
+    cases n <;> simp [NegNeu.size] <;> omega
+  simp only [encodeFuel, encodeMeasure, worklistWeight_cons, hty, objectWeight,
+    InvTm.size, InvTm.posPushBudget]
+  omega
 
 /-! ### Encoding -/
 
@@ -768,7 +922,14 @@ def encodeFocGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
           | none => none
 end
 
-/-- Encode under a phase-entry origin environment. -/
+/-- Encode under a phase-entry origin environment.
+
+Currently fueled by `encodeMeasure` (shared across ICC commute pairs at a fixed
+goal/worklist). The adequate bound `encodeFuel` (measure + letPos budget +
+`2 * size`) is the switch target once `EncodeFuelMonoGoal` lifts Go-level
+commute agreement across unequal term sizes. Positive `letPos` is why
+measure alone is not the final story (`encodeMeasure_lt_pushPos_of_pos`).
+-/
 def encodeICC {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (t : InvTm Γ A) : Option (ICCCode Γ A) :=
   let ws := OriginEnv.posWorklist ε

@@ -87,9 +87,11 @@ def OriginCollisionFree : Prop := True
 `encodeICC` must succeed on every term in the **valid fragment**, returning a
 concrete code witness (prefer `∃ c, … = some c` over bare `isSome`).
 
-It is not required for arbitrary `InvTm`. The present `encodeICCGo` fuel is a
-proof device (`encodeMeasure`); prove adequacy on the valid fragment or switch
-to WF recursion. Fuel exhaustion must not appear on the proof-critical path.
+It is not required for arbitrary `InvTm`. The candidate adequate bound is
+`encodeFuel` (measure + `posPushBudget` + `2 * InvTm.size`); the runner still
+uses `encodeMeasure` until fuel mono lifts commute across unequal sizes.
+Positive `letPos` is why measure alone is insufficient. Fuel exhaustion must
+not appear on the proof-critical path.
 -/
 def EncodeTotal : Prop :=
   ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
