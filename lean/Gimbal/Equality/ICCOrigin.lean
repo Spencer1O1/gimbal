@@ -1002,6 +1002,38 @@ theorem Origin.ble_trans (a b c : Origin sig)
           rw [Origin.eq_of_cmp_eq hab, Origin.eq_of_cmp_eq hbc]
           exact Or.inr (Origin.cmp_self _)
 
+@[simp] theorem Origin.cmp_hyp_split (i : Nat) (p : Origin sig) (side : Bool) :
+    Origin.cmp (.hyp (sig := sig) i) (.split p side) = .lt := rfl
+
+@[simp] theorem Origin.cmp_obs_split (k : Nat) (p : Origin sig) (side : Bool) :
+    Origin.cmp (.obs (sig := sig) k) (.split p side) = .lt := rfl
+
+@[simp] theorem Origin.cmp_dom_split (n : Nat) (p : Origin sig) (side : Bool) :
+    Origin.cmp (.dom (sig := sig) n) (.split p side) = .lt := rfl
+
+@[simp] theorem Origin.blt_hyp_split (i : Nat) (p : Origin sig) (side : Bool) :
+    Origin.blt (.hyp (sig := sig) i) (.split p side) = true := by
+  simp [Origin.blt]
+
+@[simp] theorem Origin.blt_obs_split (k : Nat) (p : Origin sig) (side : Bool) :
+    Origin.blt (.obs (sig := sig) k) (.split p side) = true := by
+  simp [Origin.blt]
+
+@[simp] theorem Origin.blt_dom_split (n : Nat) (p : Origin sig) (side : Bool) :
+    Origin.blt (.dom (sig := sig) n) (.split p side) = true := by
+  simp [Origin.blt]
+
+theorem Origin.ble_of_blt {o₁ o₂ : Origin sig}
+    (h : Origin.blt o₁ o₂ = true) : Origin.ble o₁ o₂ = true := by
+  simp only [Origin.blt, beq_iff_eq] at h
+  simp [Origin.ble, h]
+
+theorem Origin.not_ble_of_blt_symm {o₁ o₂ : Origin sig}
+    (h : Origin.blt o₁ o₂ = true) : Origin.ble o₂ o₁ = false := by
+  simp only [Origin.blt, beq_iff_eq] at h
+  have hswap : Origin.cmp o₂ o₁ = .gt := by rw [Origin.cmp_swap, h]; rfl
+  simp [Origin.ble, hswap]
+
 
 /-! ### posCollect structural lemmas -/
 

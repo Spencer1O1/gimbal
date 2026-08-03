@@ -243,10 +243,11 @@ Blocked / WIP:
    (~~ofHyps_push~~ / ~~peel rekey~~ / ~~full `encodeReady_rekeyHypToObs`~~ /
    ~~leftCoprod under letPos via push-body ready~~ /
    ~~coprod obs outer `case` (var) packaging~~ /
-   ~~branch schedule gap + `rekeyHypToSplit` API +
-   `posWorklist_rekey_weaken_hyp_to_split`~~ /
-   ~~empty-schedule unit/foc-done shapes~~ landed; still need consume
-   left-coprod head + `EncodeReady` under `rekeyHypToSplit`, and general
+   ~~branch schedule algebra (`rekeyHypToSplit`,
+   `posWorklist_rekey_weaken_hyp_to_split`, `pushPos_cons_of_blt_head`,
+   `leftCoprod_branch_schedule_gap` → `e :: leftCoprodBranchWs`)~~ /
+   ~~empty-schedule unit/foc-done shapes~~ landed; still need
+   EncodeReady under encode branch schedule (not ofHyps drop-`e`), and general
    `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
