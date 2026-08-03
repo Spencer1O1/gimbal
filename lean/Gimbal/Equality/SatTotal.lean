@@ -1,0 +1,90 @@
+/-
+  Saturation never runs out of fuel.
+
+  `applyPairObsGo` consumes one schedule entry per two units of fuel: one to
+  enter the entry, one to apply the observation it names. So the numeric bound
+  is not a semantic parameter at all — any budget above twice the length of the
+  schedule behaves identically, and the `exhausted` result is unreachable there.
+  That is what lets the reference comparator treat exhaustion as an operational
+  failure rather than an answer.
+
+  `invariantFailure` is a different obligation (witness reconstruction and the
+  old-only check) and is not addressed here.
+-/
+
+import Gimbal.Equality.Saturation
+
+namespace Gimbal
+namespace Equality
+
+variable {sig : Signature}
+
+/--
+Applying one observation, and applying a whole schedule, cannot exhaust a
+budget that covers two units per entry.
+-/
+theorem applyObs_ne_exhausted : ∀ fuel : Nat,
+    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+        (P : Object sig.nBases) (nP : NegNeu (Ctx.ofHyps hyps) P)
+        (rest : List (PairEntry sig hyps)) {A : Object sig.nBases}
+        (cont : InvTm (Ctx.ofHyps hyps) A),
+        2 * rest.length + 1 < fuel →
+        applyObsNeu fuel σ hyps P nP rest cont ≠ .exhausted) ∧
+    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+        (entries : List (PairEntry sig hyps)) {A : Object sig.nBases}
+        (cont : InvTm (Ctx.ofHyps hyps) A),
+        2 * entries.length < fuel →
+        applyPairObsGo fuel σ hyps entries cont ≠ .exhausted)
+  | 0 => by constructor <;> intros <;> omega
+  | fuel + 1 => by
+      obtain ⟨ihObs, ihGo⟩ := applyObs_ne_exhausted fuel
+      constructor
+      · intro σ hyps P nP rest A cont hlen
+        rw [applyObsNeu.eq_def]
+        dsimp only
+        split
+        · simp
+        · -- the observation splits the schedule but never lengthens it
+          have hgo : ∀ (hyps' : Array (Object sig.nBases))
+              (l : List (PairEntry sig hyps')) {B : Object sig.nBases}
+              (c : InvTm (Ctx.ofHyps hyps') B), l.length = rest.length →
+              applyPairObsGo fuel σ hyps' l c ≠ .exhausted := by
+            intro hyps' l B c hl
+            exact ihGo σ hyps' l c (by omega)
+          split <;> split <;>
+            first
+              | (rename_i h; exact absurd h (hgo _ _ _ (by simp)))
+              | (rename_i h _; exact absurd h (hgo _ _ _ (by simp)))
+              | simp
+      · intro σ hyps entries A cont hlen
+        rw [applyPairObsGo.eq_def]
+        dsimp only
+        cases entries with
+        | nil => simp
+        | cons e rest =>
+          have hlen' : 2 * rest.length + 1 < fuel := by
+            simp only [List.length_cons] at hlen; omega
+          dsimp only
+          cases e with
+          | consistency P w =>
+            dsimp only
+            split
+            · simp
+            · split
+              · exact ihObs σ hyps _ _ rest cont hlen'
+              · simp
+          | exact P n => exact ihObs σ hyps _ _ rest cont hlen'
+
+/-- The schedule application in the reference pipeline never reports exhaustion. -/
+theorem applyPairObs_ne_exhausted (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (entries : Array (PairEntry sig hyps))
+    {A : Object sig.nBases} (cont : InvTm (Ctx.ofHyps hyps) A)
+    (hfuel : 2 * entries.size < fuel) :
+    applyPairObs fuel σ hyps entries cont ≠ .exhausted := by
+  rw [applyPairObs]
+  split
+  · split <;> simp
+  · exact (applyObs_ne_exhausted fuel).2 σ hyps entries.toList cont (by simpa using hfuel)
+
+end Equality
+end Gimbal
