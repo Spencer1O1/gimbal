@@ -754,8 +754,9 @@ example : hofSumId = CandidateResult.equal := by native_decide
 
 /--
 `g ≫ case(left,right) = g` (sum η).
-S4 unblocks saturation (was `invariantFailure`); still `.different` until
-ICC / referenceCompare close the η gap.
+Closed once saturation commits a coproduct observation by substituting the
+η patterns into one abstracted body: both sides then saturate to the same
+`case`, and ICC contracts it.
 -/
 def hofSumEta : CandidateResult :=
   compareIntrinsic (sig := HofSumSig) (fuel := 512)
@@ -766,7 +767,7 @@ def hofSumEta : CandidateResult :=
         (IntrinsicMorphism.right (sig := HofSumSig) Number Number)))
     (.generator ⟨0, by decide⟩)
 
-example : hofSumEta = CandidateResult.different := by native_decide
+example : hofSumEta = CandidateResult.equal := by native_decide
 
 /-- Higher-order generator returning a function. -/
 def HofExpSig : Signature where

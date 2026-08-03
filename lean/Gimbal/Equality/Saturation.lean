@@ -7,6 +7,7 @@
   through the same schedule.
 -/
 
+import Gimbal.Equality.Abstract
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
 
@@ -1006,14 +1007,17 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
           let targetR := NegNeu.toRaw (NegNeu.weaken (B := R) nSum)
           let restL := rest.map (mapRestAbstractSumInl fuel σ hyps L R hL targetL)
           let restR := rest.map (mapRestAbstractSumInr fuel σ hyps L R hR targetR)
+          -- Abstract the observation once, then commit the fresh binder to each
+          -- injection: the branch bodies are instances of one common body, which
+          -- is what makes the split meaning-preserving (strong sum η).
+          let body : InvTm (Ctx.ofHyps hyps ▻ .coprod L R) A :=
+            InvTm.abstr .here (NegNeu.weaken nSum) (InvTm.weaken cont)
           let contL : InvTm (Ctx.ofHyps hypsL) A :=
             InvTm.castCtx hL.symm
-              (InvTm.abstractSumInl (L := L) (R := R) .here targetL
-                (InvTm.weaken (B := L) cont))
+              (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInl L R))
           let contR : InvTm (Ctx.ofHyps hypsR) A :=
             InvTm.castCtx hR.symm
-              (InvTm.abstractSumInr (L := L) (R := R) .here targetR
-                (InvTm.weaken (B := R) cont))
+              (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInr L R))
           match applyPairObsGo fuel σ hypsL restL contL,
                 applyPairObsGo fuel σ hypsR restR contR with
           | .ok bodyL', .ok bodyR' =>
@@ -1028,9 +1032,11 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
             Ctx.ofHyps_push hyps P₀
           let targetRaw := NegNeu.toRaw (NegNeu.weaken (B := P₀) n₀)
           let rest' := rest.map (mapRestAbstractAtom fuel σ hyps P₀ hctx targetRaw)
+          -- Typed abstraction: occurrences are recognised by `NegNeu.beq`, whose
+          -- soundness lemma is what makes the cut erasure-preserving.
           let cont' : InvTm (Ctx.ofHyps hyps') A :=
             InvTm.castCtx hctx.symm
-              (InvTm.abstractAtom (P := P₀) .here targetRaw
+              (InvTm.abstr (P := P₀) .here (NegNeu.weaken (B := P₀) n₀)
                 (InvTm.weaken (B := P₀) cont))
           match applyPairObsGo fuel σ hyps' rest' cont' with
           | .ok body' =>

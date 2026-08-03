@@ -13,22 +13,6 @@ namespace Equality
 
 variable {sig : Signature}
 
-/-! ### Coproduct η patterns
-
-The two branches of a coproduct η-expansion: the newest variable re-injected on
-the corresponding side.
--/
-
-/-- `x. inl x`, the left branch of a coproduct η-expansion. -/
-def InvTm.etaInl {Γ : Ctx sig} (A B : Object sig.nBases) :
-    InvTm (Γ ▻ A) (.coprod A B) :=
-  .foc (.pos (.done (.inl (.neu (.var .here)))))
-
-/-- `y. inr y`, the right branch of a coproduct η-expansion. -/
-def InvTm.etaInr {Γ : Ctx sig} (A B : Object sig.nBases) :
-    InvTm (Γ ▻ B) (.coprod A B) :=
-  .foc (.pos (.done (.inr (.neu (.var .here)))))
-
 /-! ### ICC relation -/
 
 mutual
