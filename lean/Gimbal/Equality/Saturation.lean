@@ -307,6 +307,7 @@ def demandsPosNeu {Γ : Ctx sig} {A : Object sig.nBases} :
   | .neu n, acc => demandsNegNeu n (pushDemand acc A)
   | .inl p, acc => demandsPosNeu p (pushDemand acc A)
   | .inr p, acc => demandsPosNeu p (pushDemand acc A)
+  | .val t, acc => demandsInvTm t acc
 
 def demandsInvTm {Γ : Ctx sig} {A : Object sig.nBases} :
     InvTm Γ A → Array (Object sig.nBases) → Array (Object sig.nBases)
@@ -378,6 +379,7 @@ def exactGo (fuel : Nat) {Γ : Ctx sig} :
       | .pos (.neu n) => exactGo fuel (.neu n) acc
       | .pos (.inl p) => exactGo fuel (.pos p) acc
       | .pos (.inr p) => exactGo fuel (.pos p) acc
+      | .pos (.val t) => exactGo fuel (.inv t) acc
       | .inv .unit => acc
       | .inv (.pair t u) => exactGo fuel (.inv u) (exactGo fuel (.inv t) acc)
       | .inv (.lam _) => acc
@@ -443,6 +445,7 @@ def PosNeu.mentionsNew (hypsSize newFrom : Nat) {Γ : Ctx sig}
   | .neu n => NegNeu.mentionsNew hypsSize newFrom n
   | .inl p => PosNeu.mentionsNew hypsSize newFrom p
   | .inr p => PosNeu.mentionsNew hypsSize newFrom p
+  | .val t => InvTm.mentionsNew hypsSize newFrom t
 end
 
 /-- Every selected exact observation in this phase must mention `Γnew`. -/
@@ -714,6 +717,7 @@ def RawPos.shift : RawPos → RawPos
   | .neu n => .neu (RawNeu.shift n)
   | .inl p => .inl (RawPos.shift p)
   | .inr p => .inr (RawPos.shift p)
+  | .val t => .val (RawFocused.shift t)
 
 def RawFocused.shift : RawFocused → RawFocused
   | .unit => .unit
@@ -770,6 +774,7 @@ def PosNeu.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
   | .neu n => .neu (NegNeu.abstractAtom x targetRaw n)
   | .inl p => .inl (PosNeu.abstractAtom x targetRaw p)
   | .inr p => .inr (PosNeu.abstractAtom x targetRaw p)
+  | .val t => .val (InvTm.abstractAtom x targetRaw t)
 
 def InvTm.abstractAtom {Γ : Ctx sig} {P A : Object sig.nBases}
     (x : Var Γ P) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
@@ -807,6 +812,7 @@ def PosNeu.abstractSumWalk {Γ : Ctx sig} {B A : Object sig.nBases}
   | .neu n => .neu (NegNeu.abstractSum x targetRaw n)
   | .inl p => .inl (PosNeu.abstractSumWalk x targetRaw p)
   | .inr p => .inr (PosNeu.abstractSumWalk x targetRaw p)
+  | .val t => .val (InvTm.abstractSumWalk x targetRaw t)
 
 def InvTm.abstractSumWalk {Γ : Ctx sig} {B A : Object sig.nBases}
     (x : Var Γ B) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A
@@ -841,6 +847,7 @@ def PosNeu.abstractSumInl {Γ : Ctx sig} {L R A : Object sig.nBases}
         .neu (NegNeu.abstractSum x targetRaw n)
   | .inl p => .inl (PosNeu.abstractSumInl (R := R) x targetRaw p)
   | .inr p => .inr (PosNeu.abstractSumInl (R := R) x targetRaw p)
+  | .val t => .val (InvTm.abstractSumInl (R := R) x targetRaw t)
 
 def PosNeu.abstractSumInr {Γ : Ctx sig} {L R A : Object sig.nBases}
     (x : Var Γ R) (targetRaw : RawNeu) : PosNeu Γ A → PosNeu Γ A
@@ -853,6 +860,7 @@ def PosNeu.abstractSumInr {Γ : Ctx sig} {L R A : Object sig.nBases}
         .neu (NegNeu.abstractSum x targetRaw n)
   | .inl p => .inl (PosNeu.abstractSumInr (L := L) x targetRaw p)
   | .inr p => .inr (PosNeu.abstractSumInr (L := L) x targetRaw p)
+  | .val t => .val (InvTm.abstractSumInr (L := L) x targetRaw t)
 
 def InvTm.abstractSumInl {Γ : Ctx sig} {L R A : Object sig.nBases}
     (x : Var Γ L) (targetRaw : RawNeu) : InvTm Γ A → InvTm Γ A

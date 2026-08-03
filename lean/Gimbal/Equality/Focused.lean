@@ -42,6 +42,9 @@ inductive PosNeu : Ctx sig → Object sig.nBases → Type where
   | neu {Γ A} : NegNeu Γ A → PosNeu Γ A
   | inl {Γ A B} : PosNeu Γ A → PosNeu Γ (.coprod A B)
   | inr {Γ A B} : PosNeu Γ B → PosNeu Γ (.coprod A B)
+  /-- Shift `↓`: an invertible value of negative type used positively,
+  e.g. the `⟨⟩` in `inl ⟨⟩ : Unit + B`. -/
+  | val {Γ A} : InvTm Γ A → PosNeu Γ A
 
 /-- Invertible-phase terms. -/
 inductive InvTm : Ctx sig → Object sig.nBases → Type where
@@ -95,6 +98,7 @@ def PosNeu.erase {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → Tm Γ 
   | .neu n => NegNeu.erase n
   | .inl p => .inl (PosNeu.erase p)
   | .inr p => .inr (PosNeu.erase p)
+  | .val t => InvTm.erase t
 
 def InvTm.erase {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → Tm Γ A
   | .unit => .unit
@@ -136,6 +140,7 @@ def PosNeu.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
   | .neu n => .neu (NegNeu.rename ρ n)
   | .inl p => .inl (PosNeu.rename ρ p)
   | .inr p => .inr (PosNeu.rename ρ p)
+  | .val t => .val (InvTm.rename ρ t)
 
 def InvTm.rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
     (ρ : Rename sig Γ Δ) : InvTm Γ A → InvTm Δ A
@@ -222,6 +227,7 @@ inductive RawPos where
   | neu (n : RawNeu)
   | inl (p : RawPos)
   | inr (p : RawPos)
+  | val (t : RawFocused)
   deriving DecidableEq, Repr
 
 inductive RawFocused where
@@ -258,6 +264,7 @@ def RawPos.hasNeu (hay : RawPos) (needle : RawNeu) : Bool :=
   | .neu n => RawNeu.hasNeu n needle
   | .inl p => RawPos.hasNeu p needle
   | .inr p => RawPos.hasNeu p needle
+  | .val t => RawFocused.hasNeu t needle
 
 def RawFocused.hasNeu (hay : RawFocused) (needle : RawNeu) : Bool :=
   match hay with
@@ -288,6 +295,7 @@ def PosNeu.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → RawPos
   | .neu n => .neu (NegNeu.toRaw n)
   | .inl p => .inl (PosNeu.toRaw p)
   | .inr p => .inr (PosNeu.toRaw p)
+  | .val t => .val (InvTm.toRaw t)
 
 def InvTm.toRaw {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → RawFocused
   | .unit => .unit
@@ -324,13 +332,22 @@ inductive WellInv : {Γ : Ctx sig} → {A : Object sig.nBases} → InvTm Γ A �
 /-- Focused terms match goal polarity (pos/neg) or binder/saturation forms. -/
 inductive WellFoc : {Γ : Ctx sig} → {A : Object sig.nBases} → FocTm Γ A → Prop where
   | pos {Γ A} {p : PosNeu Γ A} :
-      objectPolarity A = .pos → WellFoc (.pos (.done p))
+      objectPolarity A = .pos → WellPos p → WellFoc (.pos (.done p))
   | neg {Γ A} {n : NegNeu Γ A} :
       objectPolarity A = .neg → WellFoc (.neg (.done n))
   | letPos {Γ P A} {n : NegNeu Γ P} {t : InvTm (Γ ▻ P) A} :
       objectPolarity P = .pos → WellInv t → WellFoc (.letPos n t)
   | sat {Γ A} {s : Schedule sig.nBases} {t : InvTm Γ A} :
       WellInv t → WellFoc (.sat (.mk s t))
+
+/-- Positive values: neutrals at positive types, injections, and `↓` shifts. -/
+inductive WellPos : {Γ : Ctx sig} → {A : Object sig.nBases} → PosNeu Γ A → Prop where
+  | neu {Γ A} {n : NegNeu Γ A} :
+      objectPolarity A = .pos → WellPos (.neu n)
+  | inl {Γ A B} {p : PosNeu Γ A} : WellPos p → WellPos (.inl (B := B) p)
+  | inr {Γ A B} {p : PosNeu Γ B} : WellPos p → WellPos (.inr (A := A) p)
+  | val {Γ A} {t : InvTm Γ A} :
+      objectPolarity A = .neg → WellInv t → WellPos (.val t)
 end
 
 mutual
@@ -343,10 +360,16 @@ def wellInvb {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → Bool
   | .foc f => wellFocb f
 
 def wellFocb {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → Bool
-  | .pos (.done _) => objectPolarity A == .pos
+  | .pos (.done p) => objectPolarity A == .pos && wellPosb p
   | .neg (.done _) => objectPolarity A == .neg
   | .letPos (P := P) _ t => objectPolarity P == .pos && wellInvb t
   | .sat (.mk _ t) => wellInvb t
+
+def wellPosb {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → Bool
+  | .neu _ => objectPolarity A == .pos
+  | .inl p => wellPosb p
+  | .inr p => wellPosb p
+  | .val t => objectPolarity A == .neg && wellInvb t
 end
 
 /-- Executable phase check (sound for `WellInv` / `WellFoc` by construction). -/
