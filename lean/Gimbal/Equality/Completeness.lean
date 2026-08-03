@@ -240,9 +240,9 @@ Blocked / WIP:
    `RawReferenceProduced → PhaseEncodeReady` (equivalently raw →
    `CertifiedReferenceProduced`). Do not switch `referenceCompare` or claim
    characterization until the stash is eliminated. WIP: `encodeReady_applyPairObs`
-   (~~ofHyps_push cast~~ landed; ~~peel dig `.dom 0`~~ + ~~`peelCaseOuter_rekey`~~
-   landed; full `encodeReady_rekeyHypToObs` with peel / leftCoprod under letPos /
-   coprod obs still open)
+   (~~ofHyps_push~~ / ~~peel rekey~~ / ~~full `encodeReady_rekeyHypToObs`~~ /
+   ~~leftCoprod under letPos via push-body ready~~ landed; coprod obs → outer
+   case + ready branches, and empty-schedule `WellInv`→ready, still open)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;

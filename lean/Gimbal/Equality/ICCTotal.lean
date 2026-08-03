@@ -1924,6 +1924,374 @@ theorem encodeReady_env_eq {Γ : Ctx sig} {A : Object sig.nBases}
     intro Γ A ws ε d o s t _ iht ε' hε'
     exact .sat (iht ε' hε')
 
+/--
+Full `EncodeReady` transport under `rekeyHypToObs hypIdx 0` (bumps `obsSlot`).
+Peel / unit-η use `peelCaseOuter_rekeyHypToObs` / `find?_rekeyHypToObs`.
+-/
+theorem encodeReady_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
+    (hypIdx : Nat)
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (hws : worklistHypIdxLe ws hypIdx)
+    (hε : ∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx)
+    (h : EncodeReady ws ε domNest obsSlot t) :
+    EncodeReady
+      (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+      (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x))
+      domNest (obsSlot + 1) t := by
+  refine
+    (EncodeReady.rec
+      (motive_1 := fun {Γ} ws ε d o {A} t _ =>
+        worklistHypIdxLe ws hypIdx →
+        (∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx) →
+        EncodeReady (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+          (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x)) d (o + 1) t)
+      (motive_2 := fun {Γ} ws ε d o {A} f _ =>
+        worklistHypIdxLe ws hypIdx →
+        (∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx) →
+        EncodeReadyFoc (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+          (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x)) d (o + 1) f)
+      ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?lp ?lu ?fo ?pos ?neg ?letp ?sat h) hws hε
+  case ms =>
+    intro Γ A e ws ε d o t hfr _ ih hws hε
+    exact .moveStable (forcedRule_rekey_cons_moveStable hypIdx 0 e ws hfr)
+      (ih (fun e' he => hws e' (List.Mem.tail _ he)) hε)
+  case ln =>
+    intro Γ A e ws ε d o n hty hws hε
+    exact .leftNever (by simpa [PosEntry.rekeyHypToObs] using hty)
+  case ru =>
+    intro Γ ws ε d o hfr hws hε
+    exact .rightUnit (forcedRule_rekey_rightUnit hypIdx 0 ws hfr)
+  case rp =>
+    intro Γ L R ws ε d o t u hfr _ _ iht ihu hws hε
+    exact .rightProd_pair (forcedRule_rekey_rightProd hypIdx 0 ws hfr)
+      (iht hws hε) (ihu hws hε)
+  case rpf =>
+    intro Γ L R ws ε d o f hfr _ ihf hws hε
+    exact .rightProd_foc (forcedRule_rekey_rightProd hypIdx 0 ws hfr) (ihf hws hε)
+  case re =>
+    intro Γ Arg Ret ws ε d o body hfr _ ihb hws hε
+    have hpush := pushPos_map_rekeyHypToObs_zero hypIdx ws (.dom (sig := sig) d) Arg
+      hws (by simp [Origin.hypIdxLe])
+    have hεw : ∀ {B} (x : Var (Γ ▻ Arg) B),
+        Origin.hypIdxLe (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) d) x) hypIdx := by
+      intro B x; cases x with
+      | here => simp [OriginEnv.weaken, Origin.hypIdxLe]
+      | there y => exact hε y
+    have hb := ihb (hypIdxLe_of_mem_pushPos ws _ Arg hypIdx hws (by simp [Origin.hypIdxLe])) hεw
+    refine .rightExp_lam (forcedRule_rekey_rightExp hypIdx 0 ws hfr) ?_
+    refine encodeReady_env_eq ?_ (by
+      simpa [hpush, Origin.rekeyHypToObs_dom] using hb)
+    intro B x
+    simpa [OriginEnv.weaken_rekeyHypToObs] using rfl
+  case ref =>
+    intro Γ Arg Ret ws ε d o f hfr _ ihf hws hε
+    exact .rightExp_foc (forcedRule_rekey_rightExp hypIdx 0 ws hfr) (ihf hws hε)
+  case lp =>
+    intro Γ A L R e ws ε d o n tL tR t hfr hpeel _ _ ihL ihR hws hε
+    have hfr' := forcedRule_rekey_cons_leftCoprod hypIdx 0 e ws hfr
+    have hpeel' :
+        peelCaseOuter
+            (fun {_B} x => Origin.rekeyHypToObs hypIdx 0 (ε x))
+            (Origin.rekeyHypToObs hypIdx 0 e.origin) t =
+          some ⟨L, R, n, tL, tR⟩ := by
+      rw [peelCaseOuter_rekeyHypToObs]; exact hpeel
+    have he : Origin.hypIdxLe e.origin hypIdx := hws e (List.Mem.head _)
+    have hws' : worklistHypIdxLe ws hypIdx :=
+      fun e' he' => hws e' (List.Mem.tail _ he')
+    have hεL : ∀ {B} (x : Var (Γ ▻ L) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := L) ε (.split e.origin false) x) hypIdx := by
+      intro B x; cases x with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there y => exact hε y
+    have hεR : ∀ {B} (x : Var (Γ ▻ R) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := R) ε (.split e.origin true) x) hypIdx := by
+      intro B x; cases x with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there y => exact hε y
+    have hpushL := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin false) L
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hpushR := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin true) R
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hL := ihL
+      (hypIdxLe_of_mem_pushPos ws _ L hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεL
+    have hR := ihR
+      (hypIdxLe_of_mem_pushPos ws _ R hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεR
+    refine .leftCoprod_peel hfr' hpeel' ?_ ?_
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushL, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hL)
+      intro B x
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin false) hypIdx 0 x
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushR, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hR)
+      intro B x
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin true) hypIdx 0 x
+  case lu =>
+    intro Γ L R e ws ε d o x hfr hfind hit _ _ ihL ihR hws hε
+    have hfr' := forcedRule_rekey_cons_leftCoprod hypIdx 0 e ws hfr
+    have hfind' :
+        OriginEnv.find?
+            (fun {_B} y => Origin.rekeyHypToObs hypIdx 0 (ε y))
+            (Origin.rekeyHypToObs hypIdx 0 e.origin) =
+          some ⟨.coprod L R, x⟩ := by
+      rw [OriginEnv.find?_rekeyHypToObs]; exact hfind
+    have hit' :
+        ((fun {_B} y => Origin.rekeyHypToObs hypIdx 0 (ε y)) x ==
+          Origin.rekeyHypToObs hypIdx 0 e.origin) = true := by
+      rw [Origin.beq_rekeyHypToObs]; exact hit
+    have he : Origin.hypIdxLe e.origin hypIdx := hws e (List.Mem.head _)
+    have hws' : worklistHypIdxLe ws hypIdx :=
+      fun e' he' => hws e' (List.Mem.tail _ he')
+    have hεL : ∀ {B} (y : Var (Γ ▻ L) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := L) ε (.split e.origin false) y) hypIdx := by
+      intro B y; cases y with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there z => exact hε z
+    have hεR : ∀ {B} (y : Var (Γ ▻ R) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := R) ε (.split e.origin true) y) hypIdx := by
+      intro B y; cases y with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there z => exact hε z
+    have hpushL := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin false) L
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hpushR := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin true) R
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hL := ihL
+      (hypIdxLe_of_mem_pushPos ws _ L hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεL
+    have hR := ihR
+      (hypIdxLe_of_mem_pushPos ws _ R hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεR
+    refine .leftCoprod_unitEta hfr' hfind' hit' ?_ ?_
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushL, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hL)
+      intro B y
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin false) hypIdx 0 y
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushR, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hR)
+      intro B y
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin true) hypIdx 0 y
+  case fo =>
+    intro Γ A ws ε d o f hfr _ ihf hws hε
+    exact .focus (forcedRule_rekey_focus hypIdx 0 ws hfr) (ihf hws hε)
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case letp =>
+    intro Γ P A ws ε d o n t _ iht hws hε
+    have hpush := pushPos_map_rekeyHypToObs_zero hypIdx ws (.obs (sig := sig) o) P
+      hws (by simp [Origin.hypIdxLe])
+    have hεw : ∀ {B} (x : Var (Γ ▻ P) B),
+        Origin.hypIdxLe (OriginEnv.weaken (A := P) ε (.obs (sig := sig) o) x) hypIdx := by
+      intro B x; cases x with
+      | here => simp [OriginEnv.weaken, Origin.hypIdxLe]
+      | there y => exact hε y
+    have ht := iht (hypIdxLe_of_mem_pushPos ws _ P hypIdx hws (by simp [Origin.hypIdxLe])) hεw
+    refine .letPos ?_
+    refine encodeReady_env_eq
+      (fun {B} x => by
+        simpa [Origin.rekeyHypToObs_obs] using
+          OriginEnv.weaken_rekeyHypToObs ε (.obs (sig := sig) o) hypIdx 0 x)
+      (by simpa [hpush, Origin.rekeyHypToObs_obs, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
+        using ht)
+  case sat =>
+    intro Γ A ws ε d o s t _ iht hws hε
+    exact .sat (iht hws hε)
+
+theorem encodeReadyFoc_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
+    (hypIdx : Nat)
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {f : FocTm Γ A}
+    (hws : worklistHypIdxLe ws hypIdx)
+    (hε : ∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx)
+    (h : EncodeReadyFoc ws ε domNest obsSlot f) :
+    EncodeReadyFoc
+      (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+      (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x))
+      domNest (obsSlot + 1) f := by
+  refine
+    (EncodeReadyFoc.rec
+      (motive_1 := fun {Γ} ws ε d o {A} t _ =>
+        worklistHypIdxLe ws hypIdx →
+        (∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx) →
+        EncodeReady (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+          (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x)) d (o + 1) t)
+      (motive_2 := fun {Γ} ws ε d o {A} f _ =>
+        worklistHypIdxLe ws hypIdx →
+        (∀ {B} (x : Var Γ B), Origin.hypIdxLe (ε x) hypIdx) →
+        EncodeReadyFoc (ws.map (PosEntry.rekeyHypToObs hypIdx 0))
+          (fun {B} x => Origin.rekeyHypToObs hypIdx 0 (ε x)) d (o + 1) f)
+      ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?lp ?lu ?fo ?pos ?neg ?letp ?sat h) hws hε
+  case ms =>
+    intro Γ A e ws ε d o t hfr _ ih hws hε
+    exact .moveStable (forcedRule_rekey_cons_moveStable hypIdx 0 e ws hfr)
+      (ih (fun e' he => hws e' (List.Mem.tail _ he)) hε)
+  case ln =>
+    intro Γ A e ws ε d o n hty hws hε
+    exact .leftNever (by simpa [PosEntry.rekeyHypToObs] using hty)
+  case ru =>
+    intro Γ ws ε d o hfr hws hε
+    exact .rightUnit (forcedRule_rekey_rightUnit hypIdx 0 ws hfr)
+  case rp =>
+    intro Γ L R ws ε d o t u hfr _ _ iht ihu hws hε
+    exact .rightProd_pair (forcedRule_rekey_rightProd hypIdx 0 ws hfr)
+      (iht hws hε) (ihu hws hε)
+  case rpf =>
+    intro Γ L R ws ε d o f hfr _ ihf hws hε
+    exact .rightProd_foc (forcedRule_rekey_rightProd hypIdx 0 ws hfr) (ihf hws hε)
+  case re =>
+    intro Γ Arg Ret ws ε d o body hfr _ ihb hws hε
+    have hpush := pushPos_map_rekeyHypToObs_zero hypIdx ws (.dom (sig := sig) d) Arg
+      hws (by simp [Origin.hypIdxLe])
+    have hεw : ∀ {B} (x : Var (Γ ▻ Arg) B),
+        Origin.hypIdxLe (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) d) x) hypIdx := by
+      intro B x; cases x with
+      | here => simp [OriginEnv.weaken, Origin.hypIdxLe]
+      | there y => exact hε y
+    have hb := ihb (hypIdxLe_of_mem_pushPos ws _ Arg hypIdx hws (by simp [Origin.hypIdxLe])) hεw
+    refine .rightExp_lam (forcedRule_rekey_rightExp hypIdx 0 ws hfr) ?_
+    refine encodeReady_env_eq ?_ (by simpa [hpush, Origin.rekeyHypToObs_dom] using hb)
+    intro B x; simpa [OriginEnv.weaken_rekeyHypToObs] using rfl
+  case ref =>
+    intro Γ Arg Ret ws ε d o f hfr _ ihf hws hε
+    exact .rightExp_foc (forcedRule_rekey_rightExp hypIdx 0 ws hfr) (ihf hws hε)
+  case lp =>
+    intro Γ A L R e ws ε d o n tL tR t hfr hpeel _ _ ihL ihR hws hε
+    have hfr' := forcedRule_rekey_cons_leftCoprod hypIdx 0 e ws hfr
+    have hpeel' :
+        peelCaseOuter
+            (fun {_B} x => Origin.rekeyHypToObs hypIdx 0 (ε x))
+            (Origin.rekeyHypToObs hypIdx 0 e.origin) t =
+          some ⟨L, R, n, tL, tR⟩ := by
+      rw [peelCaseOuter_rekeyHypToObs]; exact hpeel
+    have he : Origin.hypIdxLe e.origin hypIdx := hws e (List.Mem.head _)
+    have hws' : worklistHypIdxLe ws hypIdx :=
+      fun e' he' => hws e' (List.Mem.tail _ he')
+    have hεL : ∀ {B} (x : Var (Γ ▻ L) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := L) ε (.split e.origin false) x) hypIdx := by
+      intro B x; cases x with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there y => exact hε y
+    have hεR : ∀ {B} (x : Var (Γ ▻ R) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := R) ε (.split e.origin true) x) hypIdx := by
+      intro B x; cases x with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there y => exact hε y
+    have hpushL := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin false) L
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hpushR := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin true) R
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hL := ihL
+      (hypIdxLe_of_mem_pushPos ws _ L hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεL
+    have hR := ihR
+      (hypIdxLe_of_mem_pushPos ws _ R hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεR
+    refine .leftCoprod_peel hfr' hpeel' ?_ ?_
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushL, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hL)
+      intro B x
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin false) hypIdx 0 x
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushR, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hR)
+      intro B x
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin true) hypIdx 0 x
+  case lu =>
+    intro Γ L R e ws ε d o x hfr hfind hit _ _ ihL ihR hws hε
+    have hfr' := forcedRule_rekey_cons_leftCoprod hypIdx 0 e ws hfr
+    have hfind' :
+        OriginEnv.find?
+            (fun {_B} y => Origin.rekeyHypToObs hypIdx 0 (ε y))
+            (Origin.rekeyHypToObs hypIdx 0 e.origin) =
+          some ⟨.coprod L R, x⟩ := by
+      rw [OriginEnv.find?_rekeyHypToObs]; exact hfind
+    have hit' :
+        ((fun {_B} y => Origin.rekeyHypToObs hypIdx 0 (ε y)) x ==
+          Origin.rekeyHypToObs hypIdx 0 e.origin) = true := by
+      rw [Origin.beq_rekeyHypToObs]; exact hit
+    have he : Origin.hypIdxLe e.origin hypIdx := hws e (List.Mem.head _)
+    have hws' : worklistHypIdxLe ws hypIdx :=
+      fun e' he' => hws e' (List.Mem.tail _ he')
+    have hεL : ∀ {B} (y : Var (Γ ▻ L) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := L) ε (.split e.origin false) y) hypIdx := by
+      intro B y; cases y with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there z => exact hε z
+    have hεR : ∀ {B} (y : Var (Γ ▻ R) B),
+        Origin.hypIdxLe
+          (OriginEnv.weaken (A := R) ε (.split e.origin true) y) hypIdx := by
+      intro B y; cases y with
+      | here => simpa [OriginEnv.weaken, Origin.hypIdxLe] using he
+      | there z => exact hε z
+    have hpushL := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin false) L
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hpushR := pushPos_map_rekeyHypToObs_zero hypIdx ws (.split e.origin true) R
+      hws' (by simpa [Origin.hypIdxLe] using he)
+    have hL := ihL
+      (hypIdxLe_of_mem_pushPos ws _ L hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεL
+    have hR := ihR
+      (hypIdxLe_of_mem_pushPos ws _ R hypIdx hws'
+        (by simpa [Origin.hypIdxLe] using he)) hεR
+    refine .leftCoprod_unitEta hfr' hfind' hit' ?_ ?_
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushL, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hL)
+      intro B y
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin false) hypIdx 0 y
+    · refine encodeReady_env_eq ?_ (by
+        simpa [hpushR, Origin.rekeyHypToObs_split, List.map_cons,
+          PosEntry.rekeyHypToObs] using hR)
+      intro B y
+      simpa [Origin.rekeyHypToObs_split] using
+        OriginEnv.weaken_rekeyHypToObs ε (.split e.origin true) hypIdx 0 y
+  case fo =>
+    intro Γ A ws ε d o f hfr _ ihf hws hε
+    exact .focus (forcedRule_rekey_focus hypIdx 0 ws hfr) (ihf hws hε)
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case letp =>
+    intro Γ P A ws ε d o n t _ iht hws hε
+    have hpush := pushPos_map_rekeyHypToObs_zero hypIdx ws (.obs (sig := sig) o) P
+      hws (by simp [Origin.hypIdxLe])
+    have hεw : ∀ {B} (x : Var (Γ ▻ P) B),
+        Origin.hypIdxLe (OriginEnv.weaken (A := P) ε (.obs (sig := sig) o) x) hypIdx := by
+      intro B x; cases x with
+      | here => simp [OriginEnv.weaken, Origin.hypIdxLe]
+      | there y => exact hε y
+    have ht := iht (hypIdxLe_of_mem_pushPos ws _ P hypIdx hws (by simp [Origin.hypIdxLe])) hεw
+    refine .letPos ?_
+    refine encodeReady_env_eq
+      (fun {B} x => by
+        simpa [Origin.rekeyHypToObs_obs] using
+          OriginEnv.weaken_rekeyHypToObs ε (.obs (sig := sig) o) hypIdx 0 x)
+      (by simpa [hpush, Origin.rekeyHypToObs_obs, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
+        using ht)
+  case sat =>
+    intro Γ A ws ε d o s t _ iht hws hε
+    exact .sat (iht hws hε)
+
 /-! ### Newest-hyp → obs (peel-free) and atom bases-only -/
 
 private theorem ble_posEntry_trans (a b c : PosEntry sig)
@@ -2140,6 +2508,46 @@ theorem encodeReady_newest_hyp_to_obs_noPeel
     (fun {B} x => OriginEnv.rekey_ofHyps_weaken_to_obs hyps P 0 x) ?_
   simpa [posWorklist_rekey_weaken_hyp_to_obs] using hr
 
+/-- Full `EncodeReady` newest-hyp → obs (includes peel / unit-η under the binder). -/
+theorem encodeReady_newest_hyp_to_obs
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps ▻ P) A}
+    (h : EncodeReady
+      (OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)))
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size))
+      0 0 t) :
+    EncodeReady
+      (pushPos (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+        (.obs (sig := sig) 0) P)
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.obs (sig := sig) 0))
+      0 1 t := by
+  have hws :
+      worklistHypIdxLe
+        (OriginEnv.posWorklist
+          (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+            (.hyp (sig := sig) hyps.size)))
+        hyps.size := by
+    intro e he
+    have he' : e ∈ OriginEnv.posCollect
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)) := by
+      simpa [OriginEnv.posWorklist, List.mem_mergeSort] using he
+    exact hypIdxLe_posCollect_weaken_hyp hyps P he'
+  have hε : ∀ {B} (x : Var (Ctx.ofHyps hyps ▻ P) B),
+      Origin.hypIdxLe
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size) x)
+        hyps.size :=
+    fun {B} x => Origin.hypIdxLe_weaken_hyp hyps P x
+  have hr := encodeReady_rekeyHypToObs hyps.size hws hε h
+  refine encodeReady_env_eq
+    (fun {B} x => OriginEnv.rekey_ofHyps_weaken_to_obs hyps P 0 x) ?_
+  simpa [posWorklist_rekey_weaken_hyp_to_obs] using hr
+
 /-- Invert `moveStable` when the worklist head is a base. -/
 theorem encodeReadyNoPeel_tail_of_base_head
     {Γ : Ctx sig} {A : Object sig.nBases}
@@ -2215,6 +2623,78 @@ theorem encodeReadyNoPeel_of_base_prefix
         (encodeReadyNoPeel_tail_of_base_head
           (hpref e (List.Mem.head _)) h)
 
+/-- Invert `moveStable` when the worklist head is a base (`EncodeReady`). -/
+theorem encodeReady_tail_of_base_head
+    {Γ : Ctx sig} {A : Object sig.nBases}
+    {e : PosEntry sig} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (hty : ∃ b : Fin sig.nBases, e.ty = .base b)
+    (h : EncodeReady (e :: ws) ε domNest obsSlot t) :
+    EncodeReady ws ε domNest obsSlot t := by
+  have ⟨b, hb⟩ := hty
+  refine
+    (EncodeReady.rec
+      (motive_1 := fun {Γ} ws' ε' d o {A} t' _ =>
+        ∀ (e' : PosEntry sig) (wsTail : List (PosEntry sig))
+          (_hws : ws' = e' :: wsTail)
+          (_hty : ∃ b : Fin sig.nBases, e'.ty = .base b),
+          EncodeReady wsTail ε' d o t')
+      (motive_2 := fun {Γ} ws' ε' d o {A} f _ =>
+        ∀ (_e' : PosEntry sig) (_wsTail : List (PosEntry sig))
+          (_hws : ws' = _e' :: _wsTail)
+          (_hty : ∃ b : Fin sig.nBases, _e'.ty = .base b),
+          True)
+      ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?lp ?lu ?fo ?pos ?neg ?letp ?sat h)
+      e ws rfl hty
+  case ms =>
+    intro Γ A e' ws' ε d o t hfr _ ih e'' wsTail hws hty'
+    cases hws
+    exact ‹EncodeReady ws' ε d o t›
+  case ln =>
+    intro Γ A e' ws' ε d o n hty' e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [hb] at hty'
+  case ru =>
+    intro Γ ws' ε d o hfr e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case rp =>
+    intro Γ L R ws' ε d o t u hfr _ _ _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case rpf =>
+    intro Γ L R ws' ε d o f hfr _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case re =>
+    intro Γ Arg Ret ws' ε d o body hfr _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case ref =>
+    intro Γ Arg Ret ws' ε d o f hfr _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case lp =>
+    intro Γ A L R e' ws' ε d o n tL tR t hfr hpeel _ _ _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case lu =>
+    intro Γ L R e' ws' ε d o x hfr hfind hit _ _ _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case fo =>
+    intro Γ A ws' ε d o f hfr _ _ e'' wsTail hws ⟨b, hb⟩
+    cases hws; simp [forcedRule, hb] at hfr
+  case pos => intros; trivial
+  case neg => intros; trivial
+  case letp => intros; trivial
+  case sat => intros; trivial
+
+theorem encodeReady_of_base_prefix
+    {Γ : Ctx sig} {A : Object sig.nBases}
+    {pref ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (hpref : ∀ e ∈ pref, ∃ b : Fin sig.nBases, e.ty = .base b)
+    (h : EncodeReady (pref ++ ws) ε domNest obsSlot t) :
+    EncodeReady ws ε domNest obsSlot t := by
+  induction pref with
+  | nil => exact h
+  | cons e pref ih =>
+      exact ih (fun e' he' => hpref e' (List.Mem.tail _ he'))
+        (encodeReady_tail_of_base_head (hpref e (List.Mem.head _)) h)
+
 /--
 Base-only outer worklist: after stripping `moveStable` bases, `focus` + `letPos`
 with body ready under `pushPos [] (.obs 0)` (empty remaining worklist).
@@ -2232,6 +2712,26 @@ theorem encodeReady_foc_letPos_basesOnly_noPeel
       (OriginEnv.weaken (A := P) ε (.obs (sig := sig) 0))
       0 1 body) :
     EncodeReadyNoPeel ws ε 0 0 (.foc (.letPos n body)) := by
+  induction ws with
+  | nil =>
+      exact .focus hfr (.letPos hbody)
+  | cons e ws ih =>
+      have ⟨b, hb⟩ := hws e (List.Mem.head _)
+      exact .moveStable (forcedRule_cons_base_moveStable e ws hb A)
+        (ih fun e' he' => hws e' (List.Mem.tail _ he'))
+
+/-- Full `EncodeReady` form: body may use peel / unit-η (e.g. left-coprod under obs). -/
+theorem encodeReady_foc_letPos_basesOnly
+    {Γ : Ctx sig} {A P : Object sig.nBases}
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {n : NegNeu Γ P} {body : InvTm (Γ ▻ P) A}
+    (hws : ∀ e ∈ ws, ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hbody : EncodeReady
+      (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) 0) P)
+      (OriginEnv.weaken (A := P) ε (.obs (sig := sig) 0))
+      0 1 body) :
+    EncodeReady ws ε 0 0 (.foc (.letPos n body)) := by
   induction ws with
   | nil =>
       exact .focus hfr (.letPos hbody)
@@ -2263,6 +2763,23 @@ theorem encodeReady_applyObsNeu_atom_basesOnly
   simpa [PhaseEncodeReady] using
     encodeReady_of_noPeel
       (encodeReady_foc_letPos_basesOnly_noPeel hws hfr hbody)
+
+/-- Atom `letPos` with a full-ready body (peel allowed under the observation). -/
+theorem encodeReady_applyObsNeu_atom
+    {hyps : Array (Object sig.nBases)} {A P : Object sig.nBases}
+    {n : NegNeu (Ctx.ofHyps hyps) P}
+    {body : InvTm (Ctx.ofHyps hyps ▻ P) A}
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hbody : EncodeReady
+      (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) 0) P)
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.obs (sig := sig) 0))
+      0 1 body) :
+    PhaseEncodeReady
+      (.foc (.letPos n body) : InvTm (Ctx.ofHyps hyps) A) :=
+  encodeReady_foc_letPos_basesOnly hws hfr hbody
 
 /-! ### `Ctx.ofHyps_push` cast transport (atom / applyObsNeu) -/
 
@@ -2371,6 +2888,58 @@ theorem encodeReadyNoPeel_ofHyps_push_to_obs
   encodeReady_newest_hyp_to_obs_noPeel hyps P
     (encodeReadyNoPeel_ofHyps_push hyps P h)
 
+/-- Transport full `EncodeReady` along a context equality. -/
+theorem encodeReady_castCtx {Γ Δ : Ctx sig} (hΓ : Γ = Δ)
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ} {ε' : OriginEnv Δ}
+    {domNest obsSlot : Nat} {A : Object sig.nBases} {t : InvTm Γ A}
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' (hΓ ▸ x))
+    (h : EncodeReady ws ε domNest obsSlot t) :
+    EncodeReady ws ε' domNest obsSlot (InvTm.castCtx hΓ t) := by
+  subst hΓ
+  exact encodeReady_env_eq (fun {B} x => hε x) h
+
+theorem encodeReady_ofHyps_push
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (h : EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 t) :
+    EncodeReady
+      (OriginEnv.posWorklist
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.hyp (sig := sig) hyps.size)))
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps P) t) := by
+  have hctx := Ctx.ofHyps_push hyps P
+  have hws := posWorklist_ofHyps_push (sig := sig) hyps P
+  have h' :
+      EncodeReady
+        (OriginEnv.posWorklist
+          (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+            (.hyp (sig := sig) hyps.size)))
+        (OriginEnv.ofHyps (hyps.push P)) 0 0 t := by
+    simpa [hws] using h
+  exact encodeReady_castCtx hctx
+    (fun {B} y => OriginEnv.ofHyps_eq_weaken_hyp_cast hyps P y) h'
+
+/-- Push-body full readiness → obs-side readiness (peel allowed under the binder). -/
+theorem encodeReady_ofHyps_push_to_obs
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (h : EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 t) :
+    EncodeReady
+      (pushPos (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))
+        (.obs (sig := sig) 0) P)
+      (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+        (.obs (sig := sig) 0))
+      0 1
+      (InvTm.castCtx (Ctx.ofHyps_push hyps P) t) :=
+  encodeReady_newest_hyp_to_obs hyps P (encodeReady_ofHyps_push hyps P h)
+
 /--
 Observing under `ofHyps` appends the new obs after all hyp entries (hyp < obs).
 -/
@@ -2441,6 +3010,38 @@ theorem encodeReady_applyObsNeu_atom_of_push_body
     refine encodeReadyNoPeel_of_base_prefix hws ?_
     simpa [happen] using hobs
   exact encodeReady_applyObsNeu_atom_basesOnly hws hfr hbody'
+
+/--
+Full-ready push body (peel / left-coprod allowed under the new hyp): cast, rekey
+newest hyp → `.obs 0`, strip base prefix, wrap outer `focus` + `letPos`.
+This is the left-coprod-under-outer-`letPos` transport after peel dig readiness
+on the extended hyp context.
+-/
+theorem encodeReady_applyObsNeu_atom_of_push_body_ready
+    {hyps : Array (Object sig.nBases)} {A P : Object sig.nBases}
+    {n : NegNeu (Ctx.ofHyps hyps) P}
+    {body : InvTm (Ctx.ofHyps (hyps.push P)) A}
+    (hws : ∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+      ∃ b : Fin sig.nBases, e.ty = .base b)
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus)
+    (hbody : EncodeReady
+      (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+      (OriginEnv.ofHyps (hyps.push P)) 0 0 body) :
+    PhaseEncodeReady
+      (.foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body)) :
+        InvTm (Ctx.ofHyps hyps) A) := by
+  have hobs := encodeReady_ofHyps_push_to_obs hyps P hbody
+  have happen := pushPos_obs_ofHyps_eq_append hyps P 0
+  have hbody' :
+      EncodeReady
+        (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) 0) P)
+        (OriginEnv.weaken (A := P) (OriginEnv.ofHyps hyps)
+          (.obs (sig := sig) 0))
+        0 1
+        (InvTm.castCtx (Ctx.ofHyps_push hyps P) body) := by
+    refine encodeReady_of_base_prefix hws ?_
+    simpa [happen] using hobs
+  exact encodeReady_applyObsNeu_atom hws hfr hbody'
 
 /-! ### Schedule application preserves EncodeReady -/
 
@@ -2532,21 +3133,20 @@ Required: `encodeReady_of_rawReferenceProduced` /
 Until then `ValidEncodeFragment.ready` is a provisional stash and
 `EncodeTotal_holds_provisional` is not semantic totality.
 
-* ~~`peelCaseOuter_rekeyHypToObs`~~ **Landed** (incl. nested case-miss);
-  `encodeReady_env_eq` transports full `EncodeReady` (peel / unit-η). Full
-  `encodeReady_rekeyHypToObs` (worklist map + obsSlot bump with peel) still open;
-  peel-free rekey already exists.
-* ~~`Ctx.ofHyps_push` cast~~ **Landed** (`encodeReadyNoPeel_ofHyps_push` /
-  `encodeReady_applyObsNeu_atom_of_push_body`).
-* Coprod observation → outer `case` + ready branches.
+* ~~`peelCaseOuter_rekeyHypToObs`~~ **Landed**
+* ~~`encodeReady_rekeyHypToObs` (full, peel/unit-η)~~ **Landed**;
+  `encodeReady_newest_hyp_to_obs` / `encodeReady_ofHyps_push_to_obs` /
+  `encodeReady_applyObsNeu_atom_of_push_body_ready` package left-coprod-under-
+  outer-`letPos` after peel-ready bodies on `ofHyps.push`.
+* ~~`Ctx.ofHyps_push` cast~~ **Landed**
+* Coprod observation → outer `case` + ready branches (still open).
 * Empty-schedule case needs cont readiness from `WellInv` (raw has no stash).
-* Forced `leftCoprod` beneath outer `letPos` (EncodeReady transport after peel dig;
-  needs full ready-rekey + peel dig readiness).
 -/
 
 /--
 Partial readiness from **extra** case data (not from raw alone): empty schedule
-with a ready continuation, or inconsistent abort with never-on-worklist.
+with a ready continuation, inconsistent abort with never-on-worklist, or
+base-only atom `letPos` from a full-ready push body (peel / left-coprod allowed).
 -/
 theorem phaseEncodeReady_of_applyPairObs_partial
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -2568,7 +3168,16 @@ theorem phaseEncodeReady_of_applyPairObs_partial
         OriginEnv.posWorklist (OriginEnv.ofHyps hyps) = pref ++ e :: suf ∧
         (∀ e' ∈ pref, ∃ b : Fin sig.nBases, e'.ty = .base b) ∧
         e.ty = .never ∧
-        applyPairObs fuel σ hyps entries cont = .ok t)) :
+        applyPairObs fuel σ hyps entries cont = .ok t) ∨
+      (∃ (P : Object sig.nBases) (n : NegNeu (Ctx.ofHyps hyps) P)
+          (body : InvTm (Ctx.ofHyps (hyps.push P)) A),
+        (∀ e ∈ OriginEnv.posWorklist (OriginEnv.ofHyps hyps),
+          ∃ b : Fin sig.nBases, e.ty = .base b) ∧
+        forcedRule ([] : List (PosEntry sig)) A = .focus ∧
+        EncodeReady
+          (OriginEnv.posWorklist (OriginEnv.ofHyps (hyps.push P)))
+          (OriginEnv.ofHyps (hyps.push P)) 0 0 body ∧
+        t = .foc (.letPos n (InvTm.castCtx (Ctx.ofHyps_push hyps P) body)))) :
     PhaseEncodeReady t := by
   cases hcase with
   | inl h =>
@@ -2576,9 +3185,23 @@ theorem phaseEncodeReady_of_applyPairObs_partial
       exact encodeReady_applyPairObs_emptyEntries fuel σ entries cont hcons hempty
         hcont hok
   | inr h =>
-      obtain ⟨fuel, σ, entries, cont, pref, e, suf, hincons, hws, hpref, hty, hok⟩ := h
-      exact encodeReady_applyPairObs_inconsistent fuel σ entries cont hincons hok
-        hws hpref hty
+      cases h with
+      | inl h =>
+          obtain ⟨fuel, σ, entries, cont, pref, e, suf, hincons, hws, hpref, hty, hok⟩ := h
+          exact encodeReady_applyPairObs_inconsistent fuel σ entries cont hincons hok
+            hws hpref hty
+      | inr h =>
+          obtain ⟨P, n, body, hws, hfr, hbody, rfl⟩ := h
+          exact encodeReady_applyObsNeu_atom_of_push_body_ready hws hfr hbody
+
+/-- Partial certify when readiness is supplied by the partial cases above. -/
+theorem certifyReferenceProduced_of_partial
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {t : InvTm (Ctx.ofHyps hyps) A}
+    (hraw : RawReferenceProduced t)
+    (hready : PhaseEncodeReady t) :
+    CertifiedReferenceProduced t :=
+  ⟨hraw, hready⟩
 
 /-- Goal Prop: raw operational production implies phase encode readiness. -/
 def EncodeReadyOfRawGoal : Prop :=
