@@ -222,6 +222,32 @@ def provenanceDualKeepsBoth : Bool :=
 
 example : provenanceDualKeepsBoth = true := by native_decide
 
+/--
+Known 8D imprecision, pinned so a fix is visible as a fixture change.
+`X` carries both an old-only and a uses-new witness, so the application rule
+records `Y` only in the uses-new slot — even though `f x` uses no new
+hypothesis. Provenance stays sound (a uses-new derivation does exist); it is
+old-completeness that fails.
+-/
+def provenanceOverlapCtx : ReachCtx 2 where
+  hyps := #[
+    .base 0,                  -- x  : X  (old)
+    .exp (.base 0) (.base 1), -- f  : X → Y (old)
+    .base 0                   -- x' : X  (new)
+  ]
+  newFrom := 2
+
+def provenanceOverlapOldSlotEmpty : Bool :=
+  let σ := runReachability provenanceOverlapCtx (.base 1)
+  match σ.findTypeIdx (.base 1) with
+  | some i => !(σ.getCell i).oldWitness.isSome && (σ.getCell i).newWitness.isSome
+  | none => false
+
+example : usesNew (runReachability provenanceOverlapCtx (.base 1)) (.base 1) = true := by
+  native_decide
+
+example : provenanceOverlapOldSlotEmpty = true := by native_decide
+
 /-- Product projection: `p : X × Y` makes both components deducible. -/
 def prodCtx : ReachCtx 2 where
   hyps := #[.prod (.base 0) (.base 1)]
