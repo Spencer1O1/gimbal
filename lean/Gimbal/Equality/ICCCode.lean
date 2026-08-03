@@ -568,10 +568,12 @@ def peelCaseOuterGo {Γ : Ctx sig} {C : Object sig.nBases}
             peelCaseOuterGo fuel ε o body
         | .letPos (P := P) n body =>
             -- Peel only needs a non-colliding binder tag; encode assigns real
-            -- `obsSlot` later. Forced origins are hyp/obs/split, and temporary
-            -- `.obs 0` is fine for unweaken / origin checks on older vars.
+            -- `obsSlot` later. Use `.dom 0` (same as λ dig): forced origins are
+            -- hyp/obs/split, never `dom`, and `rekeyHypToObs` fixes `.dom`, so
+            -- dig under letPos commutes with newest-hyp→obs rekey (unlike a
+            -- temporary `.obs 0`, which collides after `hyp ↦ obs 0`).
             let ε' : OriginEnv (Γ ▻ P) :=
-              OriginEnv.weaken (A := P) ε (.obs (sig := sig) 0)
+              OriginEnv.weaken (A := P) ε (.dom 0)
             match peelCaseOuterGo fuel ε' o body with
             | some ⟨A, B, m, tL, tR⟩ =>
                 match NegNeu.unweaken? m with

@@ -1418,15 +1418,6 @@ worklist/env is `≤ hypIdx`, this preserves `Origin.cmp`, so `pushPos` and
     (PosEntry.rekeyHypToObs hypIdx k e).origin =
       Origin.rekeyHypToObs hypIdx k e.origin := rfl
 
-theorem OriginEnv.weaken_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
-    (ε : OriginEnv Γ) (o : Origin sig) (hypIdx k : Nat)
-    {B : Object sig.nBases} (x : Var (Γ ▻ A) B) :
-    Origin.rekeyHypToObs hypIdx k (OriginEnv.weaken (A := A) ε o x) =
-      OriginEnv.weaken (A := A)
-        (fun {C} y => Origin.rekeyHypToObs hypIdx k (ε y))
-        (Origin.rekeyHypToObs hypIdx k o) x := by
-  cases x <;> rfl
-
 theorem forcedRule_rekey_cons_moveStable (hypIdx k : Nat)
     (e : PosEntry sig) (ws : List (PosEntry sig)) {A : Object sig.nBases}
     (h : forcedRule (e :: ws) A = .moveStable e) :
@@ -2445,9 +2436,10 @@ Required: `encodeReady_of_rawReferenceProduced` /
 Until then `ValidEncodeFragment.ready` is a provisional stash and
 `EncodeTotal_holds_provisional` is not semantic totality.
 
-* `leftCoprod_peel` / `leftCoprod_unitEta` rekey needs `peelCaseOuter` under
-  `rekeyHypToObs` (temp dig `.obs 0` ≠ shifted obs slots). `find?_rekeyHypToObs`
-  landed.
+* `leftCoprod_peel` / `leftCoprod_unitEta` rekey: letPos dig now uses `.dom 0`
+  (rekey-fixed; same as λ). Full `peelCaseOuter_rekeyHypToObs` still WIP
+  (nested case-miss). Substrate: `originOfVar_rekeyHypToObs`,
+  `find?_rekeyHypToObs`.
 * ~~`Ctx.ofHyps_push` cast~~ **Landed** (`encodeReadyNoPeel_ofHyps_push` /
   `encodeReady_applyObsNeu_atom_of_push_body`).
 * Coprod observation → outer `case` + ready branches.

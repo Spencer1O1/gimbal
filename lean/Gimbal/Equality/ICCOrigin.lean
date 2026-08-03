@@ -575,6 +575,15 @@ def Origin.obsSlotAfterRekey (k obsSlot : Nat) : Nat :=
     Origin.rekeyHypToObs hypIdx k (.split p s) =
       .split (Origin.rekeyHypToObs hypIdx k p) s := rfl
 
+theorem OriginEnv.weaken_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig) (hypIdx k : Nat)
+    {B : Object sig.nBases} (x : Var (Γ ▻ A) B) :
+    Origin.rekeyHypToObs hypIdx k (OriginEnv.weaken (A := A) ε o x) =
+      OriginEnv.weaken (A := A)
+        (fun {C} y => Origin.rekeyHypToObs hypIdx k (ε y))
+        (Origin.rekeyHypToObs hypIdx k o) x := by
+  cases x <;> rfl
+
 /-- All `hyp` indices in `o` are `≤ bound` (true for `ofHyps` / newest-hyp rekey). -/
 def Origin.hypIdxLe (o : Origin sig) (bound : Nat) : Prop :=
   match o with

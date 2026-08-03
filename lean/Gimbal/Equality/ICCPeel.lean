@@ -280,7 +280,7 @@ theorem peelCaseOuterGo_icc {Γ : Ctx sig} {C : Object sig.nBases}
           | letPos n body =>
               simp only [peelCaseOuterGo] at h
               cases hb : peelCaseOuterGo fuel
-                  (OriginEnv.weaken (A := _) ε (.obs (sig := sig) 0)) o body with
+                  (OriginEnv.weaken (A := _) ε (.dom 0)) o body with
               | none => simp [hb] at h
               | some r =>
                   simp only [hb] at h
@@ -500,7 +500,7 @@ theorem peelCaseOuterGo_size_budget {Γ : Ctx sig} {C : Object sig.nBases}
               | letPos n body =>
                   simp only [peelCaseOuterGo] at h
                   cases hb : peelCaseOuterGo fuel
-                      (OriginEnv.weaken (A := _) ε (.obs (sig := sig) 0)) o body with
+                      (OriginEnv.weaken (A := _) ε (.dom 0)) o body with
                   | none => simp [hb] at h
                   | some r =>
                       simp only [hb] at h
@@ -1219,6 +1219,54 @@ theorem peelCaseOuter_case_case {Γ : Ctx sig}
           .case (NegNeu.weaken (B := B) (.var xt)) u₁ u₂⟩ := by
     simpa [tY, InvTm.rename_exchange_exchange] using hgo
   simpa [tY, hm] using hgo'.symm
+
+/-! ### Peel stable under `rekeyHypToObs`
+
+LetPos dig uses `.dom 0` (fixed by rekey; same as λ dig). Full
+`peelCaseOuterGo_rekeyHypToObs` (nested case-miss) is still WIP; these lemmas
+are the origin-side substrate.
+-/
+
+theorem originOfVar_rekeyHypToObs {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (hypIdx k : Nat) (n : NegNeu Γ A) :
+    originOfVar (fun {_B} x => Origin.rekeyHypToObs hypIdx k (ε x)) n =
+      (originOfVar ε n).map (Origin.rekeyHypToObs hypIdx k) := by
+  cases n with
+  | var x => rfl
+  | app _ _ | fst _ | snd _ => rfl
+
+/-- Rekey of a found origin preserves the hit/miss test (injectivity). -/
+theorem originOfVar_rekey_hit_iff {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (hypIdx k : Nat) (n : NegNeu Γ A) (o : Origin sig)
+    {β : Type} (r : β) :
+    (match (originOfVar ε n).map (Origin.rekeyHypToObs hypIdx k) with
+      | some om => if om = Origin.rekeyHypToObs hypIdx k o then some r else none
+      | none => none) =
+    (match originOfVar ε n with
+      | some om => if om = o then some r else none
+      | none => none) := by
+  cases originOfVar ε n with
+  | none => rfl
+  | some om =>
+      change
+          (if Origin.rekeyHypToObs hypIdx k om =
+                Origin.rekeyHypToObs hypIdx k o then some r else none) =
+            (if om = o then some r else none)
+      by_cases h : om = o
+      · subst h; simp
+      · have hne : Origin.rekeyHypToObs hypIdx k om ≠
+            Origin.rekeyHypToObs hypIdx k o := fun hr =>
+          h (Origin.rekeyHypToObs_inj hr)
+        simp [h, hne]
+
+theorem originOfVar_env_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    {ε ε' : OriginEnv Γ} (n : NegNeu Γ A)
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' x) :
+    originOfVar ε n = originOfVar ε' n := by
+  cases n with
+  | var x => exact congrArg some (hε x)
+  | app _ _ | fst _ | snd _ => rfl
+
 
 end Equality
 end Gimbal
