@@ -325,8 +325,8 @@ inductive WellInv : {Γ : Ctx sig} → {A : Object sig.nBases} → InvTm Γ A �
       WellInv t → WellInv (.lam t)
   | case {Γ A B C} {n : NegNeu Γ (.coprod A B)}
       {t : InvTm (Γ ▻ A) C} {u : InvTm (Γ ▻ B) C} :
-      WellInv t → WellInv u → WellInv (.case n t u)
-  | abort {Γ A} {n : NegNeu Γ .never} : WellInv (.abort (A := A) n)
+      WellNeg n → WellInv t → WellInv u → WellInv (.case n t u)
+  | abort {Γ A} {n : NegNeu Γ .never} : WellNeg n → WellInv (.abort (A := A) n)
   | foc {Γ A} {f : FocTm Γ A} : WellFoc f → WellInv (.foc f)
 
 /-- Focused terms match goal polarity (pos/neg) or binder/saturation forms. -/
@@ -334,20 +334,28 @@ inductive WellFoc : {Γ : Ctx sig} → {A : Object sig.nBases} → FocTm Γ A �
   | pos {Γ A} {p : PosNeu Γ A} :
       objectPolarity A = .pos → WellPos p → WellFoc (.pos (.done p))
   | neg {Γ A} {n : NegNeu Γ A} :
-      objectPolarity A = .neg → WellFoc (.neg (.done n))
+      objectPolarity A = .neg → WellNeg n → WellFoc (.neg (.done n))
   | letPos {Γ P A} {n : NegNeu Γ P} {t : InvTm (Γ ▻ P) A} :
-      objectPolarity P = .pos → WellInv t → WellFoc (.letPos n t)
+      objectPolarity P = .pos → WellNeg n → WellInv t → WellFoc (.letPos n t)
   | sat {Γ A} {s : Schedule sig.nBases} {t : InvTm Γ A} :
       WellInv t → WellFoc (.sat (.mk s t))
 
 /-- Positive values: neutrals at positive types, injections, and `↓` shifts. -/
 inductive WellPos : {Γ : Ctx sig} → {A : Object sig.nBases} → PosNeu Γ A → Prop where
   | neu {Γ A} {n : NegNeu Γ A} :
-      objectPolarity A = .pos → WellPos (.neu n)
+      objectPolarity A = .pos → WellNeg n → WellPos (.neu n)
   | inl {Γ A B} {p : PosNeu Γ A} : WellPos p → WellPos (.inl (B := B) p)
   | inr {Γ A B} {p : PosNeu Γ B} : WellPos p → WellPos (.inr (A := A) p)
   | val {Γ A} {t : InvTm Γ A} :
       objectPolarity A = .neg → WellInv t → WellPos (.val t)
+
+/-- Neutral spines: legality is inherited by the invertible arguments. -/
+inductive WellNeg : {Γ : Ctx sig} → {A : Object sig.nBases} → NegNeu Γ A → Prop where
+  | var {Γ A} {x : Var Γ A} : WellNeg (.var x)
+  | app {Γ A B} {n : NegNeu Γ (.exp A B)} {t : InvTm Γ A} :
+      WellNeg n → WellInv t → WellNeg (.app n t)
+  | fst {Γ A B} {n : NegNeu Γ (.prod A B)} : WellNeg n → WellNeg (.fst n)
+  | snd {Γ A B} {n : NegNeu Γ (.prod A B)} : WellNeg n → WellNeg (.snd n)
 end
 
 mutual
@@ -355,21 +363,27 @@ def wellInvb {Γ : Ctx sig} {A : Object sig.nBases} : InvTm Γ A → Bool
   | .unit => true
   | .pair t u => wellInvb t && wellInvb u
   | .lam t => wellInvb t
-  | .case _ t u => wellInvb t && wellInvb u
-  | .abort _ => true
+  | .case n t u => wellNegb n && wellInvb t && wellInvb u
+  | .abort n => wellNegb n
   | .foc f => wellFocb f
 
 def wellFocb {Γ : Ctx sig} {A : Object sig.nBases} : FocTm Γ A → Bool
   | .pos (.done p) => objectPolarity A == .pos && wellPosb p
-  | .neg (.done _) => objectPolarity A == .neg
-  | .letPos (P := P) _ t => objectPolarity P == .pos && wellInvb t
+  | .neg (.done n) => objectPolarity A == .neg && wellNegb n
+  | .letPos (P := P) n t => objectPolarity P == .pos && wellNegb n && wellInvb t
   | .sat (.mk _ t) => wellInvb t
 
 def wellPosb {Γ : Ctx sig} {A : Object sig.nBases} : PosNeu Γ A → Bool
-  | .neu _ => objectPolarity A == .pos
+  | .neu n => objectPolarity A == .pos && wellNegb n
   | .inl p => wellPosb p
   | .inr p => wellPosb p
   | .val t => objectPolarity A == .neg && wellInvb t
+
+def wellNegb {Γ : Ctx sig} {A : Object sig.nBases} : NegNeu Γ A → Bool
+  | .var _ => true
+  | .app n t => wellNegb n && wellInvb t
+  | .fst n => wellNegb n
+  | .snd n => wellNegb n
 end
 
 /-- Executable phase check (sound for `WellInv` / `WellFoc` by construction). -/

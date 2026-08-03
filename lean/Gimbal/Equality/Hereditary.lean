@@ -227,8 +227,13 @@ makes the eliminators below terminate.
 -/
 inductive HSubst {sig : Signature} (Γ : Ctx sig) (A C : Object sig.nBases) where
   | neu : NegNeu Γ C → HSubst Γ A C
-  | here : A = C → HSubst Γ A C
+  | here : InvTm Γ C → A = C → HSubst Γ A C
   | val : InvTm Γ C → objectSize C < objectSize A → HSubst Γ A C
+
+/-- Contract two copies of the newest binder when their types agree. -/
+def Rename.diagEq {Γ : Ctx sig} {A P : Object sig.nBases} (h : A = P) :
+    Rename sig (Γ ▻ A ▻ P) (Γ ▻ A) := by
+  subst h; exact Rename.diag
 
 mutual
 
@@ -323,8 +328,8 @@ def hsubstInv {Γ : Ctx sig} {A C : Object sig.nBases}
           .case n'
             (hsubstInv (InvTm.rename Rename.exchange t₁) (InvTm.weaken v))
             (hsubstInv (InvTm.rename Rename.exchange t₂) (InvTm.weaken v))
-      | .here h =>
-          hcase (h ▸ v)
+      | .here w _ =>
+          hcase w
             (hsubstInv (InvTm.rename Rename.exchange t₁) (InvTm.weaken v))
             (hsubstInv (InvTm.rename Rename.exchange t₂) (InvTm.weaken v))
       | .val w _ =>
@@ -334,24 +339,22 @@ def hsubstInv {Γ : Ctx sig} {A C : Object sig.nBases}
   | .abort n =>
       match hsubstNeu n v with
       | .neu n' => .abort n'
-      | .here h => habort C (h ▸ v)
+      | .here w _ => habort C w
       | .val w _ => habort C w
   | .foc (.pos (.done p)) => hsubstPos p v
   | .foc (.neg (.done n)) =>
       match hsubstNeu n v with
       | .neu n' => NegNeu.eta C n'
-      | .here h => h ▸ v
+      | .here w _ => w
       | .val w _ => w
   | .foc (.letPos (P := P) n t₁) =>
       match hsubstNeu n v with
       | .neu n' =>
           .foc (.letPos n'
             (hsubstInv (InvTm.rename Rename.exchange t₁) (InvTm.weaken v)))
-      | .here h =>
+      | .here _ h =>
           -- The let binds the cut variable itself: contract the two copies.
-          hsubstInv
-            (InvTm.rename Rename.diag
-              (InvTm.castCtx (congrArg (Ctx.snoc (Γ ▻ A)) h.symm) t₁)) v
+          hsubstInv (InvTm.rename (Rename.diagEq h) t₁) v
       | .val w _ =>
           hsubstInv
             (hsubstInv (InvTm.rename Rename.exchange t₁) (InvTm.weaken v)) w
@@ -361,7 +364,7 @@ decreasing_by
   all_goals
     first
     | decreasing_tactic
-    | (subst_vars; simp only [InvTm.castCtx]; decreasing_tactic)
+    | (subst_vars; decreasing_tactic)
 
 /-- Hereditary substitution into a positive value. -/
 def hsubstPos {Γ : Ctx sig} {A C : Object sig.nBases}
@@ -370,7 +373,7 @@ def hsubstPos {Γ : Ctx sig} {A C : Object sig.nBases}
   | .neu n =>
       match hsubstNeu n v with
       | .neu n' => NegNeu.eta C n'
-      | .here h => h ▸ v
+      | .here w _ => w
       | .val w _ => w
   | .inl (B := B₁) q => InvTm.hinl B₁ (hsubstPos q v)
   | .inr (A := A₁) q => InvTm.hinr A₁ (hsubstPos q v)
@@ -381,24 +384,24 @@ termination_by (objectSize A, 1, p.size)
 def hsubstNeu {Γ : Ctx sig} {A C : Object sig.nBases}
     (n : NegNeu (Γ ▻ A) C) (v : InvTm Γ A) : HSubst Γ A C :=
   match n with
-  | .var .here => .here rfl
+  | .var .here => .here v rfl
   | .var (.there x) => .neu (.var x)
   | .app (A := A₁) (B := B₁) m u =>
       match hsubstNeu m v with
       | .neu m' => .neu (.app m' (hsubstInv u v))
-      | .here h =>
-          .val (happ (h ▸ v) (hsubstInv u v)) (by subst h; simp; omega)
+      | .here w h =>
+          .val (happ w (hsubstInv u v)) (by subst h; simp; omega)
       | .val w hlt =>
           .val (happ w (hsubstInv u v)) (by simp at hlt; omega)
   | .fst (A := A₁) (B := B₁) m =>
       match hsubstNeu m v with
       | .neu m' => .neu (.fst m')
-      | .here h => .val (hfst (h ▸ v)) (by subst h; simp; omega)
+      | .here w h => .val (hfst w) (by subst h; simp; omega)
       | .val w hlt => .val (hfst w) (by simp at hlt; omega)
   | .snd (A := A₁) (B := B₁) m =>
       match hsubstNeu m v with
       | .neu m' => .neu (.snd m')
-      | .here h => .val (hsnd (h ▸ v)) (by subst h; simp; omega)
+      | .here w h => .val (hsnd w) (by subst h; simp; omega)
       | .val w hlt => .val (hsnd w) (by simp at hlt; omega)
 termination_by (objectSize A, 1, n.size)
 decreasing_by
@@ -408,6 +411,155 @@ decreasing_by
     | (subst_vars; decreasing_tactic)
 
 end
+
+/-! ### Phase legality of the output
+
+Every hereditary operation maps well-focused inputs to well-focused outputs,
+so focusing lands in the legal fragment (`WellInv`) by construction.
+-/
+
+/-! #### Renaming preserves legality -/
+
+mutual
+theorem wellInv_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) {t : InvTm Γ A} (h : WellInv t) :
+    WellInv (InvTm.rename ρ t) :=
+  match t, h with
+  | .unit, _ => .unit
+  | .pair _ _, .pair ht hu => .pair (wellInv_rename ρ ht) (wellInv_rename ρ hu)
+  | .lam _, .lam ht => .lam (wellInv_rename (Rename.ext ρ) ht)
+  | .case _ _ _, .case hn ht hu =>
+      .case (wellNeg_rename ρ hn) (wellInv_rename (Rename.ext ρ) ht)
+        (wellInv_rename (Rename.ext ρ) hu)
+  | .abort _, .abort hn => .abort (wellNeg_rename ρ hn)
+  | .foc _, .foc hf => .foc (wellFoc_rename ρ hf)
+termination_by t.size
+
+theorem wellFoc_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) {f : FocTm Γ A} (h : WellFoc f) :
+    WellFoc (FocTm.rename ρ f) :=
+  match f, h with
+  | .pos (.done _), .pos hpol hp => .pos hpol (wellPos_rename ρ hp)
+  | .neg (.done _), .neg hpol hn => .neg hpol (wellNeg_rename ρ hn)
+  | .letPos _ _, .letPos hpol hn ht =>
+      .letPos hpol (wellNeg_rename ρ hn) (wellInv_rename (Rename.ext ρ) ht)
+  | .sat (.mk _ _), .sat ht => .sat (wellInv_rename ρ ht)
+termination_by f.size
+
+theorem wellPos_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) {p : PosNeu Γ A} (h : WellPos p) :
+    WellPos (PosNeu.rename ρ p) :=
+  match p, h with
+  | .neu _, .neu hpol hn => .neu hpol (wellNeg_rename ρ hn)
+  | .inl _, .inl hp => .inl (wellPos_rename ρ hp)
+  | .inr _, .inr hp => .inr (wellPos_rename ρ hp)
+  | .val _, .val hpol ht => .val hpol (wellInv_rename ρ ht)
+termination_by p.size
+
+theorem wellNeg_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) {n : NegNeu Γ A} (h : WellNeg n) :
+    WellNeg (NegNeu.rename ρ n) :=
+  match n, h with
+  | .var _, _ => .var
+  | .app _ _, .app hn ht => .app (wellNeg_rename ρ hn) (wellInv_rename ρ ht)
+  | .fst _, .fst hn => .fst (wellNeg_rename ρ hn)
+  | .snd _, .snd hn => .snd (wellNeg_rename ρ hn)
+termination_by n.size
+end
+
+theorem wellInv_weaken {Γ : Ctx sig} {A B : Object sig.nBases} {t : InvTm Γ A}
+    (h : WellInv t) : WellInv (InvTm.weaken (B := B) t) :=
+  wellInv_rename _ h
+
+/-! #### Identity expansion and injections -/
+
+theorem wellInv_eta :
+    ∀ (A : Object sig.nBases) {Γ : Ctx sig} {n : NegNeu Γ A}, WellNeg n →
+      WellInv (NegNeu.eta A n) := by
+  intro A
+  induction A with
+  | base q => intro Γ n hn; exact .foc (.pos rfl (.neu rfl hn))
+  | unit => intro Γ n _; exact .unit
+  | never => intro Γ n hn; exact .abort hn
+  | prod A B ihA ihB => intro Γ n hn; exact .pair (ihA (.fst hn)) (ihB (.snd hn))
+  | coprod A B _ _ => intro Γ n hn; exact .foc (.pos rfl (.neu rfl hn))
+  | exp A B ihA ihB =>
+      intro Γ n hn
+      exact .lam (ihB (.app (wellNeg_rename _ hn) (ihA .var)))
+
+theorem wellInv_toInv {Γ : Ctx sig} {A : Object sig.nBases} {p : PosNeu Γ A}
+    (h : WellPos p) : WellInv p.toInv := by
+  cases h with
+  | neu _ hn => exact wellInv_eta _ hn
+  | inl hp => exact .foc (.pos rfl (.inl hp))
+  | inr hp => exact .foc (.pos rfl (.inr hp))
+  | val _ ht => exact ht
+
+theorem wellInv_hinl {Γ : Ctx sig} {A : Object sig.nBases}
+    (B : Object sig.nBases) {t : InvTm Γ A} (h : WellInv t) :
+    WellInv (InvTm.hinl B t) := by
+  induction t using InvTm.hinl.induct generalizing B with
+  | case1 _ _ _ _ n t u iht ihu =>
+      cases h with
+      | case hn ht hu => exact .case hn (iht B ht) (ihu B hu)
+  | case2 => cases h with | abort hn => exact .abort hn
+  | case3 _ _ _ n t iht =>
+      cases h with
+      | foc hf =>
+          cases hf with
+          | letPos hpol hn ht => exact .foc (.letPos hpol hn (iht B ht))
+  | case4 _ _ s t iht =>
+      cases h with
+      | foc hf => cases hf with | sat ht => exact .foc (.sat (iht B ht))
+  | case5 _ _ p =>
+      cases h with
+      | foc hf => cases hf with | pos _ hp => exact .foc (.pos rfl (.inl hp))
+  | case6 _ _ n =>
+      cases h with
+      | foc hf =>
+          cases hf with
+          | neg hpol hn =>
+              exact .foc (.pos rfl (.inl (.val hpol (wellInv_eta _ hn))))
+  | case7 => exact .foc (.pos rfl (.inl (.val rfl .unit)))
+  | case8 _ _ _ t u =>
+      cases h with
+      | pair ht hu => exact .foc (.pos rfl (.inl (.val rfl (.pair ht hu))))
+  | case9 _ _ _ t =>
+      cases h with
+      | lam ht => exact .foc (.pos rfl (.inl (.val rfl (.lam ht))))
+
+theorem wellInv_hinr {Γ : Ctx sig} {B : Object sig.nBases}
+    (A : Object sig.nBases) {t : InvTm Γ B} (h : WellInv t) :
+    WellInv (InvTm.hinr A t) := by
+  induction t using InvTm.hinr.induct generalizing A with
+  | case1 _ _ _ _ n t u iht ihu =>
+      cases h with
+      | case hn ht hu => exact .case hn (iht A ht) (ihu A hu)
+  | case2 => cases h with | abort hn => exact .abort hn
+  | case3 _ _ _ n t iht =>
+      cases h with
+      | foc hf =>
+          cases hf with
+          | letPos hpol hn ht => exact .foc (.letPos hpol hn (iht A ht))
+  | case4 _ _ s t iht =>
+      cases h with
+      | foc hf => cases hf with | sat ht => exact .foc (.sat (iht A ht))
+  | case5 _ _ p =>
+      cases h with
+      | foc hf => cases hf with | pos _ hp => exact .foc (.pos rfl (.inr hp))
+  | case6 _ _ n =>
+      cases h with
+      | foc hf =>
+          cases hf with
+          | neg hpol hn =>
+              exact .foc (.pos rfl (.inr (.val hpol (wellInv_eta _ hn))))
+  | case7 => exact .foc (.pos rfl (.inr (.val rfl .unit)))
+  | case8 _ _ _ t u =>
+      cases h with
+      | pair ht hu => exact .foc (.pos rfl (.inr (.val rfl (.pair ht hu))))
+  | case9 _ _ _ t =>
+      cases h with
+      | lam ht => exact .foc (.pos rfl (.inr (.val rfl (.lam ht))))
 
 /-! ### Total focusing -/
 
