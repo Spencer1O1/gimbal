@@ -259,10 +259,14 @@ Blocked / WIP:
    ~~`EncodeReadyRawCase` + `certifyReferenceProduced_of_EncodeReadyRawCase`~~ /
    ~~exact-never / exactNeverOnly / atom-nil-rest Go steps~~ /
    ~~restricted Raw→ready `EncodeReadyOfRawGoal_emptyOrExactNever_holds`~~ /
+   ~~atom+coprod nil-rest Go inversion (`*_nil_rest_ok_inv`, `*_of_go`)~~ /
+   ~~enlarged restricted Raw→ready
+   `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds`~~ /
    ~~empty-schedule unit/foc-done shapes~~ landed; same-term
    `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
    head); still need full unrestricted `encodeReady_of_rawReferenceProduced`
-   (atom+coprod Go inversion), and general `WellInv`→ready)
+   (multi-entry mixed schedules / body readiness from raw alone), and general
+   `WellInv`→ready)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
