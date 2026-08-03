@@ -28,6 +28,7 @@ import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Preserve
 import Gimbal.Equality.Opacity
+import Gimbal.Equality.Subformula
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Deduction
 import Gimbal.Equality.Saturation

@@ -9,33 +9,10 @@
 
 import Gimbal.Equality.LambdaSyntax
 import Gimbal.Equality.Polarized
+import Gimbal.Equality.Subformula
 
 namespace Gimbal
 namespace Equality
-
-/-! ### Subformula universe -/
-
-/-- Immediate subformulas of an object. -/
-def subformulaStep {n : Nat} : Object n → List (Object n)
-  | .base _ | .unit | .never => []
-  | .prod A B | .coprod A B | .exp A B => [A, B]
-
-/-- Finite subformula closure of a list of roots (deduplicated, stable order). -/
-def subformulaClosure {n : Nat} (roots : List (Object n)) (fuel : Nat := 4096) :
-    Array (Object n) :=
-  let rec go (fuel : Nat) (pending : List (Object n)) (acc : Array (Object n)) :
-      Array (Object n) :=
-    match fuel with
-    | 0 => acc
-    | fuel + 1 =>
-      match pending with
-      | [] => acc
-      | A :: rest =>
-        if acc.contains A then
-          go fuel rest acc
-        else
-          go fuel (subformulaStep A ++ rest) (acc.push A)
-  go fuel roots #[]
 
 /-! ### Witness parent pointers -/
 
