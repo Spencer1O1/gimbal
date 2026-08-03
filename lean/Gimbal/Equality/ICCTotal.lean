@@ -1026,6 +1026,29 @@ theorem encodeIccStep_case_unit {Γ : Ctx sig} {A B : Object sig.nBases}
     (fun fuel =>
       encodeICCGo_case_unit_any fuel e ws ε 0 0 x hty hit hfind)
 
+/-! ### `case_letPos` / `sat_body` packaging (invariance substrate)
+
+`ICCEq.sat_body` unwraps `.foc (.sat _)` to the body. Encode of sat under
+`forcedRule = .focus` yields `.foc (.body c)` while encode of the body yields
+`c`, so raw `EncodeIccStep` needs either body-erasure on codes or a restricted
+domain — not claimed here.
+
+`ICCEq.case_letPos` is the peel-dig commute (parallel to `case_lam`). Go
+agreement under forced left-coprod is the next packaging step
+(`encodeIccStep_case_letPos`), once peel payloads on both sides are shown equal.
+-/
+
+/-- Sat unwrap at the Go level under `focus` (fuel shifted by the sat shell). -/
+theorem encodeICCGo_foc_sat_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (s : Schedule sig.nBases) (t : InvTm Γ A)
+    (hfr : forcedRule ws A = .focus) :
+    encodeICCGo (fuel + 2) ws ε domNest obsSlot (.foc (.sat (.mk s t))) =
+      match encodeICCGo fuel ws ε domNest obsSlot t with
+      | some c => some (.foc (.body c))
+      | none => none :=
+  encodeICCGo_foc_sat fuel ws ε domNest obsSlot s t hfr
+
 /-! ### EncodeTotal base witnesses -/
 
 theorem encode_unit_nilWorklist {Γ : Ctx sig} (ε : OriginEnv Γ)
@@ -1534,10 +1557,10 @@ theorem pushPos_map_rekeyHypToObs_zero (hypIdx : Nat)
         (f := PosEntry.rekeyHypToObs hypIdx 0) hl
     simpa [PosEntry.rekeyHypToObs, List.map_cons] using hmap
 
-/-! ### Rekey EncodeReady (peel-free)
+/-! ### Rekey EncodeReady
 
-Transport `EncodeReadyNoPeel` along `Origin.rekeyHypToObs hypIdx 0` (bumps
-`obsSlot`). Omits peel / unit-η (those need `find?` / `peelCaseOuter` rekey).
+Transport along `Origin.rekeyHypToObs hypIdx 0` (bumps `obsSlot`). Peel / unit-η
+use `peelCaseOuter_rekeyHypToObs` / `OriginEnv.find?_rekeyHypToObs`.
 -/
 
 def worklistHypIdxLe (ws : List (PosEntry sig)) (bound : Nat) : Prop :=
@@ -1827,6 +1850,79 @@ theorem encodeReadyFoc_rekeyHypToObs_noPeel {Γ : Ctx sig} {A : Object sig.nBase
   case sat =>
     intro Γ A ws ε d o s t _ iht hws hε
     exact .sat (iht hws hε)
+
+/-- Pointwise env equality for full `EncodeReady` (incl. peel / unit-η). -/
+theorem encodeReady_env_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    {ws : List (PosEntry sig)} {ε ε' : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' x)
+    (h : EncodeReady ws ε domNest obsSlot t) :
+    EncodeReady ws ε' domNest obsSlot t := by
+  refine
+    (EncodeReady.rec
+      (motive_1 := fun {Γ} ws ε d o {A} t _ =>
+        ∀ ε' : OriginEnv Γ, (∀ {B} (x : Var Γ B), ε x = ε' x) →
+          EncodeReady ws ε' d o t)
+      (motive_2 := fun {Γ} ws ε d o {A} f _ =>
+        ∀ ε' : OriginEnv Γ, (∀ {B} (x : Var Γ B), ε x = ε' x) →
+          EncodeReadyFoc ws ε' d o f)
+      ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?lp ?lu ?fo ?pos ?neg ?letp ?sat h) ε' hε
+  case ms =>
+    intro Γ A e ws ε d o t hfr _ ih ε' hε'
+    exact .moveStable hfr (ih ε' hε')
+  case ln => intros; exact .leftNever ‹_›
+  case ru => intros; exact .rightUnit ‹_›
+  case rp =>
+    intro Γ L R ws ε d o t u hfr _ _ iht ihu ε' hε'
+    exact .rightProd_pair hfr (iht ε' hε') (ihu ε' hε')
+  case rpf =>
+    intro Γ L R ws ε d o f hfr _ ihf ε' hε'
+    exact .rightProd_foc hfr (ihf ε' hε')
+  case re =>
+    intro Γ Arg Ret ws ε d o body hfr _ ihb ε' hε'
+    refine .rightExp_lam hfr (ihb (OriginEnv.weaken (A := Arg) ε' (.dom (sig := sig) d)) ?_)
+    intro B x; cases x <;> [rfl; exact hε' _]
+  case ref =>
+    intro Γ Arg Ret ws ε d o f hfr _ ihf ε' hε'
+    exact .rightExp_foc hfr (ihf ε' hε')
+  case lp =>
+    intro Γ A L R e ws ε d o n tL tR t hfr hpeel _ _ ihL ihR ε' hε'
+    have hpeel' : peelCaseOuter ε' e.origin t = some ⟨L, R, n, tL, tR⟩ :=
+      (peelCaseOuter_env_eq t hε' rfl).symm ▸ hpeel
+    refine .leftCoprod_peel hfr hpeel'
+      (ihL (OriginEnv.weaken (A := L) ε' (.split e.origin false)) ?_)
+      (ihR (OriginEnv.weaken (A := R) ε' (.split e.origin true)) ?_)
+    · intro B x; cases x with
+      | here => simp [OriginEnv.weaken, hε']
+      | there y => exact hε' y
+    · intro B x; cases x with
+      | here => simp [OriginEnv.weaken, hε']
+      | there y => exact hε' y
+  case lu =>
+    intro Γ L R e ws ε d o x hfr hfind hit _ _ ihL ihR ε' hε'
+    have hit' : (ε' x == e.origin) = true := by simpa [hε' x] using hit
+    refine .leftCoprod_unitEta hfr
+      ((OriginEnv.find?_env_eq e.origin hε').symm ▸ hfind) hit'
+      (ihL (OriginEnv.weaken (A := L) ε' (.split e.origin false)) ?_)
+      (ihR (OriginEnv.weaken (A := R) ε' (.split e.origin true)) ?_)
+    · intro B y; cases y with
+      | here => simp [OriginEnv.weaken, hε']
+      | there z => exact hε' z
+    · intro B y; cases y with
+      | here => simp [OriginEnv.weaken, hε']
+      | there z => exact hε' z
+  case fo =>
+    intro Γ A ws ε d o f hfr _ ihf ε' hε'
+    exact .focus hfr (ihf ε' hε')
+  case pos => intros; exact .pos
+  case neg => intros; exact .neg
+  case letp =>
+    intro Γ P A ws ε d o n t _ iht ε' hε'
+    refine .letPos (iht (OriginEnv.weaken (A := P) ε' (.obs (sig := sig) o)) ?_)
+    intro B x; cases x <;> [rfl; exact hε' _]
+  case sat =>
+    intro Γ A ws ε d o s t _ iht ε' hε'
+    exact .sat (iht ε' hε')
 
 /-! ### Newest-hyp → obs (peel-free) and atom bases-only -/
 
@@ -2436,15 +2532,16 @@ Required: `encodeReady_of_rawReferenceProduced` /
 Until then `ValidEncodeFragment.ready` is a provisional stash and
 `EncodeTotal_holds_provisional` is not semantic totality.
 
-* `leftCoprod_peel` / `leftCoprod_unitEta` rekey: letPos dig now uses `.dom 0`
-  (rekey-fixed; same as λ). Full `peelCaseOuter_rekeyHypToObs` still WIP
-  (nested case-miss). Substrate: `originOfVar_rekeyHypToObs`,
-  `find?_rekeyHypToObs`.
+* ~~`peelCaseOuter_rekeyHypToObs`~~ **Landed** (incl. nested case-miss);
+  `encodeReady_env_eq` transports full `EncodeReady` (peel / unit-η). Full
+  `encodeReady_rekeyHypToObs` (worklist map + obsSlot bump with peel) still open;
+  peel-free rekey already exists.
 * ~~`Ctx.ofHyps_push` cast~~ **Landed** (`encodeReadyNoPeel_ofHyps_push` /
   `encodeReady_applyObsNeu_atom_of_push_body`).
 * Coprod observation → outer `case` + ready branches.
 * Empty-schedule case needs cont readiness from `WellInv` (raw has no stash).
-* Forced `leftCoprod` beneath outer `letPos` (EncodeReady transport after peel dig).
+* Forced `leftCoprod` beneath outer `letPos` (EncodeReady transport after peel dig;
+  needs full ready-rekey + peel dig readiness).
 -/
 
 /--

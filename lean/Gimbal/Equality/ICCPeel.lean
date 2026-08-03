@@ -1541,5 +1541,11 @@ theorem peelCaseOuter_rekeyHypToObs {Γ : Ctx sig} {C : Object sig.nBases}
       peelCaseOuter ε o t :=
   peelCaseOuterGo_rekeyHypToObs (InvTm.size t) ε hypIdx k o t
 
+theorem peelCaseOuter_env_eq {Γ : Ctx sig} {C : Object sig.nBases}
+    {ε ε' : OriginEnv Γ} {o o' : Origin sig} (t : InvTm Γ C)
+    (hε : ∀ {B} (x : Var Γ B), ε x = ε' x) (ho : o = o') :
+    peelCaseOuter ε o t = peelCaseOuter ε' o' t :=
+  peelCaseOuterGo_env_eq (InvTm.size t) t hε ho
+
 end Equality
 end Gimbal

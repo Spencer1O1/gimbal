@@ -556,6 +556,21 @@ theorem OriginEnv.find?_rekeyHypToObs {Γ : Ctx sig} (ε : OriginEnv Γ)
       · rfl
       · rw [ih]
 
+/-- `find?` depends only on the pointwise environment. -/
+theorem OriginEnv.find?_env_eq {Γ : Ctx sig} {ε ε' : OriginEnv Γ}
+    (o : Origin sig) (hε : ∀ {B} (x : Var Γ B), ε x = ε' x) :
+    OriginEnv.find? ε o = OriginEnv.find? ε' o := by
+  induction Γ with
+  | empty => rw [OriginEnv.find?_empty, OriginEnv.find?_empty]
+  | snoc Δ A ih =>
+      rw [OriginEnv.find?_snoc, OriginEnv.find?_snoc]
+      have hbeq : (ε (Var.here : Var (Δ ▻ A) A) == o) =
+          (ε' (Var.here : Var (Δ ▻ A) A) == o) := by rw [hε Var.here]
+      rw [hbeq]
+      split
+      · rfl
+      · rw [ih (fun {_} y => hε (Var.there y))]
+
 /-- Next observation slot after rekeying `hypIdx ↦ obs k` (obs indices `≥ k` shift). -/
 def Origin.obsSlotAfterRekey (k obsSlot : Nat) : Nat :=
   if obsSlot < k then obsSlot else obsSlot + 1
