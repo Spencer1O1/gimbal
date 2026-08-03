@@ -20,6 +20,8 @@
 import Gimbal.Equality.ICCCanon
 import Gimbal.Equality.ICCCode
 import Gimbal.Equality.ICCEncode
+import Gimbal.Equality.ICCFragment
+import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.ICCIdem
 import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.Reference
@@ -34,6 +36,22 @@ variable {sig : Signature}
 
 /-- Primary characterization — see also `IccEqIffEncodeEqGoal` in `ICCCode`. -/
 abbrev ICCCompleteness : Prop := IccEqIffEncodeEqGoal (sig := sig)
+
+/--
+Every ICC conversion is an `EncodeIccStep` under the phase-entry origin
+environment: domain preserved both ways, and codes agree if either endpoint
+encodes.
+
+`ValidEncodeFragment` is **not** required on `ICCEq.trans` intermediates
+(reference provenance need not survive ICC rearrangement). Use
+`ValidEncodeFragment` only via `EncodeTotal` to obtain an initial
+`EncodableICC`; then propagate encodability and code equality through
+`EncodeIccStep` (see `EncodeIccStep.trans`).
+-/
+def EncodeIccInvariantGoal : Prop :=
+  ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {t u : InvTm (Ctx.ofHyps hyps) A},
+    ICCEq t u → EncodeIccStep (OriginEnv.ofHyps hyps) t u
 
 /-- Generator-wise code invariance (`EncodeIccStep`: domain both ways). -/
 abbrev EncodeIccInvariant : Prop := EncodeIccInvariantGoal (sig := sig)
@@ -66,18 +84,17 @@ def OriginCollisionFree : Prop := True
 
 /--
 `encodeICC` must succeed on every term in the **valid fragment** consumed by
-the reference comparator: well-focused, saturated invertible terms under an
-adequate phase-entry origin environment.
+the reference comparator (`ValidEncodeFragment`: WellInv + reference
+saturation under phase-entry `OriginEnv.ofHyps`).
 
 It is not required for arbitrary `InvTm`. The present `encodeICCGo` fuel is a
 proof device (`encodeMeasure`); prove adequacy on the valid fragment or switch
 to WF recursion. Fuel exhaustion must not appear on the proof-critical path.
 -/
 def EncodeTotal : Prop :=
-  ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ) (t : InvTm Γ A),
-    WellInv t →
-      -- TODO: add saturated / adequate-ε hypotheses for the reference fragment
-      EncodableICC ε t
+  ∀ {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps hyps) A),
+    ValidEncodeFragment t → EncodableICC (OriginEnv.ofHyps hyps) t
 
 /-! ### Reference completeness and decidability (fuel-free) -/
 
@@ -150,8 +167,10 @@ Blocked / WIP:
 1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`)
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
-3. `EncodeTotal` / measure adequacy — no proof-critical fuel exhaustion
-4. `EncodeIccInvariant` (`EncodeIccStep`: domain both ways) / rigidity /
+3. `EncodeTotal` on `ValidEncodeFragment` — measure adequacy; no
+   proof-critical fuel exhaustion. `ValidEncodeFragment` supplies initial
+   `EncodableICC` only; ICCEq intermediates use `EncodeIccStep` alone.
+4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) / rigidity /
    `ICCCompleteness` (iff requires `EncodableICC` on both sides — never
    `none = none` as ICC)
 5. `ReferenceCompareTotal` + iff — erase `2048` from decidability

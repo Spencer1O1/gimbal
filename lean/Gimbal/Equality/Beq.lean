@@ -7,8 +7,8 @@
   occurrence site well-typed, and what lets the ICC canonicalizer identify the
   two scrutinees of a nested `case`.
 
-  `sat` nodes are operational metadata rather than focused syntax, so two
-  saturation phases are never identified here.
+  `sat` nodes compare schedule identity and body; schedules are operational
+  metadata but must agree for Boolean equality to imply term equality.
 -/
 
 import Gimbal.Equality.Hereditary
@@ -74,6 +74,8 @@ def FocTm.beq : {Γ Δ : Ctx sig} → {A B : Object sig.nBases} →
   | _, _, _, _, .pos (.done p), .pos (.done q) => PosNeu.beq p q
   | _, _, _, _, .neg (.done n), .neg (.done m) => NegNeu.beq n m
   | _, _, _, _, .letPos n t, .letPos m u => NegNeu.beq n m && InvTm.beq t u
+  | _, _, _, _, .sat (.mk s t), .sat (.mk s' u) =>
+      decide (s = s') && InvTm.beq t u
   | _, _, _, _, _, _ => false
 end
 
@@ -319,8 +321,88 @@ theorem FocTm.eq_of_beq {Γ : Ctx sig} :
       | pos q => simp [FocTm.beq] at h
       | neg q => simp [FocTm.beq] at h
       | sat s => simp [FocTm.beq] at h
-  | _, .sat s, g, h => by simp [FocTm.beq] at h
+  | _, .sat (.mk s t), g, h => by
+      cases g with
+      | sat s' =>
+          cases s' with
+          | mk s' u =>
+              simp only [FocTm.beq, Bool.and_eq_true, decide_eq_true_eq] at h
+              cases h.1
+              rw [InvTm.eq_of_beq t u h.2]
+      | pos q => simp [FocTm.beq] at h
+      | neg q => simp [FocTm.beq] at h
+      | letPos m u => simp [FocTm.beq] at h
 termination_by _A f _g _h => FocTm.size f
+end
+
+/-! ### Reflexivity of typed `beq` -/
+
+mutual
+theorem NegNeu.beq_rfl {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (n : NegNeu Γ A), NegNeu.beq n n = true
+  | _, .var x => by simp [NegNeu.beq]
+  | _, .app f a => by
+      simp only [NegNeu.beq, Bool.and_eq_true]
+      exact ⟨NegNeu.beq_rfl f, InvTm.beq_rfl a⟩
+  | _, .fst f => by
+      simp only [NegNeu.beq]
+      exact NegNeu.beq_rfl f
+  | _, .snd f => by
+      simp only [NegNeu.beq]
+      exact NegNeu.beq_rfl f
+termination_by _A n => NegNeu.size n
+
+theorem PosNeu.beq_rfl {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (p : PosNeu Γ A), PosNeu.beq p p = true
+  | _, .neu n => by
+      simp only [PosNeu.beq]
+      exact NegNeu.beq_rfl n
+  | _, .inl p => by
+      simp only [PosNeu.beq]
+      exact PosNeu.beq_rfl p
+  | _, .inr p => by
+      simp only [PosNeu.beq]
+      exact PosNeu.beq_rfl p
+  | _, .val t => by
+      simp only [PosNeu.beq]
+      exact InvTm.beq_rfl t
+termination_by _A p => PosNeu.size p
+
+theorem InvTm.beq_rfl {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (t : InvTm Γ A), InvTm.beq t t = true
+  | _, .unit => by simp [InvTm.beq]
+  | _, .pair t₁ t₂ => by
+      simp only [InvTm.beq, Bool.and_eq_true]
+      exact ⟨InvTm.beq_rfl t₁, InvTm.beq_rfl t₂⟩
+  | _, .lam t => by
+      simp only [InvTm.beq]
+      exact InvTm.beq_rfl t
+  | _, .case n t u => by
+      simp only [InvTm.beq, Bool.and_eq_true]
+      exact ⟨⟨NegNeu.beq_rfl n, InvTm.beq_rfl t⟩, InvTm.beq_rfl u⟩
+  | _, .abort n => by
+      simp only [InvTm.beq]
+      exact NegNeu.beq_rfl n
+  | _, .foc f => by
+      simp only [InvTm.beq]
+      exact FocTm.beq_rfl f
+termination_by _A t => InvTm.size t
+
+theorem FocTm.beq_rfl {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (f : FocTm Γ A), FocTm.beq f f = true
+  | _, .pos (.done p) => by
+      simp only [FocTm.beq]
+      exact PosNeu.beq_rfl p
+  | _, .neg (.done n) => by
+      simp only [FocTm.beq]
+      exact NegNeu.beq_rfl n
+  | _, .letPos n t => by
+      simp only [FocTm.beq, Bool.and_eq_true]
+      exact ⟨NegNeu.beq_rfl n, InvTm.beq_rfl t⟩
+  | _, .sat (.mk s t) => by
+      simp only [FocTm.beq, decide_eq_true_eq, Bool.true_and]
+      exact InvTm.beq_rfl t
+termination_by _A f => FocTm.size f
 end
 
 end Equality

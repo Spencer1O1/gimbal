@@ -100,20 +100,6 @@ private theorem List.foldl_add_nat {α : Type _} (ws : List α) (f : α → Nat)
       rw [ih (a + f x), hx]
       omega
 
-private theorem worklistWeight_cons (e : PosEntry sig) (ws : List (PosEntry sig)) :
-    worklistWeight (e :: ws) = objectWeight e.ty + worklistWeight ws := by
-  simp only [worklistWeight, List.foldl]
-  have h := List.foldl_add_nat ws (fun e => objectWeight e.ty) (objectWeight e.ty)
-  simpa [Nat.zero_add] using h
-
-private theorem encodeMeasure_cons_pos (e : PosEntry sig) (ws : List (PosEntry sig))
-    (goal : Object sig.nBases) :
-    0 < encodeMeasure (e :: ws) goal := by
-  have he : 0 < objectWeight e.ty := objectWeight_pos _
-  have hg : 0 < objectWeight goal := objectWeight_pos _
-  rw [encodeMeasure, worklistWeight_cons]
-  omega
-
 /-- `ICCEq.case_pair` preserves `encodeICC` when the worklist head is that coprod. -/
 theorem encodeICC_case_pair {Γ : Ctx sig} {A B C D : Object sig.nBases}
     (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
@@ -336,18 +322,135 @@ theorem encodeICCGo_lam_nil {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
   simp [encodeICCGo, forcedRule_nil_exp, peelLam]
   rfl
 
+/-! ### Congruence and remaining generators -/
+
+theorem forcedRule_cons_never (e : PosEntry sig) (ws : List (PosEntry sig))
+    (hty : e.ty = .never) (goal : Object sig.nBases) :
+    forcedRule (e :: ws) goal = .leftNever e := by
+  simp [forcedRule, hty]
+
+/-- Under forced `leftNever`, every abort encodes to the forced origin. -/
+theorem encodeICCGo_abort_leftNever {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (n : NegNeu Γ .never) (hty : e.ty = .never) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot (.abort (A := A) n) =
+      some (.abort e.origin) := by
+  simp [encodeICCGo, forcedRule_cons_never e ws hty A]
+
+theorem encodeICC_abort_leftNever {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (n : NegNeu Γ .never)
+    (hws : OriginEnv.posWorklist ε = e :: ws) (hty : e.ty = .never) :
+    encodeICC ε (.abort (A := A) n) = some (.abort e.origin) := by
+  unfold encodeICC
+  rw [hws]
+  have hpos := encodeMeasure_cons_pos e ws A
+  obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+  simpa [hm] using encodeICCGo_abort_leftNever fuel e ws ε 0 0 n hty
+
+/-- `abort_eq` as `EncodeIccStep` under forced `leftNever`. -/
+theorem encodeIccStep_abort_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (n m : NegNeu Γ .never)
+    (hws : OriginEnv.posWorklist ε = e :: ws) (hty : e.ty = .never) :
+    EncodeIccStep ε (.abort (A := A) n) (.abort (A := A) m) :=
+  EncodeIccStep.of_option_eq ε <| by
+    rw [encodeICC_abort_leftNever ε e ws n hws hty,
+      encodeICC_abort_leftNever ε e ws m hws hty]
+
+/-- Saturation metadata is erased by encode (`sat_cong` / `sat_foc`). -/
+theorem encodeFocGo_sat {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (s : Schedule sig.nBases) (t : InvTm Γ A) :
+    encodeFocGo (fuel + 1) ws ε domNest obsSlot (.sat (.mk s t)) =
+      match encodeICCGo fuel ws ε domNest obsSlot t with
+      | some c => some (.foc (.body c))
+      | none => none := by
+  rw [encodeFocGo]
+  rfl
+
+theorem encodeICCGo_foc_sat {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (s : Schedule sig.nBases) (t : InvTm Γ A)
+    (hforce : forcedRule ws A = .focus) :
+    encodeICCGo (fuel + 2) ws ε domNest obsSlot (.foc (.sat (.mk s t))) =
+      match encodeICCGo fuel ws ε domNest obsSlot t with
+      | some c => some (.foc (.body c))
+      | none => none := by
+  rw [encodeICCGo, hforce, encodeFocGo_sat]
+
+/-- Right-product congruence on codes when both sides peel as pairs. -/
+theorem encodeICCGo_pair_cong {Γ : Ctx sig} {L R : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat)
+    {t₁ t₂ : InvTm Γ L} {u₁ u₂ : InvTm Γ R}
+    (hforce : forcedRule ws (.prod L R) = .rightProd L R)
+    (ht : encodeICCGo fuel ws ε domNest obsSlot t₁ =
+      encodeICCGo fuel ws ε domNest obsSlot t₂)
+    (hu : encodeICCGo fuel ws ε domNest obsSlot u₁ =
+      encodeICCGo fuel ws ε domNest obsSlot u₂) :
+    encodeICCGo (fuel + 1) ws ε domNest obsSlot (.pair t₁ u₁) =
+      encodeICCGo (fuel + 1) ws ε domNest obsSlot (.pair t₂ u₂) := by
+  simp [encodeICCGo, hforce, peelPair, ht, hu]
+
+/-- Right-λ: Go-level congruence when bodies agree under the same weakened env. -/
+theorem encodeICCGo_lam_cong {Γ : Ctx sig} {Arg Ret : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat)
+    {t u : InvTm (Γ ▻ Arg) Ret}
+    (hforce : forcedRule ws (.exp Arg Ret) = .rightExp Arg Ret)
+    (hbody : encodeICCGo fuel (pushPos ws (.dom (sig := sig) domNest) Arg)
+        (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) domNest))
+        (domNest + 1) obsSlot t =
+      encodeICCGo fuel (pushPos ws (.dom (sig := sig) domNest) Arg)
+        (OriginEnv.weaken (A := Arg) ε (.dom (sig := sig) domNest))
+        (domNest + 1) obsSlot u) :
+    encodeICCGo (fuel + 1) ws ε domNest obsSlot (.lam t) =
+      encodeICCGo (fuel + 1) ws ε domNest obsSlot (.lam u) := by
+  simp [encodeICCGo, hforce, peelLam, hbody]
+
+/-- `case_cong` at Go level under a forced outer coprod. -/
+theorem encodeICCGo_case_cong {Γ : Ctx sig} {A B C : Object sig.nBases}
+    (fuel : Nat) (e : PosEntry sig) (ws : List (PosEntry sig))
+    (ε : OriginEnv Γ) (domNest obsSlot : Nat)
+    (x : Var Γ (.coprod A B))
+    (t₁ t₂ : InvTm (Γ ▻ A) C) (u₁ u₂ : InvTm (Γ ▻ B) C)
+    (hty : e.ty = .coprod A B) (hit : ε x = e.origin)
+    (ht : encodeICCGo fuel
+        (pushPos ws (.split e.origin false) A)
+        (OriginEnv.weaken (A := A) ε (.split e.origin false))
+        domNest obsSlot t₁ =
+      encodeICCGo fuel
+        (pushPos ws (.split e.origin false) A)
+        (OriginEnv.weaken (A := A) ε (.split e.origin false))
+        domNest obsSlot t₂)
+    (hu : encodeICCGo fuel
+        (pushPos ws (.split e.origin true) B)
+        (OriginEnv.weaken (A := B) ε (.split e.origin true))
+        domNest obsSlot u₁ =
+      encodeICCGo fuel
+        (pushPos ws (.split e.origin true) B)
+        (OriginEnv.weaken (A := B) ε (.split e.origin true))
+        domNest obsSlot u₂) :
+    encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot (.case (.var x) t₁ u₁) =
+      encodeICCGo (fuel + 1) (e :: ws) ε domNest obsSlot (.case (.var x) t₂ u₂) := by
+  have hforce := forcedRule_cons_coprod e ws hty C
+  have hpeel1 := peelCaseOuter_case_var_hit ε e.origin x t₁ u₁ hit
+  have hpeel2 := peelCaseOuter_case_var_hit ε e.origin x t₂ u₂ hit
+  simp [encodeICCGo, hforce, hpeel1, hpeel2, encodeLeftCoprodBranches, List.tail_cons,
+    ht, hu]
+
 /-! ### Open obligations (design E remaining work)
 
 Tracked as goal Props in `Completeness.lean`:
 
 1. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom`, `obsSlot`/`domNest`)
 2. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done**
-3. `EncodeIccInvariant` (`EncodeIccStep`: domain both ways + codes if either
-   encodes) — commute rules packaged; `case_unit` left-η executable + fixture;
-   congruence / full package remain. Iff requires `EncodableICC` on both sides
-   (never `none = none` as ICC). `EncodeIccStep.trans` needs intermediate
-   encodable.
-4. `EncodeTotal` — valid fragment only (WellInv + saturated/adequate ε)
+3. `EncodeIccInvariant` (`ValidEncodeFragment` → `EncodeIccStep`) — commute
+   rules packaged; `case_unit` left-η; `abort_eq` under `leftNever`; sat erase
+   and Go-level pair/lam/case congruence landed; fuel mono / top-level cong remain.
+4. `EncodeTotal` — `ValidEncodeFragment` only (`ICCFragment.lean` / `ICCTotal.lean`)
 5. `ReferenceCompareTotal` + iff — erase `2048` from decidability
 6. Wire code equality into the total `referenceCompare`; resume 8G
 -/

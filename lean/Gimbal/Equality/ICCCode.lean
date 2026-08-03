@@ -63,8 +63,10 @@ def ICCCode.beq : {Γ Δ : Ctx sig} → {A B : Object sig.nBases} →
   | _, _, _, _, .pair t₁ t₂, .pair u₁ u₂ =>
       ICCCode.beq t₁ u₁ && ICCCode.beq t₂ u₂
   | _, _, _, _, .lam t, .lam u => ICCCode.beq t u
-  | _, _, _, _, .case o₁ t u, .case o₂ v w =>
-      o₁ == o₂ && ICCCode.beq t v && ICCCode.beq u w
+  | _, _, _, _, .case (A := L₁) (B := R₁) o₁ t u,
+      .case (A := L₂) (B := R₂) o₂ v w =>
+      decide (L₁ = L₂) && decide (R₁ = R₂) &&
+        o₁ == o₂ && ICCCode.beq t v && ICCCode.beq u w
   | _, _, _, _, .abort o₁, .abort o₂ => o₁ == o₂
   | _, _, _, _, .foc f, .foc g => FocCode.beq f g
   | _, _, _, _, _, _ => false
@@ -73,11 +75,143 @@ def FocCode.beq : {Γ Δ : Ctx sig} → {A B : Object sig.nBases} →
     FocCode Γ A → FocCode Δ B → Bool
   | _, _, _, _, .pos p, .pos q => PosNeu.beq p q
   | _, _, _, _, .neg n, .neg m => NegNeu.beq n m
-  | _, _, _, _, .letPos o₁ _n t, .letPos o₂ _m u =>
-      o₁ == o₂ && ICCCode.beq t u
+  | _, _, _, _, .letPos o₁ n t, .letPos o₂ m u =>
+      o₁ == o₂ && NegNeu.beq n m && ICCCode.beq t u
   | _, _, _, _, .body t, .body u => ICCCode.beq t u
   | _, _, _, _, _, _ => false
 end
+
+/-! ### Structural Boolean equality on codes -/
+
+mutual
+theorem ICCCode.beq_rfl : {Γ : Ctx sig} → {A : Object sig.nBases} →
+    (c : ICCCode Γ A) → ICCCode.beq c c = true
+  | _, _, .unit => rfl
+  | _, _, .pair c₁ c₂ => by
+      simp only [ICCCode.beq, Bool.and_eq_true]
+      exact ⟨ICCCode.beq_rfl c₁, ICCCode.beq_rfl c₂⟩
+  | _, _, .lam c => ICCCode.beq_rfl c
+  | _, _, .case o c₁ c₂ => by
+      simp only [ICCCode.beq, decide_eq_true_eq, beq_self_eq_true, Bool.and_eq_true,
+        true_and]
+      exact ⟨ICCCode.beq_rfl c₁, ICCCode.beq_rfl c₂⟩
+  | _, _, .abort o => by simp [ICCCode.beq]
+  | _, _, .foc f => FocCode.beq_rfl f
+
+theorem FocCode.beq_rfl : {Γ : Ctx sig} → {A : Object sig.nBases} →
+    (f : FocCode Γ A) → FocCode.beq f f = true
+  | _, _, .pos p => by
+      simp only [FocCode.beq]
+      exact PosNeu.beq_rfl p
+  | _, _, .neg n => by
+      simp only [FocCode.beq]
+      exact NegNeu.beq_rfl n
+  | _, _, .letPos o n c => by
+      simp only [FocCode.beq, beq_self_eq_true, Bool.and_eq_true, true_and]
+      exact ⟨NegNeu.beq_rfl n, ICCCode.beq_rfl c⟩
+  | _, _, .body c => ICCCode.beq_rfl c
+end
+
+mutual
+theorem ICCCode.eq_of_beq {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (c d : ICCCode Γ A),
+      ICCCode.beq c d = true → c = d
+  | _, .unit, d, h => by
+      cases d with
+      | unit => rfl
+      | case _ _ _ => simp [ICCCode.beq] at h
+      | abort _ => simp [ICCCode.beq] at h
+      | foc _ => simp [ICCCode.beq] at h
+  | _, .pair c₁ c₂, d, h => by
+      cases d with
+      | pair d₁ d₂ =>
+          simp only [ICCCode.beq, Bool.and_eq_true] at h
+          rw [ICCCode.eq_of_beq c₁ d₁ h.1, ICCCode.eq_of_beq c₂ d₂ h.2]
+      | case _ _ _ => simp [ICCCode.beq] at h
+      | abort _ => simp [ICCCode.beq] at h
+      | foc _ => simp [ICCCode.beq] at h
+  | _, .lam c, d, h => by
+      cases d with
+      | lam e => rw [ICCCode.eq_of_beq c e (by simpa [ICCCode.beq] using h)]
+      | case _ _ _ => simp [ICCCode.beq] at h
+      | abort _ => simp [ICCCode.beq] at h
+      | foc _ => simp [ICCCode.beq] at h
+  | _, .case o c₁ c₂, d, h => by
+      cases d with
+      | case o' d₁ d₂ =>
+          simp only [ICCCode.beq, Bool.and_eq_true, decide_eq_true_eq] at h
+          rcases h with ⟨⟨⟨⟨rfl, rfl⟩, ho⟩, hc₁⟩, hc₂⟩
+          cases LawfulBEq.eq_of_beq ho
+          rw [ICCCode.eq_of_beq c₁ d₁ hc₁, ICCCode.eq_of_beq c₂ d₂ hc₂]
+      | unit => simp [ICCCode.beq] at h
+      | pair _ _ => simp [ICCCode.beq] at h
+      | lam _ => simp [ICCCode.beq] at h
+      | abort _ => simp [ICCCode.beq] at h
+      | foc _ => simp [ICCCode.beq] at h
+  | _, .abort o, d, h => by
+      cases d with
+      | abort o' =>
+          simp only [ICCCode.beq] at h
+          cases LawfulBEq.eq_of_beq h
+          rfl
+      | unit => simp [ICCCode.beq] at h
+      | pair _ _ => simp [ICCCode.beq] at h
+      | lam _ => simp [ICCCode.beq] at h
+      | case _ _ _ => simp [ICCCode.beq] at h
+      | foc _ => simp [ICCCode.beq] at h
+  | _, .foc f, d, h => by
+      cases d with
+      | foc g => rw [FocCode.eq_of_beq f g (by simpa [ICCCode.beq] using h)]
+      | unit => simp [ICCCode.beq] at h
+      | pair _ _ => simp [ICCCode.beq] at h
+      | lam _ => simp [ICCCode.beq] at h
+      | case _ _ _ => simp [ICCCode.beq] at h
+      | abort _ => simp [ICCCode.beq] at h
+
+theorem FocCode.eq_of_beq {Γ : Ctx sig} :
+    ∀ {A : Object sig.nBases} (f g : FocCode Γ A),
+      FocCode.beq f g = true → f = g
+  | _, .pos p, g, h => by
+      cases g with
+      | pos q => rw [PosNeu.eq_of_beq p q (by simpa [FocCode.beq] using h)]
+      | neg _ => simp [FocCode.beq] at h
+      | letPos _ _ _ => simp [FocCode.beq] at h
+      | body _ => simp [FocCode.beq] at h
+  | _, .neg n, g, h => by
+      cases g with
+      | neg m =>
+          obtain ⟨_, hnm⟩ := NegNeu.eq_of_beq n m (by simpa [FocCode.beq] using h)
+          cases eq_of_heq hnm
+          rfl
+      | pos _ => simp [FocCode.beq] at h
+      | letPos _ _ _ => simp [FocCode.beq] at h
+      | body _ => simp [FocCode.beq] at h
+  | _, .letPos o n c, g, h => by
+      cases g with
+      | letPos o' m d =>
+          simp only [FocCode.beq, Bool.and_eq_true] at h
+          cases LawfulBEq.eq_of_beq h.1.1
+          obtain ⟨rfl, hnm⟩ := NegNeu.eq_of_beq n m h.1.2
+          cases eq_of_heq hnm
+          rw [ICCCode.eq_of_beq c d h.2]
+      | pos _ => simp [FocCode.beq] at h
+      | neg _ => simp [FocCode.beq] at h
+      | body _ => simp [FocCode.beq] at h
+  | _, .body c, g, h => by
+      cases g with
+      | body d => rw [ICCCode.eq_of_beq c d (by simpa [FocCode.beq] using h)]
+      | pos _ => simp [FocCode.beq] at h
+      | neg _ => simp [FocCode.beq] at h
+      | letPos _ _ _ => simp [FocCode.beq] at h
+end
+
+theorem ICCCode.beq_iff_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (c d : ICCCode Γ A) : ICCCode.beq c d = true ↔ c = d :=
+  ⟨ICCCode.eq_of_beq c d, fun h => h ▸ ICCCode.beq_rfl c⟩
+
+theorem FocCode.beq_iff_eq {Γ : Ctx sig} {A : Object sig.nBases}
+    (f g : FocCode Γ A) : FocCode.beq f g = true ↔ f = g :=
+  ⟨FocCode.eq_of_beq f g, fun h => h ▸ FocCode.beq_rfl f⟩
 
 /-! ### Worklist measure (candidate) -/
 
@@ -94,6 +228,62 @@ def encodeMeasure (ws : List (PosEntry sig)) (goal : Object sig.nBases) : Nat :=
 
 theorem objectWeight_pos {n : Nat} (A : Object n) : 0 < objectWeight A := by
   cases A <;> simp [objectWeight] <;> omega
+
+private theorem List.foldl_add_nat {α : Type _} (ws : List α) (f : α → Nat) (a : Nat) :
+    ws.foldl (fun acc x => acc + f x) a =
+      a + ws.foldl (fun acc x => acc + f x) 0 := by
+  induction ws generalizing a with
+  | nil => rfl
+  | cons x xs ih =>
+      have hx :
+          (x :: xs).foldl (fun acc y => acc + f y) 0 =
+            f x + xs.foldl (fun acc y => acc + f y) 0 := by
+        simpa [List.foldl, Nat.zero_add] using ih (f x)
+      change xs.foldl (fun acc y => acc + f y) (a + f x) =
+        a + (x :: xs).foldl (fun acc y => acc + f y) 0
+      rw [ih (a + f x), hx]
+      omega
+
+theorem worklistWeight_cons (e : PosEntry sig) (ws : List (PosEntry sig)) :
+    worklistWeight (e :: ws) = objectWeight e.ty + worklistWeight ws := by
+  simp only [worklistWeight, List.foldl]
+  have h := List.foldl_add_nat ws (fun e => objectWeight e.ty) (objectWeight e.ty)
+  simpa [Nat.zero_add] using h
+
+theorem encodeMeasure_cons_pos (e : PosEntry sig) (ws : List (PosEntry sig))
+    (goal : Object sig.nBases) :
+    0 < encodeMeasure (e :: ws) goal := by
+  have he : 0 < objectWeight e.ty := objectWeight_pos _
+  have hg : 0 < objectWeight goal := objectWeight_pos _
+  rw [encodeMeasure, worklistWeight_cons]
+  omega
+
+/-- Dropping a worklist head strictly decreases the encode measure. -/
+theorem encodeMeasure_tail_lt (e : PosEntry sig) (ws : List (PosEntry sig))
+    (goal : Object sig.nBases) :
+    encodeMeasure ws goal < encodeMeasure (e :: ws) goal := by
+  have he : 0 < objectWeight e.ty := objectWeight_pos _
+  simp only [encodeMeasure, worklistWeight_cons]
+  omega
+
+/-- Right-product recursion uses a strictly smaller goal weight. -/
+theorem encodeMeasure_prod_fst_lt (ws : List (PosEntry sig))
+    (L R : Object sig.nBases) :
+    encodeMeasure ws L < encodeMeasure ws (.prod L R) := by
+  simp only [encodeMeasure, objectWeight]
+  omega
+
+theorem encodeMeasure_prod_snd_lt (ws : List (PosEntry sig))
+    (L R : Object sig.nBases) :
+    encodeMeasure ws R < encodeMeasure ws (.prod L R) := by
+  simp only [encodeMeasure, objectWeight]
+  omega
+
+theorem encodeMeasure_exp_ret_lt (ws : List (PosEntry sig))
+    (Arg Ret : Object sig.nBases) :
+    encodeMeasure ws Ret < encodeMeasure ws (.exp Arg Ret) := by
+  simp only [encodeMeasure, objectWeight]
+  omega
 
 /-! ### Forced next rule -/
 
@@ -370,9 +560,8 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
                   | none => none
               | _ => none
       | .leftNever e =>
+          -- Code keyed by forced origin (`abort_eq`); scrutinee spine erased.
           match t with
-          | .abort (.var x) =>
-              if ε x == e.origin then some (.abort e.origin) else none
           | .abort _ => some (.abort e.origin)
           | _ => none
       | .focus =>
@@ -470,27 +659,21 @@ theorem EncodeIccStep.either {Γ : Ctx sig} {A : Object sig.nBases}
       exact ⟨ht, hu, h.2 ht⟩
 
 /--
-Transitivity of code agreement requires the intermediate term to be encodable.
-Endpoint-only `isSome` hypotheses do not suffice to chain equalities.
+Transitivity: domain preservation of the first step supplies the intermediate
+encodability needed to chain code equalities. No external `EncodableICC u`
+hypothesis.
 -/
 theorem EncodeIccStep.trans {Γ : Ctx sig} {A : Object sig.nBases}
     {ε : OriginEnv Γ} {t u v : InvTm Γ A}
-    (htu : EncodeIccStep ε t u) (huv : EncodeIccStep ε u v)
-    (hu : EncodableICC ε u) :
+    (htu : EncodeIccStep ε t u) (huv : EncodeIccStep ε u v) :
     EncodeIccStep ε t v := by
-  have ht := htu.1.mpr hu
-  have hv := huv.1.mp hu
-  refine ⟨⟨fun _ => hv, fun _ => ht⟩, fun _ => ?_⟩
+  refine ⟨htu.1.trans huv.1, fun ht => ?_⟩
+  have hu : EncodableICC ε u := htu.1.mp ht
   exact (htu.2 ht).trans (huv.2 hu)
 
-/--
-Every ICC conversion is an `EncodeIccStep`: domain preserved both ways, and
-codes agree if either endpoint encodes. Transitivity of the packaged relation
-requires the intermediate term to be encodable when chaining code equalities.
--/
-def EncodeIccInvariantGoal : Prop :=
-  ∀ {Γ : Ctx sig} {A : Object sig.nBases} (ε : OriginEnv Γ)
-    {t u : InvTm Γ A}, ICCEq t u → EncodeIccStep ε t u
+theorem EncodeIccStep.refl {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (t : InvTm Γ A) : EncodeIccStep ε t t :=
+  EncodeIccStep.of_option_eq ε rfl
 
 /--
 Primary characterization on the encoder domain.
