@@ -1675,5 +1675,655 @@ theorem peelCaseOuter_env_eq {Γ : Ctx sig} {C : Object sig.nBases}
     peelCaseOuter ε o t = peelCaseOuter ε' o' t :=
   peelCaseOuterGo_env_eq (InvTm.size t) t hε ho
 
+/-! ### Peel naturality under `InvTm.rename` -/
+
+/-- `ρ` reflects raw-index equality — required for `NegNeu.beq` to commute with rename. -/
+def Rename.RespectsRawIdx {Γ Δ : Ctx sig} (ρ : Rename sig Γ Δ) : Prop :=
+  ∀ {A B : Object sig.nBases} (x : Var Γ A) (y : Var Γ B),
+    (Var.toRawIdx (ρ x) == Var.toRawIdx (ρ y)) = (Var.toRawIdx x == Var.toRawIdx y)
+
+theorem Rename.id_respectsRawIdx {Γ : Ctx sig} :
+    Rename.RespectsRawIdx (Rename.id (Γ := Γ)) := fun {_ _} _ _ => rfl
+
+theorem Rename.weaken_respectsRawIdx {Γ : Ctx sig} {A : Object sig.nBases} :
+    Rename.RespectsRawIdx (Rename.weaken (A := A) (Γ := Γ)) := by
+  intro B C x y
+  simp [Rename.weaken, Var.toRawIdx, beq_iff_eq]
+
+theorem Rename.ext_respectsRawIdx {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    {ρ : Rename sig Γ Δ} (hρ : Rename.RespectsRawIdx ρ) :
+    Rename.RespectsRawIdx (Rename.ext (A := A) ρ) := by
+  intro B C x y
+  cases x with
+  | here =>
+      cases y with
+      | here => simp [Rename.ext, Var.toRawIdx]
+      | there _ => simp [Rename.ext, Var.toRawIdx]
+  | there x =>
+      cases y with
+      | here => simp [Rename.ext, Var.toRawIdx]
+      | there y =>
+          simp only [Rename.ext, Var.toRawIdx, beq_iff_eq, Nat.add_right_cancel_iff]
+          simpa [beq_iff_eq] using hρ x y
+
+theorem Rename.inj_of_respectsRawIdx {Γ Δ : Ctx sig}
+    {ρ : Rename sig Γ Δ} (hρ : Rename.RespectsRawIdx ρ)
+    {A : Object sig.nBases} (x y : Var Γ A) (h : ρ x = ρ y) : x = y := by
+  have hidx : (Var.toRawIdx (ρ x) == Var.toRawIdx (ρ y)) = true := by
+    simp [h, beq_iff_eq]
+  have : (Var.toRawIdx x == Var.toRawIdx y) = true := by
+    rwa [← hρ x y]
+  obtain ⟨_, heq⟩ := Var.eq_of_toRawIdx x y (beq_iff_eq.mp this)
+  exact eq_of_heq heq
+
+theorem originOfVar_rename {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (ε : OriginEnv Γ) (ε' : OriginEnv Δ)
+    (n : NegNeu Γ A)
+    (hε : ∀ {B} (x : Var Γ B), ε' (ρ x) = ε x) :
+    originOfVar ε' (NegNeu.rename ρ n) = originOfVar ε n := by
+  cases n with
+  | var x => exact congrArg some (hε x)
+  | app _ _ | fst _ | snd _ => rfl
+
+theorem NegNeu.unweaken?_rename {Γ Δ : Ctx sig} {B A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (n : NegNeu (Γ ▻ B) A) :
+    NegNeu.unweaken? (NegNeu.rename (Rename.ext ρ) n) =
+      (NegNeu.unweaken? n).map (NegNeu.rename ρ) := by
+  match n with
+  | .var .here => simp [NegNeu.rename, Rename.ext, NegNeu.unweaken?]
+  | .var (.there y) => simp [NegNeu.rename, Rename.ext, NegNeu.unweaken?]
+  | .app _ _ => simp [NegNeu.rename, NegNeu.unweaken?]
+  | .fst m =>
+      unfold NegNeu.rename NegNeu.unweaken?
+      rw [NegNeu.unweaken?_rename ρ m]
+      cases NegNeu.unweaken? m <;> rfl
+  | .snd m =>
+      unfold NegNeu.rename NegNeu.unweaken?
+      rw [NegNeu.unweaken?_rename ρ m]
+      cases NegNeu.unweaken? m <;> rfl
+
+/-- Same-context `beq` preserved by rename (`→` direction; uses typed `eq_of_beq`). -/
+theorem NegNeu.beq_rename {Γ Δ : Ctx sig} {A B : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (n : NegNeu Γ A) (m : NegNeu Γ B)
+    (h : NegNeu.beq n m = true) :
+    NegNeu.beq (NegNeu.rename ρ n) (NegNeu.rename ρ m) = true := by
+  obtain ⟨rfl, hnm⟩ := NegNeu.eq_of_beq n m h
+  cases eq_of_heq hnm
+  exact NegNeu.beq_rfl _
+
+/-- Joint raw-index respect for a pair of renames (possibly different domains). -/
+def Rename.RespectsRawIdx2 {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig}
+    (ρ₁ : Rename sig Γ₁ Δ₁) (ρ₂ : Rename sig Γ₂ Δ₂) : Prop :=
+  ∀ {A B : Object sig.nBases} (x : Var Γ₁ A) (y : Var Γ₂ B),
+    (Var.toRawIdx (ρ₁ x) == Var.toRawIdx (ρ₂ y)) =
+      (Var.toRawIdx x == Var.toRawIdx y)
+
+theorem Rename.RespectsRawIdx.to2 {Γ Δ : Ctx sig} {ρ : Rename sig Γ Δ}
+    (hρ : Rename.RespectsRawIdx ρ) : Rename.RespectsRawIdx2 ρ ρ :=
+  hρ
+
+theorem Rename.RespectsRawIdx2.ext {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig}
+    {A B : Object sig.nBases}
+    {ρ₁ : Rename sig Γ₁ Δ₁} {ρ₂ : Rename sig Γ₂ Δ₂}
+    (hρ : Rename.RespectsRawIdx2 ρ₁ ρ₂) :
+    Rename.RespectsRawIdx2 (Rename.ext (A := A) ρ₁) (Rename.ext (A := B) ρ₂) := by
+  intro P Q x y
+  cases x with
+  | here =>
+      cases y with
+      | here => simp [Rename.ext, Var.toRawIdx]
+      | there _ => simp [Rename.ext, Var.toRawIdx]
+  | there x =>
+      cases y with
+      | here => simp [Rename.ext, Var.toRawIdx]
+      | there y =>
+          simp only [Rename.ext, Var.toRawIdx, beq_iff_eq, Nat.add_right_cancel_iff]
+          simpa [beq_iff_eq] using hρ x y
+
+mutual
+/-- Heterogeneous `beq` ↔ under a pair of renames (variables via `RespectsRawIdx2`). -/
+theorem NegNeu.beq_rename_eq2 {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig} {A B : Object sig.nBases}
+    (ρ₁ : Rename sig Γ₁ Δ₁) (ρ₂ : Rename sig Γ₂ Δ₂)
+    (hρ : Rename.RespectsRawIdx2 ρ₁ ρ₂)
+    (n : NegNeu Γ₁ A) (m : NegNeu Γ₂ B) :
+    NegNeu.beq (NegNeu.rename ρ₁ n) (NegNeu.rename ρ₂ m) = NegNeu.beq n m :=
+  match n, m with
+  | .var x, .var y => by simpa [NegNeu.rename, NegNeu.beq] using hρ x y
+  | .var _, .app _ _ | .var _, .fst _ | .var _, .snd _ => by
+      simp [NegNeu.rename, NegNeu.beq]
+  | .app f a, .app g b => by
+      simp only [NegNeu.rename, NegNeu.beq]
+      rw [NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ f g, InvTm.beq_rename_eq2 ρ₁ ρ₂ hρ a b]
+  | .app _ _, .var _ | .app _ _, .fst _ | .app _ _, .snd _ => by
+      simp [NegNeu.rename, NegNeu.beq]
+  | .fst f, .fst g => by
+      simp only [NegNeu.rename, NegNeu.beq]
+      exact NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ f g
+  | .fst _, .var _ | .fst _, .app _ _ | .fst _, .snd _ => by
+      simp [NegNeu.rename, NegNeu.beq]
+  | .snd f, .snd g => by
+      simp only [NegNeu.rename, NegNeu.beq]
+      exact NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ f g
+  | .snd _, .var _ | .snd _, .app _ _ | .snd _, .fst _ => by
+      simp [NegNeu.rename, NegNeu.beq]
+termination_by n.size
+decreasing_by all_goals decreasing_trivial
+
+theorem InvTm.beq_rename_eq2 {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig} {A B : Object sig.nBases}
+    (ρ₁ : Rename sig Γ₁ Δ₁) (ρ₂ : Rename sig Γ₂ Δ₂)
+    (hρ : Rename.RespectsRawIdx2 ρ₁ ρ₂)
+    (t : InvTm Γ₁ A) (u : InvTm Γ₂ B) :
+    InvTm.beq (InvTm.rename ρ₁ t) (InvTm.rename ρ₂ u) = InvTm.beq t u :=
+  match t, u with
+  | .unit, .unit => by simp [InvTm.rename, InvTm.beq]
+  | .unit, .pair _ _ | .unit, .lam _ | .unit, .case _ _ _
+  | .unit, .abort _ | .unit, .foc _ => by simp [InvTm.rename, InvTm.beq]
+  | .pair t₁ t₂, .pair u₁ u₂ => by
+      simp only [InvTm.rename, InvTm.beq]
+      rw [InvTm.beq_rename_eq2 ρ₁ ρ₂ hρ t₁ u₁,
+          InvTm.beq_rename_eq2 ρ₁ ρ₂ hρ t₂ u₂]
+  | .pair _ _, .unit | .pair _ _, .lam _ | .pair _ _, .case _ _ _
+  | .pair _ _, .abort _ | .pair _ _, .foc _ => by simp [InvTm.rename, InvTm.beq]
+  | .lam t, .lam u => by
+      simp only [InvTm.rename, InvTm.beq]
+      exact InvTm.beq_rename_eq2 (Rename.ext ρ₁) (Rename.ext ρ₂)
+        (Rename.RespectsRawIdx2.ext hρ) t u
+  | .lam _, .unit | .lam _, .pair _ _ | .lam _, .case _ _ _
+  | .lam _, .abort _ | .lam _, .foc _ => by simp [InvTm.rename, InvTm.beq]
+  | .case n t₁ t₂, .case m u₁ u₂ => by
+      simp only [InvTm.rename, InvTm.beq]
+      rw [NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ n m,
+          InvTm.beq_rename_eq2 (Rename.ext ρ₁) (Rename.ext ρ₂)
+            (Rename.RespectsRawIdx2.ext hρ) t₁ u₁,
+          InvTm.beq_rename_eq2 (Rename.ext ρ₁) (Rename.ext ρ₂)
+            (Rename.RespectsRawIdx2.ext hρ) t₂ u₂]
+  | .case _ _ _, .unit | .case _ _ _, .pair _ _ | .case _ _ _, .lam _
+  | .case _ _ _, .abort _ | .case _ _ _, .foc _ => by
+      simp [InvTm.rename, InvTm.beq]
+  | .abort n, .abort m => by
+      simp only [InvTm.rename, InvTm.beq]
+      exact NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ n m
+  | .abort _, .unit | .abort _, .pair _ _ | .abort _, .lam _
+  | .abort _, .case _ _ _ | .abort _, .foc _ => by
+      simp [InvTm.rename, InvTm.beq]
+  | .foc f, .foc g => by
+      simp only [InvTm.rename, InvTm.beq]
+      exact FocTm.beq_rename_eq2 ρ₁ ρ₂ hρ f g
+  | .foc _, .unit | .foc _, .pair _ _ | .foc _, .lam _
+  | .foc _, .case _ _ _ | .foc _, .abort _ => by
+      simp [InvTm.rename, InvTm.beq]
+termination_by t.size
+decreasing_by all_goals decreasing_trivial
+
+theorem FocTm.beq_rename_eq2 {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig} {A B : Object sig.nBases}
+    (ρ₁ : Rename sig Γ₁ Δ₁) (ρ₂ : Rename sig Γ₂ Δ₂)
+    (hρ : Rename.RespectsRawIdx2 ρ₁ ρ₂)
+    (f : FocTm Γ₁ A) (g : FocTm Γ₂ B) :
+    FocTm.beq (FocTm.rename ρ₁ f) (FocTm.rename ρ₂ g) = FocTm.beq f g :=
+  match f, g with
+  | .pos (.done p), .pos (.done q) => by
+      simp only [FocTm.rename, PosIntro.rename, FocTm.beq]
+      exact PosNeu.beq_rename_eq2 ρ₁ ρ₂ hρ p q
+  | .pos _, .neg _ | .pos _, .letPos _ _ | .pos _, .sat _ => by
+      simp [FocTm.rename, FocTm.beq]
+  | .neg (.done n), .neg (.done m) => by
+      simp only [FocTm.rename, NegElim.rename, FocTm.beq]
+      exact NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ n m
+  | .neg _, .pos _ | .neg _, .letPos _ _ | .neg _, .sat _ => by
+      simp [FocTm.rename, FocTm.beq]
+  | .letPos n t, .letPos m u => by
+      simp only [FocTm.rename, FocTm.beq]
+      rw [NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ n m,
+          InvTm.beq_rename_eq2 (Rename.ext ρ₁) (Rename.ext ρ₂)
+            (Rename.RespectsRawIdx2.ext hρ) t u]
+  | .letPos _ _, .pos _ | .letPos _ _, .neg _ | .letPos _ _, .sat _ => by
+      simp [FocTm.rename, FocTm.beq]
+  | .sat (.mk _sched t), .sat (.mk _sched' u) => by
+      simp only [FocTm.rename, SatTm.rename, FocTm.beq]
+      rw [InvTm.beq_rename_eq2 ρ₁ ρ₂ hρ t u]
+  | .sat _, .pos _ | .sat _, .neg _ | .sat _, .letPos _ _ => by
+      simp [FocTm.rename, FocTm.beq]
+termination_by f.size
+decreasing_by all_goals decreasing_trivial
+
+theorem PosNeu.beq_rename_eq2 {Γ₁ Γ₂ Δ₁ Δ₂ : Ctx sig} {A B : Object sig.nBases}
+    (ρ₁ : Rename sig Γ₁ Δ₁) (ρ₂ : Rename sig Γ₂ Δ₂)
+    (hρ : Rename.RespectsRawIdx2 ρ₁ ρ₂)
+    (p : PosNeu Γ₁ A) (q : PosNeu Γ₂ B) :
+    PosNeu.beq (PosNeu.rename ρ₁ p) (PosNeu.rename ρ₂ q) = PosNeu.beq p q :=
+  match p, q with
+  | .neu n, .neu m => by
+      simp only [PosNeu.rename, PosNeu.beq]
+      exact NegNeu.beq_rename_eq2 ρ₁ ρ₂ hρ n m
+  | .neu _, .inl _ | .neu _, .inr _ | .neu _, .val _ => by
+      simp [PosNeu.rename, PosNeu.beq]
+  | .inl p, .inl q => by
+      simp only [PosNeu.rename, PosNeu.beq]
+      exact PosNeu.beq_rename_eq2 ρ₁ ρ₂ hρ p q
+  | .inl _, .neu _ | .inl _, .inr _ | .inl _, .val _ => by
+      simp [PosNeu.rename, PosNeu.beq]
+  | .inr p, .inr q => by
+      simp only [PosNeu.rename, PosNeu.beq]
+      exact PosNeu.beq_rename_eq2 ρ₁ ρ₂ hρ p q
+  | .inr _, .neu _ | .inr _, .inl _ | .inr _, .val _ => by
+      simp [PosNeu.rename, PosNeu.beq]
+  | .val t, .val u => by
+      simp only [PosNeu.rename, PosNeu.beq]
+      exact InvTm.beq_rename_eq2 ρ₁ ρ₂ hρ t u
+  | .val _, .neu _ | .val _, .inl _ | .val _, .inr _ => by
+      simp [PosNeu.rename, PosNeu.beq]
+termination_by p.size
+decreasing_by all_goals decreasing_trivial
+end
+
+/-- Same-type `beq` ↔ under rename (pair peel after type subst). -/
+theorem NegNeu.beq_rename_eq {Γ Δ : Ctx sig} {A : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (hρ : Rename.RespectsRawIdx ρ)
+    (n m : NegNeu Γ A) :
+    NegNeu.beq (NegNeu.rename ρ n) (NegNeu.rename ρ m) = NegNeu.beq n m :=
+  NegNeu.beq_rename_eq2 ρ ρ hρ.to2 n m
+
+/--
+Cross-binder `beq` `→` for peel scrutinees that successfully `unweaken?`
+(so `var` / `fst` / `snd` only — never `app`).
+-/
+theorem NegNeu.beq_rename_ext_of_unweaken {Γ Δ : Ctx sig} {A B P Q : Object sig.nBases}
+    (ρ : Rename sig Γ Δ)
+    (n : NegNeu (Γ ▻ A) P) (m : NegNeu (Γ ▻ B) Q) (n0 : NegNeu Γ P)
+    (hunw : NegNeu.unweaken? n = some n0)
+    (hbeq : NegNeu.beq n m = true) :
+    NegNeu.beq (NegNeu.rename (Rename.ext ρ) n)
+      (NegNeu.rename (Rename.ext ρ) m) = true := by
+  cases n with
+  | var x =>
+      cases x with
+      | here => simp [NegNeu.unweaken?] at hunw
+      | there x =>
+          cases m with
+          | var y =>
+              cases y with
+              | here => simp [NegNeu.beq, Var.toRawIdx] at hbeq
+              | there y =>
+                  simp only [NegNeu.beq, NegNeu.rename, Rename.ext, Var.toRawIdx,
+                    beq_iff_eq, Nat.add_right_cancel_iff] at hbeq ⊢
+                  obtain ⟨rfl, hxy⟩ := Var.eq_of_toRawIdx x y hbeq
+                  cases eq_of_heq hxy
+                  rfl
+          | app _ _ | fst _ | snd _ => simp [NegNeu.beq] at hbeq
+  | app _ _ => simp [NegNeu.unweaken?] at hunw
+  | fst f =>
+      cases m with
+      | fst g =>
+          cases hf : NegNeu.unweaken? f with
+          | none => simp [NegNeu.unweaken?, hf] at hunw
+          | some f0 =>
+              simp only [NegNeu.unweaken?, hf, Option.map_some, Option.some.injEq] at hunw
+              simp only [NegNeu.beq, NegNeu.rename] at hbeq ⊢
+              exact NegNeu.beq_rename_ext_of_unweaken ρ f g f0 hf hbeq
+      | var _ | app _ _ | snd _ => simp [NegNeu.beq] at hbeq
+  | snd f =>
+      cases m with
+      | snd g =>
+          cases hf : NegNeu.unweaken? f with
+          | none => simp [NegNeu.unweaken?, hf] at hunw
+          | some f0 =>
+              simp only [NegNeu.unweaken?, hf, Option.map_some, Option.some.injEq] at hunw
+              simp only [NegNeu.beq, NegNeu.rename] at hbeq ⊢
+              exact NegNeu.beq_rename_ext_of_unweaken ρ f g f0 hf hbeq
+      | var _ | app _ _ | fst _ => simp [NegNeu.beq] at hbeq
+termination_by NegNeu.size n
+
+/--
+Cross-binder `beq` `←` under `RespectsRawIdx`, for neutrals that unweaken.
+-/
+theorem NegNeu.beq_of_beq_rename_ext_of_unweaken {Γ Δ : Ctx sig}
+    {A B P Q : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (hρ : Rename.RespectsRawIdx ρ)
+    (n : NegNeu (Γ ▻ A) P) (m : NegNeu (Γ ▻ B) Q) (n0 : NegNeu Γ P)
+    (hunw : NegNeu.unweaken? n = some n0)
+    (hbeq : NegNeu.beq (NegNeu.rename (Rename.ext ρ) n)
+      (NegNeu.rename (Rename.ext ρ) m) = true) :
+    NegNeu.beq n m = true := by
+  cases n with
+  | var x =>
+      cases x with
+      | here => simp [NegNeu.unweaken?] at hunw
+      | there x =>
+          cases m with
+          | var y =>
+              cases y with
+              | here =>
+                  simp [NegNeu.rename, Rename.ext, NegNeu.beq, Var.toRawIdx] at hbeq
+              | there y =>
+                  simp only [NegNeu.beq, NegNeu.rename, Rename.ext, Var.toRawIdx,
+                    beq_iff_eq, Nat.add_right_cancel_iff] at hbeq ⊢
+                  have : (Var.toRawIdx (ρ x) == Var.toRawIdx (ρ y)) = true := by
+                    simpa [beq_iff_eq] using hbeq
+                  have : (Var.toRawIdx x == Var.toRawIdx y) = true := by
+                    rwa [← hρ x y]
+                  exact beq_iff_eq.mp this
+          | app _ _ | fst _ | snd _ =>
+              simp [NegNeu.rename, NegNeu.beq] at hbeq
+  | app _ _ => simp [NegNeu.unweaken?] at hunw
+  | fst f =>
+      cases m with
+      | fst g =>
+          cases hf : NegNeu.unweaken? f with
+          | none => simp [NegNeu.unweaken?, hf] at hunw
+          | some f0 =>
+              simp only [NegNeu.unweaken?, hf, Option.map_some] at hunw
+              simp only [NegNeu.beq, NegNeu.rename] at hbeq ⊢
+              exact NegNeu.beq_of_beq_rename_ext_of_unweaken ρ hρ f g f0 hf hbeq
+      | var _ | app _ _ | snd _ => simp [NegNeu.rename, NegNeu.beq] at hbeq
+  | snd f =>
+      cases m with
+      | snd g =>
+          cases hf : NegNeu.unweaken? f with
+          | none => simp [NegNeu.unweaken?, hf] at hunw
+          | some f0 =>
+              simp only [NegNeu.unweaken?, hf, Option.map_some] at hunw
+              simp only [NegNeu.beq, NegNeu.rename] at hbeq ⊢
+              exact NegNeu.beq_of_beq_rename_ext_of_unweaken ρ hρ f g f0 hf hbeq
+      | var _ | app _ _ | fst _ => simp [NegNeu.rename, NegNeu.beq] at hbeq
+termination_by NegNeu.size n
+
+theorem NegNeu.weaken_rename {Γ Δ : Ctx sig} {A B : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (n : NegNeu Γ A) :
+    NegNeu.rename (Rename.ext (A := B) ρ) (NegNeu.weaken (B := B) n) =
+      NegNeu.weaken (B := B) (NegNeu.rename ρ n) := by
+  simp only [NegNeu.weaken]
+  rw [NegNeu.rename_comp, NegNeu.rename_comp]
+  refine NegNeu.rename_eq_of_pointwise ?_ n
+  intro _ _
+  rfl
+
+theorem Rename.exchange_ext_apply {Γ Δ : Ctx sig} {A B C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (x : Var (Γ ▻ A ▻ B) C) :
+    Rename.ext (Rename.ext ρ) (Rename.exchange (A := A) (B := B) x) =
+      Rename.exchange (A := A) (B := B) (Rename.ext (Rename.ext ρ) x) := by
+  cases x with
+  | here => rfl
+  | there x =>
+      cases x with
+      | here => rfl
+      | there _ => rfl
+
+theorem InvTm.rename_exchange_ext {Γ Δ : Ctx sig} {A B C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (t : InvTm (Γ ▻ A ▻ B) C) :
+    InvTm.rename (Rename.ext (Rename.ext ρ))
+        (InvTm.rename (Rename.exchange (A := A) (B := B)) t) =
+      InvTm.rename (Rename.exchange (A := A) (B := B))
+        (InvTm.rename (Rename.ext (Rename.ext ρ)) t) := by
+  rw [InvTm.rename_comp, InvTm.rename_comp]
+  refine InvTm.rename_eq_of_pointwise ?_ t
+  intro _ x
+  exact Rename.exchange_ext_apply ρ x
+
+theorem distCaseOut_rename {Γ Δ : Ctx sig} {A B C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ)
+    (n : NegNeu Γ (.coprod A B))
+    (t : InvTm (Γ ▻ A) C) (u : InvTm (Γ ▻ B) C) :
+    distCaseOut (NegNeu.rename ρ n)
+      (InvTm.rename (Rename.ext ρ) t) (InvTm.rename (Rename.ext ρ) u) =
+      Option.map (InvTm.rename ρ) (distCaseOut n t u) := by
+  cases t <;> cases u <;> simp [distCaseOut, InvTm.rename, NegNeu.weaken_rename,
+    InvTm.rename_exchange_ext]
+
+/-- Map a peel Σ′-package along a renaming. -/
+private def mapPeelRename {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) :
+    Option ((A B : Object sig.nBases) × NegNeu Γ (.coprod A B) ×
+      InvTm (Γ ▻ A) C × InvTm (Γ ▻ B) C) →
+    Option ((A B : Object sig.nBases) × NegNeu Δ (.coprod A B) ×
+      InvTm (Δ ▻ A) C × InvTm (Δ ▻ B) C)
+  | none => none
+  | some ⟨A, B, n, tL, tR⟩ =>
+      some ⟨A, B, NegNeu.rename ρ n,
+        InvTm.rename (Rename.ext ρ) tL,
+        InvTm.rename (Rename.ext ρ) tR⟩
+
+/-- Full option naturality of `peelCaseOuterGo` under rename. -/
+theorem peelCaseOuterGo_rename_eq {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    (fuel : Nat) (ρ : Rename sig Γ Δ)
+    (ε : OriginEnv Γ) (ε' : OriginEnv Δ) (o : Origin sig)
+    (t : InvTm Γ C)
+    (hε : ∀ {B} (x : Var Γ B), ε' (ρ x) = ε x)
+    (hρ : Rename.RespectsRawIdx ρ) :
+    peelCaseOuterGo fuel ε' o (InvTm.rename ρ t) =
+      mapPeelRename ρ (peelCaseOuterGo fuel ε o t) := by
+  induction fuel generalizing Γ Δ ρ ε ε' C t with
+  | zero => rfl
+  | succ fuel ih =>
+      cases t with
+      | unit | abort _ => rfl
+      | foc f =>
+          cases f with
+          | pos _ | neg _ => rfl
+          | sat s =>
+              cases s with
+              | mk _sched body =>
+                  simp only [peelCaseOuterGo, InvTm.rename, FocTm.rename, SatTm.rename]
+                  exact ih ρ ε ε' body hε hρ
+          | letPos n₀ body =>
+              rename_i P
+              simp only [peelCaseOuterGo, InvTm.rename, FocTm.rename]
+              have hεw : ∀ {B} (x : Var (Γ ▻ P) B),
+                  OriginEnv.weaken (A := P) ε' (.dom 0) (Rename.ext ρ x) =
+                    OriginEnv.weaken (A := P) ε (.dom 0) x := by
+                intro B x; cases x with
+                | here => rfl
+                | there y => exact hε y
+              rw [ih (Rename.ext ρ)
+                (OriginEnv.weaken (A := P) ε (.dom 0))
+                (OriginEnv.weaken (A := P) ε' (.dom 0))
+                body hεw (Rename.ext_respectsRawIdx hρ)]
+              cases peelCaseOuterGo fuel
+                  (OriginEnv.weaken (A := P) ε (.dom 0)) o body with
+              | none => rfl
+              | some r =>
+                  rcases r with ⟨_A₁, _B₁, n₁, tL₁, tR₁⟩
+                  simp only [mapPeelRename, NegNeu.unweaken?_rename]
+                  cases NegNeu.unweaken? n₁ with
+                  | none => rfl
+                  | some m0 =>
+                      simp only [mapPeelRename, Option.map_some, InvTm.rename,
+                        FocTm.rename, NegNeu.weaken_rename,
+                        InvTm.rename_exchange_ext]
+      | pair t₁ t₂ =>
+          simp only [peelCaseOuterGo, InvTm.rename]
+          rw [ih ρ ε ε' t₁ hε hρ, ih ρ ε ε' t₂ hε hρ]
+          cases peelCaseOuterGo fuel ε o t₁ with
+          | none => rfl
+          | some r1 =>
+              cases peelCaseOuterGo fuel ε o t₂ with
+              | none => rfl
+              | some r2 =>
+                  rcases r1 with ⟨A₁, B₁, n₁, l₁, r₁⟩
+                  rcases r2 with ⟨A₂, B₂, n₂, l₂, r₂⟩
+                  simp only [mapPeelRename]
+                  by_cases hA : A₁ = A₂
+                  · by_cases hB : B₁ = B₂
+                    · subst hA; subst hB
+                      simp only [↓reduceDIte]
+                      rw [NegNeu.beq_rename_eq ρ hρ n₁ n₂]
+                      split <;> rfl
+                    · simp [hA, hB]
+                  · simp [hA]
+      | lam body =>
+          rename_i Arg _Ret
+          simp only [peelCaseOuterGo, InvTm.rename]
+          have hεw : ∀ {B} (x : Var (Γ ▻ Arg) B),
+              OriginEnv.weaken (A := Arg) ε' (.dom 0) (Rename.ext ρ x) =
+                OriginEnv.weaken (A := Arg) ε (.dom 0) x := by
+            intro B x; cases x with
+            | here => rfl
+            | there y => exact hε y
+          rw [ih (Rename.ext ρ)
+            (OriginEnv.weaken (A := Arg) ε (.dom 0))
+            (OriginEnv.weaken (A := Arg) ε' (.dom 0))
+            body hεw (Rename.ext_respectsRawIdx hρ)]
+          cases peelCaseOuterGo fuel
+              (OriginEnv.weaken (A := Arg) ε (.dom 0)) o body with
+          | none => rfl
+          | some r =>
+              rcases r with ⟨_A₁, _B₁, n₁, tL₁, tR₁⟩
+              simp only [mapPeelRename, NegNeu.unweaken?_rename]
+              cases NegNeu.unweaken? n₁ with
+              | none => rfl
+              | some n0 =>
+                  simp only [Option.map_some, InvTm.rename, InvTm.rename_exchange_ext]
+      | case scr tL₀ tR₀ =>
+          rename_i A₀ B₀
+          cases scr with
+          | app _ _ | fst _ | snd _ => rfl
+          | var x =>
+              simp only [peelCaseOuterGo, InvTm.rename, NegNeu.rename]
+              have hhit : (ε' (ρ x) == o) = (ε x == o) := by rw [hε x]
+              rw [hhit]
+              split
+              · rfl
+              · have hx : ε' (ρ x) = ε x := hε x
+                have hεL : ∀ {B} (y : Var (Γ ▻ A₀) B),
+                    OriginEnv.weaken (A := A₀) ε'
+                        (.split (ε' (ρ x)) false) (Rename.ext ρ y) =
+                      OriginEnv.weaken (A := A₀) ε (.split (ε x) false) y := by
+                  intro B y; cases y with
+                  | here =>
+                      simp only [Rename.ext, OriginEnv.weaken, OriginEnv.snoc]
+                      rw [hx]
+                  | there z => exact hε z
+                have hεR : ∀ {B} (y : Var (Γ ▻ B₀) B),
+                    OriginEnv.weaken (A := B₀) ε'
+                        (.split (ε' (ρ x)) true) (Rename.ext ρ y) =
+                      OriginEnv.weaken (A := B₀) ε (.split (ε x) true) y := by
+                  intro B y; cases y with
+                  | here =>
+                      simp only [Rename.ext, OriginEnv.weaken, OriginEnv.snoc]
+                      rw [hx]
+                  | there z => exact hε z
+                rw [ih (Rename.ext ρ)
+                  (OriginEnv.weaken (A := A₀) ε (.split (ε x) false))
+                  (OriginEnv.weaken (A := A₀) ε' (.split (ε' (ρ x)) false))
+                  tL₀ hεL (Rename.ext_respectsRawIdx hρ)]
+                rw [ih (Rename.ext ρ)
+                  (OriginEnv.weaken (A := B₀) ε (.split (ε x) true))
+                  (OriginEnv.weaken (A := B₀) ε' (.split (ε' (ρ x)) true))
+                  tR₀ hεR (Rename.ext_respectsRawIdx hρ)]
+                cases peelCaseOuterGo fuel
+                    (OriginEnv.weaken (A := A₀) ε (.split (ε x) false)) o tL₀ with
+                | none =>
+                    simp only [mapPeelRename]
+                    have hdist := distCaseOut_rename ρ (.var x) tL₀ tR₀
+                    simp only [NegNeu.rename] at hdist
+                    rw [hdist]
+                    cases distCaseOut (.var x) tL₀ tR₀ with
+                    | none => rfl
+                    | some t' =>
+                        simp only [Option.map_some]
+                        exact ih ρ ε ε' t' hε hρ
+                | some rL =>
+                    cases peelCaseOuterGo fuel
+                        (OriginEnv.weaken (A := B₀) ε (.split (ε x) true)) o tR₀ with
+                    | none =>
+                        simp only [mapPeelRename]
+                        have hdist := distCaseOut_rename ρ (.var x) tL₀ tR₀
+                        simp only [NegNeu.rename] at hdist
+                        rw [hdist]
+                        cases distCaseOut (.var x) tL₀ tR₀ with
+                        | none => rfl
+                        | some t' =>
+                            simp only [Option.map_some]
+                            exact ih ρ ε ε' t' hε hρ
+                    | some rR =>
+                        rcases rL with ⟨C₁, D₁, n₁, a₁, b₁⟩
+                        rcases rR with ⟨C₂, D₂, n₂, a₂, b₂⟩
+                        simp only [mapPeelRename]
+                        by_cases hC : C₁ = C₂
+                        · by_cases hD : D₁ = D₂
+                          · subst hC; subst hD
+                            simp only [↓reduceDIte]
+                            cases hbeq : NegNeu.beq n₁ n₂ with
+                            | true =>
+                                simp only [hbeq, ↓reduceIte]
+                                cases hunw : NegNeu.unweaken? n₁ with
+                                | none =>
+                                    cases hbeq' : NegNeu.beq
+                                        (NegNeu.rename (Rename.ext ρ) n₁)
+                                        (NegNeu.rename (Rename.ext ρ) n₂) with
+                                    | false => simp
+                                    | true =>
+                                        simp [NegNeu.unweaken?_rename, hunw]
+                                | some m =>
+                                    have hbeq' :=
+                                      NegNeu.beq_rename_ext_of_unweaken ρ n₁ n₂ m hunw hbeq
+                                    simp only [hbeq', ↓reduceIte,
+                                      NegNeu.unweaken?_rename, hunw, Option.map_some]
+                                    rw [originOfVar_rename ρ ε ε' m hε]
+                                    cases originOfVar ε m with
+                                    | none => rfl
+                                    | some om =>
+                                        cases homs : (om == o) with
+                                        | false => simp [homs]
+                                        | true =>
+                                            simp only [homs, ↓reduceIte, mapPeelRename,
+                                              InvTm.rename]
+                                            rw [NegNeu.weaken_rename (B := C₁) ρ (.var x),
+                                                NegNeu.weaken_rename (B := D₁) ρ (.var x),
+                                                InvTm.rename_exchange_ext (A := A₀) (B := C₁) ρ a₁,
+                                                InvTm.rename_exchange_ext (A := B₀) (B := C₁) ρ a₂,
+                                                InvTm.rename_exchange_ext (A := A₀) (B := D₁) ρ b₁,
+                                                InvTm.rename_exchange_ext (A := B₀) (B := D₁) ρ b₂]
+                                            simp only [NegNeu.rename]
+                            | false =>
+                                simp only [hbeq, Bool.false_eq_true, ↓reduceIte]
+                                cases hbeq' : NegNeu.beq
+                                    (NegNeu.rename (Rename.ext ρ) n₁)
+                                    (NegNeu.rename (Rename.ext ρ) n₂) with
+                                | false => simp
+                                | true =>
+                                    cases hunw : NegNeu.unweaken? n₁ with
+                                    | none =>
+                                        simp [NegNeu.unweaken?_rename, hunw]
+                                    | some m =>
+                                        have :=
+                                          NegNeu.beq_of_beq_rename_ext_of_unweaken
+                                            ρ hρ n₁ n₂ m hunw hbeq'
+                                        simp [this] at hbeq
+                          · simp [hC, hD]
+                        · simp [hC]
+
+/-- Success-form naturality under rename. -/
+theorem peelCaseOuterGo_rename {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    (fuel : Nat) (ρ : Rename sig Γ Δ)
+    (ε : OriginEnv Γ) (ε' : OriginEnv Δ) (o : Origin sig)
+    (t : InvTm Γ C)
+    {A B : Object sig.nBases} {n : NegNeu Γ (.coprod A B)}
+    {tL : InvTm (Γ ▻ A) C} {tR : InvTm (Γ ▻ B) C}
+    (hε : ∀ {B} (x : Var Γ B), ε' (ρ x) = ε x)
+    (hρ : Rename.RespectsRawIdx ρ)
+    (h : peelCaseOuterGo fuel ε o t = some ⟨A, B, n, tL, tR⟩) :
+    peelCaseOuterGo fuel ε' o (InvTm.rename ρ t) =
+      some ⟨A, B, NegNeu.rename ρ n,
+        InvTm.rename (Rename.ext ρ) tL,
+        InvTm.rename (Rename.ext ρ) tR⟩ := by
+  simpa [peelCaseOuterGo_rename_eq fuel ρ ε ε' o t hε hρ, mapPeelRename, h]
+
+theorem peelCaseOuter_rename {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ)
+    (ε : OriginEnv Γ) (ε' : OriginEnv Δ) (o : Origin sig)
+    (t : InvTm Γ C)
+    {A B : Object sig.nBases} {n : NegNeu Γ (.coprod A B)}
+    {tL : InvTm (Γ ▻ A) C} {tR : InvTm (Γ ▻ B) C}
+    (hε : ∀ {B} (x : Var Γ B), ε' (ρ x) = ε x)
+    (hρ : Rename.RespectsRawIdx ρ)
+    (h : peelCaseOuter ε o t = some ⟨A, B, n, tL, tR⟩) :
+    peelCaseOuter ε' o (InvTm.rename ρ t) =
+      some ⟨A, B, NegNeu.rename ρ n,
+        InvTm.rename (Rename.ext ρ) tL,
+        InvTm.rename (Rename.ext ρ) tR⟩ := by
+  have hsz : InvTm.size (InvTm.rename ρ t) = InvTm.size t := InvTm.size_rename ρ t
+  simpa [peelCaseOuter, hsz] using
+    peelCaseOuterGo_rename (InvTm.size t) ρ ε ε' o t hε hρ h
+
 end Equality
 end Gimbal

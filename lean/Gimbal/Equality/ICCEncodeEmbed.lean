@@ -22,6 +22,9 @@ variable {sig : Signature}
 Morphism of encoder states along `ρ : Rename Γ Δ`.
 
 * `env_commute` — old-origin slots commute with `ρ`
+* `source_wf` / `target_wf` — live origins are pairwise distinct on both sides
+  (so `find?` recovers a unique carrier; a fresher target binder cannot steal
+  a mapped source origin)
 * `ws_eq` — source worklist equals target worklist (origins are absolute;
   fresh target binders may exist but need not occur in this shared worklist)
 * `domNext_eq` / `obsNext_eq` — counter evolution is explicit (not reset)
@@ -31,37 +34,57 @@ structure EncodeIxEmbedding {Γ Δ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ)
     (t : EncodeIx (sig := sig) Δ) : Prop where
   env_commute : ∀ {A : Object sig.nBases} (x : Var Γ A), t.env (ρ x) = s.env x
+  source_wf : OriginEnv.WellFormed s.env
+  target_wf : OriginEnv.WellFormed t.env
+  respectsRawIdx : Rename.RespectsRawIdx ρ
   ws_eq : s.ws = t.ws
   domNext_eq : t.domNext = s.domNext
   obsNext_eq : t.obsNext = s.obsNext
+
+/-- Lookup naturality: well-formed embeddings transport `find?` along `ρ`. -/
+theorem EncodeIxEmbedding.find?_eq {Γ Δ : Ctx sig}
+    {ρ : Rename sig Γ Δ}
+    {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
+    (emb : EncodeIxEmbedding ρ s t)
+    (o : Origin sig) {A : Object sig.nBases} (x : Var Γ A)
+    (h : OriginEnv.find? s.env o = some ⟨A, x⟩) :
+    OriginEnv.find? t.env o = some ⟨A, ρ x⟩ := by
+  have hx : s.env x = o := OriginEnv.find?_eq_some_eq s.env o x h
+  have : t.env (ρ x) = o := by rw [emb.env_commute x, hx]
+  exact OriginEnv.find?_eq_some_of_wellFormed t.env o (ρ x) emb.target_wf this
 
 /-- Existing origins remain collision-free on the image of `ρ`. -/
 theorem EncodeIxEmbedding.origin_inj_image {Γ Δ : Ctx sig}
     {ρ : Rename sig Γ Δ}
     {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
     (emb : EncodeIxEmbedding ρ s t)
-    (hinj : ∀ {A B : Object sig.nBases} (x : Var Γ A) (y : Var Γ B),
-      s.env x = s.env y → ∃ _h : A = B, HEq x y)
     {A B : Object sig.nBases} (x : Var Γ A) (y : Var Γ B)
     (heq : t.env (ρ x) = t.env (ρ y)) :
     ∃ _hAB : A = B, HEq x y := by
   have : s.env x = s.env y := by
     simpa [emb.env_commute x, emb.env_commute y] using heq
-  exact hinj x y this
+  exact emb.source_wf.injective x y this
 
 /-! ## Unused-binder weaken embedding -/
 
 /--
 Unused newest binder: `Rename.weaken` into `OriginEnv.weaken … o` with
 identical worklist and counters.
+
+Requires `o` fresh in the source environment (otherwise the target is not
+well-formed / `find?` would prefer the colliding newest binder).
 -/
 theorem encodeIxEmbedding_weaken {Γ : Ctx sig} {B : Object sig.nBases}
-    (s : EncodeIx (sig := sig) Γ) (o : Origin sig) :
+    (s : EncodeIx (sig := sig) Γ) (o : Origin sig)
+    (hwf : OriginEnv.WellFormed s.env) (hfresh : OriginEnv.Fresh s.env o) :
     EncodeIxEmbedding (Rename.weaken (A := B)) s
       ⟨s.ws, OriginEnv.weaken (A := B) s.env o, s.domNext, s.obsNext⟩ where
   env_commute := by
     intro A x
     simp [Rename.weaken, OriginEnv.weaken, OriginEnv.snoc]
+  source_wf := hwf
+  target_wf := OriginEnv.WellFormed.weaken s.env o hwf hfresh
+  respectsRawIdx := Rename.weaken_respectsRawIdx
   ws_eq := rfl
   domNext_eq := rfl
   obsNext_eq := rfl
@@ -72,7 +95,8 @@ theorem encodeIxEmbedding_weaken {Γ : Ctx sig} {B : Object sig.nBases}
 theorem EncodeIxEmbedding.extPush {Γ Δ : Ctx sig} {P : Object sig.nBases}
     {ρ : Rename sig Γ Δ}
     {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
-    (emb : EncodeIxEmbedding ρ s t) (o : Origin sig) :
+    (emb : EncodeIxEmbedding ρ s t) (o : Origin sig)
+    (hsFresh : OriginEnv.Fresh s.env o) (htFresh : OriginEnv.Fresh t.env o) :
     EncodeIxEmbedding (Rename.ext ρ)
       ⟨pushPos s.ws o P,
         OriginEnv.weaken (A := P) s.env o, s.domNext, s.obsNext⟩
@@ -84,6 +108,9 @@ theorem EncodeIxEmbedding.extPush {Γ Δ : Ctx sig} {P : Object sig.nBases}
     | here => simp [Rename.ext, OriginEnv.weaken, OriginEnv.snoc]
     | there y =>
         simpa [Rename.ext, OriginEnv.weaken, OriginEnv.snoc] using emb.env_commute y
+  source_wf := OriginEnv.WellFormed.weaken s.env o emb.source_wf hsFresh
+  target_wf := OriginEnv.WellFormed.weaken t.env o emb.target_wf htFresh
+  respectsRawIdx := Rename.ext_respectsRawIdx emb.respectsRawIdx
   ws_eq := by simp [emb.ws_eq]
   domNext_eq := emb.domNext_eq
   obsNext_eq := emb.obsNext_eq
@@ -92,7 +119,9 @@ theorem EncodeIxEmbedding.extPush {Γ Δ : Ctx sig} {P : Object sig.nBases}
 theorem EncodeIxEmbedding.extObs {Γ Δ : Ctx sig} {P : Object sig.nBases}
     {ρ : Rename sig Γ Δ}
     {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
-    (emb : EncodeIxEmbedding ρ s t) :
+    (emb : EncodeIxEmbedding ρ s t)
+    (hsFresh : OriginEnv.Fresh s.env (.obs (sig := sig) s.obsNext))
+    (htFresh : OriginEnv.Fresh t.env (.obs (sig := sig) t.obsNext)) :
     EncodeIxEmbedding (Rename.ext ρ)
       ⟨pushPos s.ws (.obs (sig := sig) s.obsNext) P,
         OriginEnv.weaken (A := P) s.env (.obs (sig := sig) s.obsNext),
@@ -104,6 +133,11 @@ theorem EncodeIxEmbedding.extObs {Γ Δ : Ctx sig} {P : Object sig.nBases}
   have hdom : t.domNext = s.domNext := emb.domNext_eq
   refine
     { env_commute := ?_
+      source_wf := OriginEnv.WellFormed.weaken s.env (.obs (sig := sig) s.obsNext)
+        emb.source_wf hsFresh
+      target_wf := OriginEnv.WellFormed.weaken t.env (.obs (sig := sig) t.obsNext)
+        emb.target_wf htFresh
+      respectsRawIdx := Rename.ext_respectsRawIdx emb.respectsRawIdx
       ws_eq := ?_
       domNext_eq := by simp [hdom]
       obsNext_eq := by simp [hobs] }
@@ -118,7 +152,9 @@ theorem EncodeIxEmbedding.extObs {Γ Δ : Ctx sig} {P : Object sig.nBases}
 theorem EncodeIxEmbedding.extDom {Γ Δ : Ctx sig} {Arg : Object sig.nBases}
     {ρ : Rename sig Γ Δ}
     {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
-    (emb : EncodeIxEmbedding ρ s t) :
+    (emb : EncodeIxEmbedding ρ s t)
+    (hsFresh : OriginEnv.Fresh s.env (.dom (sig := sig) s.domNext))
+    (htFresh : OriginEnv.Fresh t.env (.dom (sig := sig) t.domNext)) :
     EncodeIxEmbedding (Rename.ext ρ)
       ⟨pushPos s.ws (.dom (sig := sig) s.domNext) Arg,
         OriginEnv.weaken (A := Arg) s.env (.dom (sig := sig) s.domNext),
@@ -130,6 +166,11 @@ theorem EncodeIxEmbedding.extDom {Γ Δ : Ctx sig} {Arg : Object sig.nBases}
   have hdom : t.domNext = s.domNext := emb.domNext_eq
   refine
     { env_commute := ?_
+      source_wf := OriginEnv.WellFormed.weaken s.env (.dom (sig := sig) s.domNext)
+        emb.source_wf hsFresh
+      target_wf := OriginEnv.WellFormed.weaken t.env (.dom (sig := sig) t.domNext)
+        emb.target_wf htFresh
+      respectsRawIdx := Rename.ext_respectsRawIdx emb.respectsRawIdx
       ws_eq := ?_
       domNext_eq := by simp [hdom]
       obsNext_eq := by simp [hobs] }
@@ -144,7 +185,9 @@ theorem EncodeIxEmbedding.extDom {Γ Δ : Ctx sig} {Arg : Object sig.nBases}
 theorem EncodeIxEmbedding.extSplit {Γ Δ : Ctx sig} {P : Object sig.nBases}
     {ρ : Rename sig Γ Δ}
     {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
-    (emb : EncodeIxEmbedding ρ s t) (parent : Origin sig) (side : Bool) :
+    (emb : EncodeIxEmbedding ρ s t) (parent : Origin sig) (side : Bool)
+    (hsFresh : OriginEnv.Fresh s.env (.split parent side))
+    (htFresh : OriginEnv.Fresh t.env (.split parent side)) :
     EncodeIxEmbedding (Rename.ext ρ)
       ⟨pushPos s.ws (.split parent side) P,
         OriginEnv.weaken (A := P) s.env (.split parent side),
@@ -152,7 +195,7 @@ theorem EncodeIxEmbedding.extSplit {Γ Δ : Ctx sig} {P : Object sig.nBases}
       ⟨pushPos t.ws (.split parent side) P,
         OriginEnv.weaken (A := P) t.env (.split parent side),
         t.domNext, t.obsNext⟩ :=
-  EncodeIxEmbedding.extPush (P := P) emb (.split parent side)
+  EncodeIxEmbedding.extPush (P := P) emb (.split parent side) hsFresh htFresh
 
 /-! ## Peel-free certificate transport
 
@@ -161,7 +204,8 @@ Under an embedding, `obsNext` is shared (`obsNext_eq`), so origin allocation
 does **not** change — `extObs` is the compositional counter/origin law.
 
 Full `EncodeReady` (with `leftCoprod_peel` / `leftCoprod_unitEta`) additionally
-needs `peelCaseOuter` / `find?` naturality under `ρ` (STOP below).
+needs binder-step `Fresh` for counter/split origins when threading
+`WellFormed` (peel/`find?` rename laws themselves are available).
 -/
 
 theorem encodeReadyNoPeel_of_embedding {Γ Δ : Ctx sig} {A : Object sig.nBases}
@@ -299,7 +343,8 @@ def embedExLamProduced_weaken : Produced
       embedExEntry.domNext, embedExEntry.obsNext⟩
     (.exp EmbedAtom EmbedAtom) :=
   produced_of_embedding_noPeel
-    (encodeIxEmbedding_weaken embedExEntry (.split (.hyp (sig := EmbedExSig) 0) false))
+    (encodeIxEmbedding_weaken embedExEntry (.split (.hyp (sig := EmbedExSig) 0) false)
+      OriginEnv.WellFormed.empty (OriginEnv.Fresh.empty _))
     embedExLamProduced embedExLam_noPeel
 
 def embedExΓBase : Ctx EmbedExSig := Ctx.empty ▻ EmbedAtom
@@ -344,6 +389,14 @@ theorem embedEx_weaken_embedding :
     EncodeIxEmbedding (Rename.weaken (A := EmbedAtom))
       embedExStateBase embedExTargetBase :=
   encodeIxEmbedding_weaken embedExStateBase (.split (.hyp (sig := EmbedExSig) 0) false)
+    (OriginEnv.WellFormed.weaken OriginEnv.empty (.hyp (sig := EmbedExSig) 0)
+      OriginEnv.WellFormed.empty (OriginEnv.Fresh.empty _))
+    (by
+      intro A x
+      cases x with
+      | here =>
+          simp [embedExStateBase, OriginEnv.weaken, OriginEnv.snoc]
+      | there y => nomatch y)
 
 def embedExLetPosProduced : Produced embedExStateBase EmbedAtom where
   term := embedExLetPosBase
@@ -353,29 +406,174 @@ def embedExLetPosProduced_weaken : Produced embedExTargetBase EmbedAtom :=
   produced_of_embedding_noPeel embedEx_weaken_embedding
     embedExLetPosProduced embedExLetPosBase_noPeel
 
+/-! ## Lookup naturality under embedding constructors -/
+
+/-- Identity embedding (same state). -/
+theorem encodeIxEmbedding_id {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (hwf : OriginEnv.WellFormed s.env) :
+    EncodeIxEmbedding (Rename.id (Γ := Γ)) s s where
+  env_commute := fun _ => rfl
+  source_wf := hwf
+  target_wf := hwf
+  respectsRawIdx := Rename.id_respectsRawIdx
+  ws_eq := rfl
+  domNext_eq := rfl
+  obsNext_eq := rfl
+
+private theorem embedExStateBase_wf :
+    OriginEnv.WellFormed embedExStateBase.env :=
+  OriginEnv.WellFormed.weaken OriginEnv.empty (.hyp (sig := EmbedExSig) 0)
+    OriginEnv.WellFormed.empty (OriginEnv.Fresh.empty _)
+
+private theorem embedExStateBase_fresh_obs :
+    OriginEnv.Fresh embedExStateBase.env (.obs (sig := EmbedExSig) 0) := by
+  intro A x
+  cases x with
+  | here => simp [embedExStateBase, OriginEnv.weaken, OriginEnv.snoc]
+  | there y => nomatch y
+
+private theorem embedExStateBase_fresh_dom :
+    OriginEnv.Fresh embedExStateBase.env (.dom (sig := EmbedExSig) 0) := by
+  intro A x
+  cases x with
+  | here => simp [embedExStateBase, OriginEnv.weaken, OriginEnv.snoc]
+  | there y => nomatch y
+
+private theorem embedExStateBase_fresh_split (side : Bool) :
+    OriginEnv.Fresh embedExStateBase.env
+      (.split (.hyp (sig := EmbedExSig) 0) side) := by
+  intro A x
+  cases x with
+  | here => simp [embedExStateBase, OriginEnv.weaken, OriginEnv.snoc]
+  | there y => nomatch y
+
+/-- `find?` for the base hyp survives unused-binder weaken. -/
+theorem embedEx_find?_weaken :
+    let o := Origin.hyp (sig := EmbedExSig) 0
+    OriginEnv.find? embedExStateBase.env o = some ⟨EmbedAtom, .here⟩ ∧
+    OriginEnv.find? embedExTargetBase.env o =
+      some ⟨EmbedAtom, Rename.weaken (A := EmbedAtom) (.here : Var embedExΓBase EmbedAtom)⟩ := by
+  refine ⟨?_, ?_⟩
+  · exact OriginEnv.find?_eq_some_of_wellFormed _ _ _ embedExStateBase_wf rfl
+  · exact EncodeIxEmbedding.find?_eq embedEx_weaken_embedding _ _
+      (OriginEnv.find?_eq_some_of_wellFormed _ _ _ embedExStateBase_wf rfl)
+
+/-- `find?` naturality for `extPush`. -/
+theorem embedEx_find?_extPush
+    (h : OriginEnv.find? embedExStateBase.env (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, .here⟩) :
+    OriginEnv.find? (OriginEnv.weaken (A := EmbedAtom) embedExStateBase.env
+        (.split (.hyp (sig := EmbedExSig) 0) true))
+      (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, Rename.ext (Rename.id (Γ := embedExΓBase)) (.there .here)⟩ :=
+  EncodeIxEmbedding.find?_eq
+    (EncodeIxEmbedding.extPush (P := EmbedAtom)
+      (encodeIxEmbedding_id embedExStateBase embedExStateBase_wf)
+      (.split (.hyp (sig := EmbedExSig) 0) true)
+      (embedExStateBase_fresh_split true) (embedExStateBase_fresh_split true))
+    (.hyp (sig := EmbedExSig) 0) (.there .here)
+    (OriginEnv.find?_weaken_there embedExStateBase.env
+      (.split (.hyp (sig := EmbedExSig) 0) true) (.hyp (sig := EmbedExSig) 0) .here
+      embedExStateBase_wf (embedExStateBase_fresh_split true) h)
+
+/-- `find?` naturality for `extSplit`. -/
+theorem embedEx_find?_extSplit
+    (h : OriginEnv.find? embedExStateBase.env (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, .here⟩) :
+    OriginEnv.find? (OriginEnv.weaken (A := EmbedAtom) embedExStateBase.env
+        (.split (.hyp (sig := EmbedExSig) 0) false))
+      (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, Rename.ext (Rename.id (Γ := embedExΓBase)) (.there .here)⟩ :=
+  EncodeIxEmbedding.find?_eq
+    (EncodeIxEmbedding.extSplit (P := EmbedAtom)
+      (encodeIxEmbedding_id embedExStateBase embedExStateBase_wf)
+      (.hyp (sig := EmbedExSig) 0) false
+      (embedExStateBase_fresh_split false) (embedExStateBase_fresh_split false))
+    (.hyp (sig := EmbedExSig) 0) (.there .here)
+    (OriginEnv.find?_weaken_there embedExStateBase.env
+      (.split (.hyp (sig := EmbedExSig) 0) false) (.hyp (sig := EmbedExSig) 0) .here
+      embedExStateBase_wf (embedExStateBase_fresh_split false) h)
+
+/-- `find?` naturality for `extObs`. -/
+theorem embedEx_find?_extObs
+    (h : OriginEnv.find? embedExStateBase.env (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, .here⟩) :
+    OriginEnv.find? (OriginEnv.weaken (A := EmbedAtom) embedExStateBase.env
+        (.obs (sig := EmbedExSig) 0))
+      (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, Rename.ext (Rename.id (Γ := embedExΓBase)) (.there .here)⟩ :=
+  EncodeIxEmbedding.find?_eq
+    (EncodeIxEmbedding.extObs (P := EmbedAtom)
+      (encodeIxEmbedding_id embedExStateBase embedExStateBase_wf)
+      embedExStateBase_fresh_obs embedExStateBase_fresh_obs)
+    (.hyp (sig := EmbedExSig) 0) (.there .here)
+    (OriginEnv.find?_weaken_there embedExStateBase.env
+      (.obs (sig := EmbedExSig) 0) (.hyp (sig := EmbedExSig) 0) .here
+      embedExStateBase_wf embedExStateBase_fresh_obs h)
+
+/-- `find?` naturality for `extDom`. -/
+theorem embedEx_find?_extDom
+    (h : OriginEnv.find? embedExStateBase.env (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, .here⟩) :
+    OriginEnv.find? (OriginEnv.weaken (A := EmbedAtom) embedExStateBase.env
+        (.dom (sig := EmbedExSig) 0))
+      (.hyp (sig := EmbedExSig) 0) =
+      some ⟨EmbedAtom, Rename.ext (Rename.id (Γ := embedExΓBase)) (.there .here)⟩ :=
+  EncodeIxEmbedding.find?_eq
+    (EncodeIxEmbedding.extDom (Arg := EmbedAtom)
+      (encodeIxEmbedding_id embedExStateBase embedExStateBase_wf)
+      embedExStateBase_fresh_dom embedExStateBase_fresh_dom)
+    (.hyp (sig := EmbedExSig) 0) (.there .here)
+    (OriginEnv.find?_weaken_there embedExStateBase.env
+      (.dom (sig := EmbedExSig) 0) (.hyp (sig := EmbedExSig) 0) .here
+      embedExStateBase_wf embedExStateBase_fresh_dom h)
+
+/-- Lookup + hit transport for `leftCoprod_unitEta` under an embedding. -/
+theorem EncodeIxEmbedding.unitEta_find? {Γ Δ : Ctx sig}
+    {ρ : Rename sig Γ Δ}
+    {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
+    (emb : EncodeIxEmbedding ρ s t)
+    (o : Origin sig) {L R : Object sig.nBases} (x : Var Γ (.coprod L R))
+    (hfind : OriginEnv.find? s.env o = some ⟨.coprod L R, x⟩)
+    (hit : (s.env x == o) = true) :
+    OriginEnv.find? t.env o = some ⟨.coprod L R, ρ x⟩ ∧
+      (t.env (ρ x) == o) = true :=
+  ⟨EncodeIxEmbedding.find?_eq emb o x hfind,
+    by
+      have hx := beq_iff_eq.mp hit
+      exact beq_iff_eq.mpr (by simpa [emb.env_commute x] using hx)⟩
+
+/-- Peel success packaged via `PeelCase.rename`. -/
+theorem EncodeIxEmbedding.peelCase_rename {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    {ρ : Rename sig Γ Δ}
+    {s : EncodeIx (sig := sig) Γ} {t : EncodeIx (sig := sig) Δ}
+    (emb : EncodeIxEmbedding ρ s t)
+    (o : Origin sig) (tm : InvTm Γ C) (p : PeelCase Γ C)
+    (h : peelCaseOuter s.env o tm = some p.toSigma) :
+    peelCaseOuter t.env o (InvTm.rename ρ tm) = some (p.rename ρ).toSigma := by
+  rcases p with ⟨A, B, n, tL, tR⟩
+  simpa [PeelCase.toSigma, PeelCase.rename] using
+    peelCaseOuter_rename ρ s.env t.env o tm emb.env_commute emb.respectsRawIdx h
+
 /-!
 ### STOP — full `EncodeReady` transport (`leftCoprod_peel` / unit-η)
 
-**Not blocked by `letPos`:** counters agree (`obsNext_eq` / `domNext_eq`), so
-`.obs obsSlot` / `.dom domNest` allocation is shared; `extObs` / `extDom` are
-the compositional laws. Exercises above include λ (`rightExp_lam`) and retained
-`letPos`.
+**Discharged:**
+* `OriginEnv.WellFormed` / `Fresh` / `ofHyps_wellFormed` / `OriginCollisionFree`
+* `EncodeIxEmbedding.find?_eq` under `source_wf` + `target_wf`
+* Lookup tests for `weaken` / `extPush` / `extObs` / `extDom` / `extSplit`
+  (colliding push blocked by `Fresh`, not by changing `find?` order)
+* `PeelCase` + `peelCaseOuter_rename` / `peelCaseOuterGo_rename`
+  (requires `Rename.RespectsRawIdx`, carried by embeddings)
 
-**Required for peel-inclusive transport:**
+**Remaining for readiness transport:**
+Lift peel-free transport to full `EncodeReady`. Binder steps (`rightExp_lam`,
+`letPos`, `leftCoprod_*` branches) push origins; threading `WellFormed` through
+the motive needs `Fresh` for `.dom` / `.obs` / `.split` on **both** sides
+(`EncodeIx` counter-freshness invariant). Unit-η then uses `find?_eq` + hit
+via `env_commute`. Then retry non-unit nested-coprod forced inversion.
 
-```
-peelCaseOuter ε o tm = some ⟨L, R, n, tL, tR⟩ →
-peelCaseOuter ε' o (InvTm.rename ρ tm) =
-  some ⟨L, R, NegNeu.rename ρ n,
-        InvTm.rename (Rename.ext ρ) tL,
-        InvTm.rename (Rename.ext ρ) tR⟩
-```
-whenever `∀ x, ε' (ρ x) = ε x`, plus `OriginEnv.find?` naturality for
-`leftCoprod_unitEta`.
-
-Do not add unit-only / atomic-leaf / nesting-depth cases. Prove those rename
-laws, then lift `encodeReadyNoPeel_of_embedding` to full `EncodeReady` and
-finish non-unit `leftCoprod` forced inversion with arbitrary leaves.
+Do not add unit-only / atomic-leaf / nesting-depth cases.
 -/
 
 end Equality

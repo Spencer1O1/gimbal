@@ -594,6 +594,37 @@ def peelCaseOuter {Γ : Ctx sig} {C : Object sig.nBases}
       InvTm (Γ ▻ A) C × InvTm (Γ ▻ B) C) :=
   peelCaseOuterGo (InvTm.size t) ε o t
 
+/--
+Named success package for `peelCaseOuter`. Prefer this over nested Σ′ equalities
+when transporting peel results along renames.
+-/
+structure PeelCase (Γ : Ctx sig) (C : Object sig.nBases) where
+  L : Object sig.nBases
+  R : Object sig.nBases
+  scrut : NegNeu Γ (.coprod L R)
+  left : InvTm (Γ ▻ L) C
+  right : InvTm (Γ ▻ R) C
+
+@[simp] def PeelCase.ofSigma {Γ : Ctx sig} {C : Object sig.nBases} :
+    ((A B : Object sig.nBases) × NegNeu Γ (.coprod A B) ×
+      InvTm (Γ ▻ A) C × InvTm (Γ ▻ B) C) → PeelCase Γ C
+  | ⟨A, B, n, tL, tR⟩ => ⟨A, B, n, tL, tR⟩
+
+@[simp] def PeelCase.toSigma {Γ : Ctx sig} {C : Object sig.nBases}
+    (p : PeelCase Γ C) :
+    (A B : Object sig.nBases) × NegNeu Γ (.coprod A B) ×
+      InvTm (Γ ▻ A) C × InvTm (Γ ▻ B) C :=
+  ⟨p.L, p.R, p.scrut, p.left, p.right⟩
+
+/-- Rename a peel package: scrutinee under `ρ`, branches under `Rename.ext ρ`. -/
+def PeelCase.rename {Γ Δ : Ctx sig} {C : Object sig.nBases}
+    (ρ : Rename sig Γ Δ) (p : PeelCase Γ C) : PeelCase Δ C where
+  L := p.L
+  R := p.R
+  scrut := NegNeu.rename ρ p.scrut
+  left := InvTm.rename (Rename.ext ρ) p.left
+  right := InvTm.rename (Rename.ext ρ) p.right
+
 def peelPair {Γ : Ctx sig} {L R : Object sig.nBases} :
     InvTm Γ (.prod L R) → Option (InvTm Γ L × InvTm Γ R)
   | .pair t u => some (t, u)

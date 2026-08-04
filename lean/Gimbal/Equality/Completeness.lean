@@ -68,18 +68,17 @@ def CanonicalizeIffIccEq : Prop :=
 Every processable binder and scheduled observation receives a stable,
 collision-free `Origin`.
 
-API discharge (design E):
-
-* `encodeFocGo` assigns `Origin.obs obsSlot` and increments the slot
-* λ-domain binders use `Origin.dom domNest` (encode and peel-through-λ)
-* case payloads keep `.split parent side`
-
-Remaining: a formal injectivity / non-collision theorem for a well-formed
-phase-entry environment (distinct binders ⇒ distinct origins under weaken).
-The Prop marks that obligation; do not reintroduce constant `obs 0` or
-reused `.split (.hyp 0) false` for unrelated λ binders.
+Discharged by `OriginEnv.WellFormed` / `OriginEnv.ofHyps_wellFormed`:
+distinct live binders carry distinct origins. Encoder steps that `weaken`
+must supply `OriginEnv.Fresh` for the newly allocated origin
+(`.obs` / `.dom` / `.split` / unused-branch binders).
 -/
-def OriginCollisionFree : Prop := True
+def OriginCollisionFree : Prop :=
+  ∀ (hyps : Array (Object sig.nBases)),
+    OriginEnv.WellFormed (OriginEnv.ofHyps (sig := sig) hyps)
+
+theorem originCollisionFree : OriginCollisionFree (sig := sig) :=
+  OriginEnv.ofHyps_wellFormed
 
 /-! ### Totality of encode (no correctness-critical fuel) -/
 
@@ -243,8 +242,8 @@ Blocked / WIP:
 1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`); peel digs under
    `.foc (.sat …)` / `.foc (.letPos …)` so hyp left-coprod can surface despite
    `Origin.cmp` ordering hyp < obs while `applyPairObs` nests atom obs outer
-2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
-   formal injectivity theorem still open
+2. ~~`OriginCollisionFree`~~ **Done** (`OriginEnv.WellFormed` /
+   `ofHyps_wellFormed` / `originCollisionFree`); weaken steps require `Fresh`
 3. `EncodeTotal` — **provisional only** (`EncodeTotal_holds_provisional` projects
    stashed `ValidEncodeFragment.ready`). Required bridge is no longer the
    case-by-case Raw→EncodeReady enumeration (paused at green tip `192dae5`;

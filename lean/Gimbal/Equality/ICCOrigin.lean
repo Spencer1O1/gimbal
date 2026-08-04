@@ -190,6 +190,78 @@ theorem exchange_preserves_older {Γ : Ctx sig} {A B C : Object sig.nBases}
       ε (.there (.there x)) := by
   simp only [OriginEnv.exchange, Rename.exchange]
 
+/-! ### Well-formed / collision-free origin environments -/
+
+/--
+Origins of live variables are pairwise distinct.
+This is the formal `OriginCollisionFree` obligation from Milestone 8F:
+distinct binders carry distinct origins under weaken / push.
+-/
+structure WellFormed {Γ : Ctx sig} (ε : OriginEnv Γ) : Prop where
+  injective : ∀ {A B : Object sig.nBases} (x : Var Γ A) (y : Var Γ B),
+    ε x = ε y → ∃ h : A = B, HEq x y
+
+/-- Origin `o` is not carried by any live variable in `ε`. -/
+def Fresh {Γ : Ctx sig} (ε : OriginEnv Γ) (o : Origin sig) : Prop :=
+  ∀ {A : Object sig.nBases} (x : Var Γ A), ε x ≠ o
+
+theorem WellFormed.empty :
+    WellFormed (OriginEnv.empty : OriginEnv (Ctx.empty : Ctx sig)) where
+  injective := fun x => nomatch x
+
+theorem Fresh.empty (o : Origin sig) :
+    Fresh (OriginEnv.empty : OriginEnv (Ctx.empty : Ctx sig)) o :=
+  fun x => nomatch x
+
+/-- Pushing a fresh origin preserves injectivity. -/
+theorem WellFormed.weaken {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig)
+    (hwf : WellFormed ε) (hfresh : Fresh ε o) :
+    WellFormed (OriginEnv.weaken (A := A) ε o) where
+  injective := by
+    intro B C x y hxy
+    cases x with
+    | here =>
+        cases y with
+        | here => exact ⟨rfl, by trivial⟩
+        | there y =>
+            simp [OriginEnv.weaken, OriginEnv.snoc] at hxy
+            exact False.elim (hfresh y hxy.symm)
+    | there x =>
+        cases y with
+        | here =>
+            simp [OriginEnv.weaken, OriginEnv.snoc] at hxy
+            exact False.elim (hfresh x hxy)
+        | there y =>
+            simp [OriginEnv.weaken, OriginEnv.snoc] at hxy
+            obtain ⟨hBC, hEq⟩ := hwf.injective x y hxy
+            cases hBC
+            cases hEq
+            exact ⟨rfl, by trivial⟩
+
+/-- A fresh origin remains fresh after pushing a different origin. -/
+theorem Fresh.weaken {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o o' : Origin sig)
+    (hfresh : Fresh ε o') (hne : o ≠ o') :
+    Fresh (OriginEnv.weaken (A := A) ε o) o' := by
+  intro B x
+  cases x with
+  | here =>
+      simp [OriginEnv.weaken, OriginEnv.snoc]
+      exact hne
+  | there y =>
+      simpa [OriginEnv.weaken, OriginEnv.snoc] using hfresh y
+
+/-- Restrict well-formedness to the parent context (drop newest binder). -/
+theorem WellFormed.there {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv (Γ ▻ A)) (hwf : WellFormed ε) :
+    WellFormed (fun {_B} x => ε (.there x)) where
+  injective := fun {_ _} u v huv => by
+    obtain ⟨hBC, hEq⟩ := hwf.injective (.there u) (.there v) huv
+    cases hBC
+    cases hEq
+    exact ⟨rfl, by trivial⟩
+
 end OriginEnv
 
 /-! ### Positive worklist entries -/
@@ -265,6 +337,18 @@ theorem Var.toRawIdx_here {Γ : Ctx sig} {A : Object sig.nBases} :
 theorem Var.toRawIdx_there {Γ : Ctx sig} {A B : Object sig.nBases}
     (x : Var Γ A) :
     Var.toRawIdx (.there (B := B) x) = Var.toRawIdx x + 1 := rfl
+
+/-- Variables are determined by de Bruijn index (local copy for origin WF). -/
+theorem Var.eq_of_toRawIdx' {Γ : Ctx sig} :
+    ∀ {A B : Object sig.nBases} (x : Var Γ A) (y : Var Γ B),
+      x.toRawIdx = y.toRawIdx → A = B ∧ HEq x y
+  | _, _, .here, .here, _ => ⟨rfl, HEq.refl _⟩
+  | _, _, .here, .there _, h => by simp [Var.toRawIdx] at h
+  | _, _, .there _, .here, h => by simp [Var.toRawIdx] at h
+  | _, _, .there x, .there y, h => by
+      obtain ⟨rfl, hxy⟩ := Var.eq_of_toRawIdx' x y (by simpa [Var.toRawIdx] using h)
+      cases eq_of_heq hxy
+      exact ⟨rfl, HEq.refl _⟩
 
 /-- The newest variable of `ofHyps (hyps.push P)`. -/
 def OriginEnv.herePush (hyps : Array (Object sig.nBases))
@@ -398,6 +482,29 @@ theorem OriginEnv.ofHyps_ne_size (hyps : Array (Object sig.nBases))
     have := Var.toRawIdx_lt_length x
     simpa [Ctx.length_ofHyps] using this
   omega
+
+/-- Phase-entry `ofHyps` assigns distinct `hyp` indices — collision-free. -/
+theorem OriginEnv.ofHyps_wellFormed (hyps : Array (Object sig.nBases)) :
+    OriginEnv.WellFormed (OriginEnv.ofHyps (sig := sig) hyps) where
+  injective := by
+    intro A B x y heq
+    have hidx : hyps.size - 1 - Var.toRawIdx x = hyps.size - 1 - Var.toRawIdx y := by
+      simpa [OriginEnv.ofHyps] using Origin.hyp.inj heq
+    have hx : Var.toRawIdx x < hyps.size := by
+      have := Var.toRawIdx_lt_length x
+      simpa [Ctx.length_ofHyps] using this
+    have hy : Var.toRawIdx y < hyps.size := by
+      have := Var.toRawIdx_lt_length y
+      simpa [Ctx.length_ofHyps] using this
+    have hraw : Var.toRawIdx x = Var.toRawIdx y := by omega
+    obtain ⟨hAB, hEq⟩ := Var.eq_of_toRawIdx' x y hraw
+    exact ⟨hAB, hEq⟩
+
+/-- `hyp hyps.size` is fresh for `ofHyps hyps`. -/
+theorem OriginEnv.ofHyps_fresh_size (hyps : Array (Object sig.nBases)) :
+    OriginEnv.Fresh (OriginEnv.ofHyps (sig := sig) hyps)
+      (.hyp (sig := sig) hyps.size) :=
+  fun x => OriginEnv.ofHyps_ne_size hyps x
 
 /-- Rekey is identity on `ofHyps` (no `hyp hyps.size`, no obs). -/
 theorem OriginEnv.ofHyps_rekey_id (hyps : Array (Object sig.nBases)) (k : Nat)
@@ -539,6 +646,79 @@ theorem OriginEnv.find?_snoc {Δ : Ctx sig} {A : Object sig.nBases}
         (OriginEnv.find? (fun {_B} x => ε (.there x)) o).map
           fun p => ⟨p.1, .there p.2⟩) :=
   rfl
+
+/-- `find? = some` implies the recovered variable carries that origin. -/
+theorem OriginEnv.find?_eq_some_eq {Γ : Ctx sig} (ε : OriginEnv Γ)
+    (o : Origin sig) {A : Object sig.nBases} (x : Var Γ A)
+    (h : OriginEnv.find? ε o = some ⟨A, x⟩) : ε x = o := by
+  induction Γ generalizing A with
+  | empty =>
+      simp only [OriginEnv.find?] at h
+      nomatch h
+  | snoc Δ B ih =>
+      rw [OriginEnv.find?_snoc] at h
+      by_cases hhere : (ε (.here : Var (Δ ▻ B) B) == o) = true
+      · simp only [hhere, ↓reduceIte] at h
+        cases h
+        exact beq_iff_eq.mp hhere
+      · simp only [hhere, Bool.false_eq_true, ↓reduceIte] at h
+        match hfind : OriginEnv.find? (fun {_C} y => ε (.there y)) o with
+        | none => simp [hfind] at h
+        | some ⟨B', y⟩ =>
+            simp only [hfind, Option.map] at h
+            cases h
+            exact ih (fun {_C} y => ε (.there y)) y hfind
+
+/-- Under well-formedness, `find?` recovers the unique carrier of `o`. -/
+theorem OriginEnv.find?_eq_some_of_wellFormed {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig) (x : Var Γ A)
+    (hwf : OriginEnv.WellFormed ε) (hx : ε x = o) :
+    OriginEnv.find? ε o = some ⟨A, x⟩ := by
+  induction Γ generalizing A with
+  | empty => nomatch x
+  | snoc Δ B ih =>
+      rw [OriginEnv.find?_snoc]
+      cases x with
+      | here =>
+          have : (ε (.here : Var (Δ ▻ B) B) == o) = true :=
+            beq_iff_eq.mpr hx
+          simp [this]
+      | there y =>
+          have hne : ¬ (ε (.here : Var (Δ ▻ B) B) == o) = true := by
+            intro hhit
+            have heq : ε (.here : Var (Δ ▻ B) B) = o := beq_iff_eq.mp hhit
+            have : ε (.here : Var (Δ ▻ B) B) = ε (.there y) := by
+              simp [heq, hx]
+            obtain ⟨hAB, hEq⟩ := hwf.injective (.here) (.there y) this
+            cases hAB
+            cases hEq
+          simp only [hne, ↓reduceIte]
+          let ε' : OriginEnv Δ := fun {_} z => ε (.there z)
+          have hwf' : OriginEnv.WellFormed ε' := OriginEnv.WellFormed.there ε hwf
+          have hy : ε' y = o := hx
+          have hfind : OriginEnv.find? ε' o = some ⟨A, y⟩ := ih ε' y hwf' hy
+          simp [ε', hfind]
+
+/-- Well-formed lookup is a two-sided characterization. -/
+theorem OriginEnv.find?_eq_some_iff_wellFormed {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (o : Origin sig) (x : Var Γ A)
+    (hwf : OriginEnv.WellFormed ε) :
+    OriginEnv.find? ε o = some ⟨A, x⟩ ↔ ε x = o :=
+  ⟨fun h => OriginEnv.find?_eq_some_eq ε o x h,
+    fun hx => OriginEnv.find?_eq_some_of_wellFormed ε o x hwf hx⟩
+
+/-- Looking past a fresh newest binder recovers the older carrier. -/
+theorem OriginEnv.find?_weaken_there {Γ : Ctx sig} {A B : Object sig.nBases}
+    (ε : OriginEnv Γ) (oFresh o : Origin sig) (x : Var Γ A)
+    (hwf : OriginEnv.WellFormed ε) (hfresh : OriginEnv.Fresh ε oFresh)
+    (h : OriginEnv.find? ε o = some ⟨A, x⟩) :
+    OriginEnv.find? (OriginEnv.weaken (A := B) ε oFresh) o =
+      some ⟨A, .there x⟩ := by
+  have hx : ε x = o := OriginEnv.find?_eq_some_eq ε o x h
+  exact OriginEnv.find?_eq_some_of_wellFormed
+    (OriginEnv.weaken (A := B) ε oFresh) o (.there x)
+    (OriginEnv.WellFormed.weaken ε oFresh hwf hfresh)
+    (by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx)
 
 /-- Newest binder is recovered by `find?` at the origin assigned by `weaken`. -/
 theorem OriginEnv.find?_weaken_here {Γ : Ctx sig} {A : Object sig.nBases}

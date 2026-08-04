@@ -297,49 +297,65 @@ def splitEncodeR {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
   domNext := s.domNext
   obsNext := s.obsNext
 
-/-- Unused-binder embedding: `emptyWsEncode s → emptyWsEncode (splitEncodeL …)`. -/
+/-- Unused-binder embedding: `emptyWsEncode s → emptyWsEncode (splitEncodeL …)`.
+
+Requires the allocated split origin to be fresh in `s.env` (otherwise the
+unused-binder target collides and `find?` prefers the newest binder).
+-/
 theorem encodeIxEmbedding_emptyWs_splitL {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (L : Object sig.nBases)
-    (hws : s.ws = e :: tail) :
+    (hws : s.ws = e :: tail)
+    (hwf : OriginEnv.WellFormed s.env)
+    (hfresh : OriginEnv.Fresh s.env (.split e.origin false)) :
     EncodeIxEmbedding (Rename.weaken (A := L))
       (emptyWsEncode s)
       (emptyWsEncode (splitEncodeL s e tail L hws)) := by
-  simpa [emptyWsEncode, splitEncodeL] using
-    encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin false)
+  change EncodeIxEmbedding _ (emptyWsEncode s)
+    ⟨[], OriginEnv.weaken (A := L) s.env (.split e.origin false), s.domNext, s.obsNext⟩
+  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin false) hwf hfresh
 
 theorem encodeIxEmbedding_emptyWs_splitR {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (R : Object sig.nBases)
-    (hws : s.ws = e :: tail) :
+    (hws : s.ws = e :: tail)
+    (hwf : OriginEnv.WellFormed s.env)
+    (hfresh : OriginEnv.Fresh s.env (.split e.origin true)) :
     EncodeIxEmbedding (Rename.weaken (A := R))
       (emptyWsEncode s)
       (emptyWsEncode (splitEncodeR s e tail R hws)) := by
-  simpa [emptyWsEncode, splitEncodeR] using
-    encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin true)
+  change EncodeIxEmbedding _ (emptyWsEncode s)
+    ⟨[], OriginEnv.weaken (A := R) s.env (.split e.origin true), s.domNext, s.obsNext⟩
+  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin true) hwf hfresh
 
 /-- Peel-free leaf transport into a left split empty-worklist state. -/
 def produced_emptyWs_splitL_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (L : Object sig.nBases)
     (hws : s.ws = e :: tail)
+    (hwf : OriginEnv.WellFormed s.env)
+    (hfresh : OriginEnv.Fresh s.env (.split e.origin false))
     (p : Produced (emptyWsEncode s) A)
     (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
       (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
       p.term) :
     Produced (emptyWsEncode (splitEncodeL s e tail L hws)) A :=
-  produced_of_embedding_noPeel (encodeIxEmbedding_emptyWs_splitL s e tail L hws) p h
+  produced_of_embedding_noPeel
+    (encodeIxEmbedding_emptyWs_splitL s e tail L hws hwf hfresh) p h
 
 def produced_emptyWs_splitR_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (R : Object sig.nBases)
     (hws : s.ws = e :: tail)
+    (hwf : OriginEnv.WellFormed s.env)
+    (hfresh : OriginEnv.Fresh s.env (.split e.origin true))
     (p : Produced (emptyWsEncode s) A)
     (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
       (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
       p.term) :
     Produced (emptyWsEncode (splitEncodeR s e tail R hws)) A :=
-  produced_of_embedding_noPeel (encodeIxEmbedding_emptyWs_splitR s e tail R hws) p h
+  produced_of_embedding_noPeel
+    (encodeIxEmbedding_emptyWs_splitR s e tail R hws hwf hfresh) p h
 
 theorem forcedInvertMeasure_pop_lt {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig) (tail : List (PosEntry sig))
@@ -372,28 +388,6 @@ theorem forcedInvertMeasure_splitR_lt {Γ : Ctx sig}
   split
   · have := objectWeight_pos L; omega
   · have := objectWeight_pos L; have := objectWeight_pos R; omega
-
-/-- `find? = some` implies the recovered variable carries that origin. -/
-theorem OriginEnv.find?_eq_some_eq {Γ : Ctx sig} (ε : OriginEnv Γ)
-    (o : Origin sig) {A : Object sig.nBases} (x : Var Γ A)
-    (h : OriginEnv.find? ε o = some ⟨A, x⟩) : ε x = o := by
-  induction Γ generalizing A with
-  | empty =>
-      simp only [OriginEnv.find?] at h
-      nomatch h
-  | snoc Δ B ih =>
-      rw [OriginEnv.find?_snoc] at h
-      by_cases hhere : (ε (.here : Var (Δ ▻ B) B) == o) = true
-      · simp only [hhere, ↓reduceIte] at h
-        cases h
-        exact beq_iff_eq.mp hhere
-      · simp only [hhere, Bool.false_eq_true, ↓reduceIte] at h
-        match hfind : OriginEnv.find? (fun {_C} y => ε (.there y)) o with
-        | none => simp [hfind] at h
-        | some ⟨B', y⟩ =>
-            simp only [hfind, Option.map] at h
-            cases h
-            exact ih (fun {_C} y => ε (.there y)) y hfind
 
 /-- Lift through `moveStable` for an arbitrary head (not only singleton). -/
 def produced_moveStable {Γ : Ctx sig} {X : Object sig.nBases}
