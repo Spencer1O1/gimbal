@@ -243,13 +243,11 @@ Separate from schedule recursion: mirrors `forcedRule`, decreases
   (`leftCoprod_unitEta` for goal `.unit`; `encodeReady_case_var_leftCoprod`
   when a general leaf transports).
 
-**STOP (non-unit `leftCoprod` leaf transport):** measure decreases on
-`splitL`/`splitR` (`worklistWeight`). `EncodeIxEmbedding` + peel-free
-`Produced` transport land in `ICCEncodeEmbed` (λ / `letPos` exercises OK;
-`letPos` is **not** blocked — counters agree). Remaining law for arbitrary
-leaves: `peelCaseOuter` / `find?` naturality under rename. Until that lifts
-`encodeReadyNoPeel_of_embedding` to full `EncodeReady`, non-unit nested
-`leftCoprod` forced inversion stays on the unit-η path.
+**Non-unit `leftCoprod` leaf transport:** measure decreases on
+`splitL`/`splitR` (`worklistWeight`). `EncodeIxEmbedding` + full
+`encodeReady_of_embedding` land in `ICCEncodeEmbed` (λ / `letPos` / peel
+vertical-slice exercise). Empty-worklist unused-binder branch embeddings use
+`WellFormed.emptyWs` + `fresh_split`.
 -/
 
 /-- EncodeIx with the same env/counters as `s` but an empty worklist. -/
@@ -299,63 +297,87 @@ def splitEncodeR {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
 
 /-- Unused-binder embedding: `emptyWsEncode s → emptyWsEncode (splitEncodeL …)`.
 
-Requires the allocated split origin to be fresh in `s.env` (otherwise the
-unused-binder target collides and `find?` prefers the newest binder).
+Requires `EncodeIx.WellFormed s` with `e` on the worklist head so
+`fresh_split` / `ws_bounded` / `ws_in_env` discharge `weaken_unused`.
 -/
 theorem encodeIxEmbedding_emptyWs_splitL {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (L : Object sig.nBases)
     (hws : s.ws = e :: tail)
-    (hwf : OriginEnv.WellFormed s.env)
-    (hfresh : OriginEnv.Fresh s.env (.split e.origin false)) :
+    (hwf : EncodeIx.WellFormed s) :
     EncodeIxEmbedding (Rename.weaken (A := L))
       (emptyWsEncode s)
       (emptyWsEncode (splitEncodeL s e tail L hws)) := by
   change EncodeIxEmbedding _ (emptyWsEncode s)
     ⟨[], OriginEnv.weaken (A := L) s.env (.split e.origin false), s.domNext, s.obsNext⟩
-  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin false) hwf hfresh
+  have hempty : EncodeIx.WellFormed (emptyWsEncode s) := by
+    simpa [emptyWsEncode] using EncodeIx.WellFormed.emptyWs hwf
+  have hfresh : OriginEnv.Fresh (emptyWsEncode s).env (.split e.origin false) :=
+    hwf.fresh_split (by simp [hws]) false
+  have hb : Origin.counterBounded (.split e.origin false)
+      (emptyWsEncode s).domNext (emptyWsEncode s).obsNext :=
+    hwf.ws_bounded (by simp [hws])
+  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin false) hempty
+    hfresh hb
+    (fun side => EncodeIx.WellFormed.fresh_of_fresh_parent hempty hfresh side)
+    (fun p side heq => by
+      cases heq
+      obtain ⟨C, y, hy⟩ := hwf.ws_in_env (show e ∈ s.ws by simp [hws])
+      exact ⟨C, y, hy⟩)
+    (fun he => by cases he)
 
 theorem encodeIxEmbedding_emptyWs_splitR {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (R : Object sig.nBases)
     (hws : s.ws = e :: tail)
-    (hwf : OriginEnv.WellFormed s.env)
-    (hfresh : OriginEnv.Fresh s.env (.split e.origin true)) :
+    (hwf : EncodeIx.WellFormed s) :
     EncodeIxEmbedding (Rename.weaken (A := R))
       (emptyWsEncode s)
       (emptyWsEncode (splitEncodeR s e tail R hws)) := by
   change EncodeIxEmbedding _ (emptyWsEncode s)
     ⟨[], OriginEnv.weaken (A := R) s.env (.split e.origin true), s.domNext, s.obsNext⟩
-  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin true) hwf hfresh
+  have hempty : EncodeIx.WellFormed (emptyWsEncode s) := by
+    simpa [emptyWsEncode] using EncodeIx.WellFormed.emptyWs hwf
+  have hfresh : OriginEnv.Fresh (emptyWsEncode s).env (.split e.origin true) :=
+    hwf.fresh_split (by simp [hws]) true
+  have hb : Origin.counterBounded (.split e.origin true)
+      (emptyWsEncode s).domNext (emptyWsEncode s).obsNext :=
+    hwf.ws_bounded (by simp [hws])
+  exact encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin true) hempty
+    hfresh hb
+    (fun side => EncodeIx.WellFormed.fresh_of_fresh_parent hempty hfresh side)
+    (fun p side heq => by
+      cases heq
+      obtain ⟨C, y, hy⟩ := hwf.ws_in_env (show e ∈ s.ws by simp [hws])
+      exact ⟨C, y, hy⟩)
+    (fun he => by cases he)
 
 /-- Peel-free leaf transport into a left split empty-worklist state. -/
 def produced_emptyWs_splitL_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (L : Object sig.nBases)
     (hws : s.ws = e :: tail)
-    (hwf : OriginEnv.WellFormed s.env)
-    (hfresh : OriginEnv.Fresh s.env (.split e.origin false))
+    (hwf : EncodeIx.WellFormed s)
     (p : Produced (emptyWsEncode s) A)
     (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
       (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
       p.term) :
     Produced (emptyWsEncode (splitEncodeL s e tail L hws)) A :=
   produced_of_embedding_noPeel
-    (encodeIxEmbedding_emptyWs_splitL s e tail L hws hwf hfresh) p h
+    (encodeIxEmbedding_emptyWs_splitL s e tail L hws hwf) p h
 
 def produced_emptyWs_splitR_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
     (tail : List (PosEntry sig)) (R : Object sig.nBases)
     (hws : s.ws = e :: tail)
-    (hwf : OriginEnv.WellFormed s.env)
-    (hfresh : OriginEnv.Fresh s.env (.split e.origin true))
+    (hwf : EncodeIx.WellFormed s)
     (p : Produced (emptyWsEncode s) A)
     (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
       (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
       p.term) :
     Produced (emptyWsEncode (splitEncodeR s e tail R hws)) A :=
   produced_of_embedding_noPeel
-    (encodeIxEmbedding_emptyWs_splitR s e tail R hws hwf hfresh) p h
+    (encodeIxEmbedding_emptyWs_splitR s e tail R hws hwf) p h
 
 theorem forcedInvertMeasure_pop_lt {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig) (tail : List (PosEntry sig))

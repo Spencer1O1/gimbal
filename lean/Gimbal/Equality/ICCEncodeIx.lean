@@ -106,6 +106,540 @@ theorem bindDom_ws (s : EncodeIx (sig := sig) Γ) (A : Object sig.nBases) :
 theorem bindObs_ws (s : EncodeIx (sig := sig) Γ) (P : Object sig.nBases) :
     (s.bindObs P).ws = pushPos s.ws (.obs (sig := sig) s.obsNext) P := rfl
 
+/-! ### `EncodeIx.WellFormed` — counter-bounded collision freedom -/
+
+/--
+Persistent state invariant: live origins are injective, counter indices stay
+strictly below `domNext` / `obsNext`, worklist origins are realized in the
+environment without duplication, worklist heads have not yet been split, and
+every live split retains a live parent (refinement, not a fresh counter).
+
+Implies `Fresh (.dom s.domNext)` and `Fresh (.obs s.obsNext)` automatically.
+-/
+structure WellFormed {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ) : Prop where
+  env_wf : OriginEnv.WellFormed s.env
+  env_bounded :
+    ∀ {A : Object sig.nBases} (x : Var Γ A),
+      Origin.counterBounded (s.env x) s.domNext s.obsNext
+  ws_bounded :
+    ∀ {e : PosEntry sig}, e ∈ s.ws →
+      Origin.counterBounded e.origin s.domNext s.obsNext
+  ws_in_env :
+    ∀ {e : PosEntry sig}, e ∈ s.ws →
+      ∃ (A : Object sig.nBases) (x : Var Γ A), s.env x = e.origin
+  ws_nodup : (s.ws.map (·.origin)).Nodup
+  ws_split_fresh :
+    ∀ {e : PosEntry sig}, e ∈ s.ws → ∀ side : Bool,
+      OriginEnv.Fresh s.env (.split e.origin side)
+  split_parent_live :
+    ∀ {A : Object sig.nBases} (x : Var Γ A) (p : Origin sig) (side : Bool),
+      s.env x = .split p side →
+        ∃ (B : Object sig.nBases) (y : Var Γ B), s.env y = p
+
+theorem WellFormed.fresh_dom {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) :
+    OriginEnv.Fresh s.env (.dom (sig := sig) s.domNext) := by
+  intro A x hx
+  have hb : Origin.counterBounded (.dom (sig := sig) s.domNext) s.domNext s.obsNext := by
+    simpa [hx] using hwf.env_bounded x
+  exact Origin.not_counterBounded_dom_eq _ _ hb
+
+theorem WellFormed.fresh_obs {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) :
+    OriginEnv.Fresh s.env (.obs (sig := sig) s.obsNext) := by
+  intro A x hx
+  have hb : Origin.counterBounded (.obs (sig := sig) s.obsNext) s.domNext s.obsNext := by
+    simpa [hx] using hwf.env_bounded x
+  exact Origin.not_counterBounded_obs_eq _ _ hb
+
+theorem WellFormed.fresh_split {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    {e : PosEntry sig} (he : e ∈ s.ws) (side : Bool) :
+    OriginEnv.Fresh s.env (.split e.origin side) :=
+  hwf.ws_split_fresh he side
+
+private theorem nodup_ofHyps_posWorklist (hyps : Array (Object sig.nBases)) :
+    ((OriginEnv.posWorklist (OriginEnv.ofHyps (sig := sig) hyps)).map
+      (·.origin)).Nodup := by
+  have hperm :=
+    List.mergeSort_perm (OriginEnv.posCollect (OriginEnv.ofHyps (sig := sig) hyps))
+      (fun e₁ e₂ => Origin.ble e₁.origin e₂.origin)
+  refine (List.Perm.nodup_iff (hperm.map (·.origin))).2 ?_
+  exact posCollect_origins_nodup _ (OriginEnv.ofHyps_wellFormed hyps)
+
+/-- Freshness of `o` plus live-parent closure implies nested splits are fresh. -/
+theorem WellFormed.fresh_of_fresh_parent {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    {o : Origin sig} (hfresh : OriginEnv.Fresh s.env o) (side : Bool) :
+    OriginEnv.Fresh s.env (.split o side) := by
+  intro A x hx
+  obtain ⟨B, y, hy⟩ := hwf.split_parent_live x o side hx
+  exact hfresh y hy
+
+/-- Worklist origins are absent from a fresh environment origin. -/
+theorem WellFormed.ws_origin_ne_fresh {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    {o : Origin sig} (hfresh : OriginEnv.Fresh s.env o)
+    {e : PosEntry sig} (he : e ∈ s.ws) : e.origin ≠ o := by
+  intro ho
+  obtain ⟨A, x, hx⟩ := hwf.ws_in_env he
+  exact hfresh x (hx.trans ho)
+
+/-- Phase entry is well-formed (only `hyp` origins; counters at 0). -/
+theorem entry_wellFormed (hyps : Array (Object sig.nBases)) :
+    WellFormed (entry (sig := sig) hyps) where
+  env_wf := OriginEnv.ofHyps_wellFormed hyps
+  env_bounded := by
+    intro A x
+    simp only [entry, OriginEnv.ofHyps]
+    exact Origin.counterBounded_hyp _ _ _
+  ws_bounded := by
+    intro e he
+    simp only [entry] at he
+    have he' : e ∈ OriginEnv.posCollect (OriginEnv.ofHyps (sig := sig) hyps) :=
+      (List.mergeSort_perm _ _).mem_iff.mp he
+    obtain ⟨i, hi⟩ := posCollect_ofHyps_origin_hyp hyps he'
+    simpa [hi, entry] using Origin.counterBounded_hyp i 0 0
+  ws_in_env := by
+    intro e he
+    simp only [entry] at he ⊢
+    have he' : e ∈ OriginEnv.posCollect (OriginEnv.ofHyps (sig := sig) hyps) :=
+      (List.mergeSort_perm _ _).mem_iff.mp he
+    obtain ⟨A, x, hx, _⟩ := posCollect_mem_exists (OriginEnv.ofHyps hyps) he'
+    exact ⟨A, x, hx⟩
+  ws_nodup := nodup_ofHyps_posWorklist hyps
+  ws_split_fresh := by
+    intro e he side A x hx
+    simp only [entry, OriginEnv.ofHyps] at hx
+    cases hx
+  split_parent_live := by
+    intro A x p side hx
+    simp only [entry, OriginEnv.ofHyps] at hx
+    cases hx
+
+/-- `pop` preserves well-formedness (drops a worklist head). -/
+theorem WellFormed.pop {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) :
+    WellFormed s.pop where
+  env_wf := hwf.env_wf
+  env_bounded := hwf.env_bounded
+  ws_bounded := fun he => hwf.ws_bounded (List.mem_of_mem_tail he)
+  ws_in_env := fun he => hwf.ws_in_env (List.mem_of_mem_tail he)
+  ws_nodup := by
+    simp only [EncodeIx.pop]
+    have h := hwf.ws_nodup
+    cases hws : s.ws with
+    | nil =>
+        simpa [hws] using h
+    | cons head tail =>
+        simp only [hws, List.tail_cons]
+        rw [hws, List.map_cons, List.nodup_cons] at h
+        exact h.2
+  ws_split_fresh := fun he side => hwf.ws_split_fresh (List.mem_of_mem_tail he) side
+  split_parent_live := hwf.split_parent_live
+
+/-- Emptying the worklist preserves the environment invariant. -/
+theorem WellFormed.emptyWs {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) :
+    WellFormed (⟨[], s.env, s.domNext, s.obsNext⟩ : EncodeIx (sig := sig) Γ) where
+  env_wf := hwf.env_wf
+  env_bounded := hwf.env_bounded
+  ws_bounded := fun he => by cases he
+  ws_in_env := fun he => by cases he
+  ws_nodup := List.nodup_nil
+  ws_split_fresh := fun he _ => by cases he
+  split_parent_live := hwf.split_parent_live
+
+/--
+Unused-binder push: same worklist/counters, environment extended by a bounded
+fresh origin that does not collide with worklist split-freshness obligations.
+-/
+theorem WellFormed.weaken_unused {Γ : Ctx sig} {B : Object sig.nBases}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) (o : Origin sig)
+    (hfresh : OriginEnv.Fresh s.env o)
+    (hb : Origin.counterBounded o s.domNext s.obsNext)
+    (_hsplit : ∀ side : Bool, OriginEnv.Fresh s.env (.split o side))
+    (hparent :
+      ∀ (p : Origin sig) (side : Bool), o = .split p side →
+        ∃ (C : Object sig.nBases) (y : Var Γ C), s.env y = p)
+    (hcoll : ∀ {e : PosEntry sig}, e ∈ s.ws → ∀ side : Bool, o ≠ .split e.origin side) :
+    WellFormed
+      (⟨s.ws, OriginEnv.weaken (A := B) s.env o, s.domNext, s.obsNext⟩ :
+        EncodeIx (sig := sig) (Γ ▻ B)) where
+  env_wf := OriginEnv.WellFormed.weaken s.env o hwf.env_wf hfresh
+  env_bounded := by
+    intro C x
+    cases x with
+    | here =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hb
+    | there y =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hwf.env_bounded y
+  ws_bounded := hwf.ws_bounded
+  ws_in_env := by
+    intro e he
+    obtain ⟨C, x, hx⟩ := hwf.ws_in_env he
+    exact ⟨C, .there x, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx⟩
+  ws_nodup := hwf.ws_nodup
+  ws_split_fresh := by
+    intro e he side C x
+    cases x with
+    | here =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hcoll he side
+    | there y =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hwf.ws_split_fresh he side y
+  split_parent_live := by
+    intro C x p side hx
+    cases x with
+    | here =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨D, y, hy⟩ := hparent p side hx
+        exact ⟨D, .there y, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hy⟩
+    | there y =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨D, z, hz⟩ := hwf.split_parent_live y p side hx
+        exact ⟨D, .there z, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hz⟩
+
+/-- `bindDom` preserves well-formedness (allocates `.dom domNext`). -/
+theorem WellFormed.bindDom {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    (A : Object sig.nBases) :
+    WellFormed (s.bindDom A) where
+  env_wf :=
+    OriginEnv.WellFormed.weaken s.env (.dom (sig := sig) s.domNext)
+      hwf.env_wf hwf.fresh_dom
+  env_bounded := by
+    intro B x
+    cases x with
+    | here =>
+        simp [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc]
+        exact Nat.lt_succ_self _
+    | there y =>
+        simp [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc]
+        exact Origin.counterBounded_mono_dom (hwf.env_bounded y) (Nat.le_succ _)
+  ws_bounded := by
+    intro e he
+    simp only [EncodeIx.bindDom] at he
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        simp [EncodeIx.bindDom]
+        exact Nat.lt_succ_self _
+    | inr hmem =>
+        simp [EncodeIx.bindDom]
+        exact Origin.counterBounded_mono_dom (hwf.ws_bounded hmem) (Nat.le_succ _)
+  ws_in_env := by
+    intro e he
+    simp only [EncodeIx.bindDom] at he ⊢
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        exact ⟨A, .here, rfl⟩
+    | inr hmem =>
+        obtain ⟨B, x, hx⟩ := hwf.ws_in_env hmem
+        exact ⟨B, .there x, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx⟩
+  ws_nodup := by
+    simp only [EncodeIx.bindDom]
+    refine nodup_pushPos s.ws (.dom (sig := sig) s.domNext) A hwf.ws_nodup ?_
+    intro e he
+    exact hwf.ws_origin_ne_fresh hwf.fresh_dom he
+  ws_split_fresh := by
+    intro e he side B x
+    simp only [EncodeIx.bindDom] at he
+    rw [mem_pushPos_iff] at he
+    cases x with
+    | here =>
+        simp [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc]
+    | there y =>
+        cases he with
+        | inl h =>
+            obtain ⟨_, rfl⟩ := h
+            simpa [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.fresh_of_fresh_parent hwf.fresh_dom side y
+        | inr hmem =>
+            simpa [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.ws_split_fresh hmem side y
+  split_parent_live := by
+    intro B x p side hx
+    cases x with
+    | here =>
+        simp [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc] at hx
+    | there y =>
+        simp [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨C, z, hz⟩ := hwf.split_parent_live y p side hx
+        exact ⟨C, .there z, by simpa [EncodeIx.bindDom, OriginEnv.weaken, OriginEnv.snoc] using hz⟩
+
+/-- `bindObs` preserves well-formedness (allocates `.obs obsNext`). -/
+theorem WellFormed.bindObs {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    (P : Object sig.nBases) :
+    WellFormed (s.bindObs P) where
+  env_wf :=
+    OriginEnv.WellFormed.weaken s.env (.obs (sig := sig) s.obsNext)
+      hwf.env_wf hwf.fresh_obs
+  env_bounded := by
+    intro B x
+    cases x with
+    | here =>
+        simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc]
+        exact Nat.lt_succ_self _
+    | there y =>
+        simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc]
+        exact Origin.counterBounded_mono_obs (hwf.env_bounded y) (Nat.le_succ _)
+  ws_bounded := by
+    intro e he
+    simp only [EncodeIx.bindObs] at he
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        simp [EncodeIx.bindObs]
+        exact Nat.lt_succ_self _
+    | inr hmem =>
+        simp [EncodeIx.bindObs]
+        exact Origin.counterBounded_mono_obs (hwf.ws_bounded hmem) (Nat.le_succ _)
+  ws_in_env := by
+    intro e he
+    simp only [EncodeIx.bindObs] at he ⊢
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        exact ⟨P, .here, rfl⟩
+    | inr hmem =>
+        obtain ⟨B, x, hx⟩ := hwf.ws_in_env hmem
+        exact ⟨B, .there x, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx⟩
+  ws_nodup := by
+    simp only [EncodeIx.bindObs]
+    refine nodup_pushPos s.ws (.obs (sig := sig) s.obsNext) P hwf.ws_nodup ?_
+    intro e he
+    exact hwf.ws_origin_ne_fresh hwf.fresh_obs he
+  ws_split_fresh := by
+    intro e he side B x
+    simp only [EncodeIx.bindObs] at he
+    rw [mem_pushPos_iff] at he
+    cases x with
+    | here =>
+        simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc]
+    | there y =>
+        cases he with
+        | inl h =>
+            obtain ⟨_, rfl⟩ := h
+            simpa [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.fresh_of_fresh_parent hwf.fresh_obs side y
+        | inr hmem =>
+            simpa [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.ws_split_fresh hmem side y
+  split_parent_live := by
+    intro B x p side hx
+    cases x with
+    | here =>
+        simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc] at hx
+    | there y =>
+        simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨C, z, hz⟩ := hwf.split_parent_live y p side hx
+        exact ⟨C, .there z, by simpa [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc] using hz⟩
+
+private theorem split_side_wellFormed {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    (e : PosEntry sig) (tail : List (PosEntry sig))
+    (side₀ : Bool) (P : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    WellFormed
+      (⟨pushPos tail (.split e.origin side₀) P,
+        OriginEnv.weaken (A := P) s.env (.split e.origin side₀),
+        s.domNext, s.obsNext⟩ : EncodeIx (sig := sig) (Γ ▻ P)) where
+  env_wf :=
+    OriginEnv.WellFormed.weaken s.env (.split e.origin side₀)
+      hwf.env_wf (hwf.fresh_split (by simp [hws]) side₀)
+  env_bounded := by
+    intro B x
+    cases x with
+    | here =>
+        change Origin.counterBounded (.split e.origin side₀) s.domNext s.obsNext
+        exact hwf.ws_bounded (show e ∈ s.ws by simp [hws])
+    | there y =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hwf.env_bounded y
+  ws_bounded := by
+    intro e' he'
+    rw [mem_pushPos_iff] at he'
+    cases he' with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        change Origin.counterBounded (.split e.origin side₀) s.domNext s.obsNext
+        exact hwf.ws_bounded (show e ∈ s.ws by simp [hws])
+    | inr hmem =>
+        exact hwf.ws_bounded (by rw [hws]; exact List.Mem.tail _ hmem)
+  ws_in_env := by
+    intro e' he'
+    rw [mem_pushPos_iff] at he'
+    cases he' with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        exact ⟨P, .here, rfl⟩
+    | inr hmem =>
+        obtain ⟨B, x, hx⟩ := hwf.ws_in_env (by rw [hws]; exact List.Mem.tail _ hmem)
+        exact ⟨B, .there x, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx⟩
+  ws_nodup := by
+    refine nodup_pushPos tail (.split e.origin side₀) P ?_ ?_
+    · have h := hwf.ws_nodup
+      rw [hws, List.map_cons, List.nodup_cons] at h
+      exact h.2
+    · intro e' he'
+      exact hwf.ws_origin_ne_fresh
+        (hwf.fresh_split (by simp [hws]) side₀)
+        (by rw [hws]; exact List.Mem.tail _ he')
+  ws_split_fresh := by
+    intro e' he' side B x
+    have hfresh₀ : OriginEnv.Fresh s.env (.split e.origin side₀) :=
+      hwf.fresh_split (by simp [hws]) side₀
+    have hne_head_tail : ∀ e' ∈ tail, e'.origin ≠ e.origin := by
+      intro e' he' ho
+      have h := hwf.ws_nodup
+      rw [hws, List.map_cons, List.nodup_cons] at h
+      exact h.1 (List.mem_map.2 ⟨e', he', ho⟩)
+    rw [mem_pushPos_iff] at he'
+    cases x with
+    | here =>
+        intro h
+        simp [OriginEnv.weaken, OriginEnv.snoc] at h
+        cases he' with
+        | inl hpos =>
+            obtain ⟨_, rfl⟩ := hpos
+            obtain ⟨hp, _⟩ := h
+            exact Origin.ne_split_self e.origin side₀ (by simpa using hp)
+        | inr hmem =>
+            obtain ⟨hp, _⟩ := h
+            exact hne_head_tail e' hmem (by simpa using hp.symm)
+    | there y =>
+        cases he' with
+        | inl hpos =>
+            obtain ⟨_, rfl⟩ := hpos
+            simpa [OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.fresh_of_fresh_parent hfresh₀ side y
+        | inr hmem =>
+            have hold : OriginEnv.Fresh s.env (Origin.split e'.origin side) :=
+              hwf.ws_split_fresh (by rw [hws]; exact List.Mem.tail _ hmem) side
+            simpa [OriginEnv.weaken, OriginEnv.snoc] using hold y
+  split_parent_live := by
+    intro B x p side hx
+    cases x with
+    | here =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨hp, _⟩ := hx
+        obtain ⟨C, y, hy⟩ := hwf.ws_in_env (show e ∈ s.ws by simp [hws])
+        refine ⟨C, .there y, ?_⟩
+        simpa [OriginEnv.weaken, OriginEnv.snoc, hp] using hy
+    | there y =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨C, z, hz⟩ := hwf.split_parent_live y p side hx
+        exact ⟨C, .there z, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hz⟩
+
+/--
+`splitL` preserves well-formedness when consuming the worklist head
+(`s.ws = e :: tail`); parent identity is refined by `.split … false`.
+-/
+theorem WellFormed.splitL {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    (e : PosEntry sig) (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    WellFormed (s.splitL e L) := by
+  simpa [EncodeIx.splitL, hws] using split_side_wellFormed hwf e tail false L hws
+
+/--
+`splitR` preserves well-formedness when consuming the worklist head
+(`s.ws = e :: tail`); parent identity is refined by `.split … true`.
+-/
+theorem WellFormed.splitR {Γ : Ctx sig}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s)
+    (e : PosEntry sig) (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    WellFormed (s.splitR e R) := by
+  simpa [EncodeIx.splitR, hws] using split_side_wellFormed hwf e tail true R hws
+
+/--
+Push a fresh, already-bounded origin onto the worklist (counters unchanged).
+Used by embedding `extPush` / `extSplit` when the origin is not a counter
+allocation (`bindDom` / `bindObs`) and not a head-consuming split.
+-/
+theorem WellFormed.pushPos_fresh {Γ : Ctx sig} {P : Object sig.nBases}
+    {s : EncodeIx (sig := sig) Γ} (hwf : WellFormed s) (o : Origin sig)
+    (hfresh : OriginEnv.Fresh s.env o)
+    (hb : Origin.counterBounded o s.domNext s.obsNext)
+    (hparent :
+      ∀ (p : Origin sig) (side : Bool), o = .split p side →
+        ∃ (C : Object sig.nBases) (y : Var Γ C), s.env y = p)
+    (hcoll : ∀ {e : PosEntry sig}, e ∈ s.ws → ∀ side : Bool, o ≠ .split e.origin side) :
+    WellFormed
+      (⟨pushPos s.ws o P,
+        OriginEnv.weaken (A := P) s.env o, s.domNext, s.obsNext⟩ :
+        EncodeIx (sig := sig) (Γ ▻ P)) where
+  env_wf := OriginEnv.WellFormed.weaken s.env o hwf.env_wf hfresh
+  env_bounded := by
+    intro B x
+    cases x with
+    | here =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hb
+    | there y =>
+        simpa [OriginEnv.weaken, OriginEnv.snoc] using hwf.env_bounded y
+  ws_bounded := by
+    intro e he
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        exact hb
+    | inr hmem =>
+        exact hwf.ws_bounded hmem
+  ws_in_env := by
+    intro e he
+    rw [mem_pushPos_iff] at he
+    cases he with
+    | inl h =>
+        obtain ⟨_, rfl⟩ := h
+        exact ⟨P, .here, rfl⟩
+    | inr hmem =>
+        obtain ⟨B, x, hx⟩ := hwf.ws_in_env hmem
+        exact ⟨B, .there x, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hx⟩
+  ws_nodup := by
+    refine nodup_pushPos s.ws o P hwf.ws_nodup ?_
+    intro e he
+    exact hwf.ws_origin_ne_fresh hfresh he
+  ws_split_fresh := by
+    intro e he side B x
+    rw [mem_pushPos_iff] at he
+    cases x with
+    | here =>
+        intro hx
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        cases he with
+        | inl hpos =>
+            obtain ⟨_, rfl⟩ := hpos
+            exact Origin.ne_split_self o side hx
+        | inr hmem =>
+            exact hcoll hmem side hx
+    | there y =>
+        cases he with
+        | inl hpos =>
+            obtain ⟨_, rfl⟩ := hpos
+            simpa [OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.fresh_of_fresh_parent hfresh side y
+        | inr hmem =>
+            simpa [OriginEnv.weaken, OriginEnv.snoc] using
+              hwf.ws_split_fresh hmem side y
+  split_parent_live := by
+    intro B x p side hx
+    cases x with
+    | here =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨C, y, hy⟩ := hparent p side hx
+        exact ⟨C, .there y, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hy⟩
+    | there y =>
+        simp [OriginEnv.weaken, OriginEnv.snoc] at hx
+        obtain ⟨C, z, hz⟩ := hwf.split_parent_live y p side hx
+        exact ⟨C, .there z, by simpa [OriginEnv.weaken, OriginEnv.snoc] using hz⟩
+
 end EncodeIx
 
 /-! ### Certificates indexed by `EncodeIx` -/

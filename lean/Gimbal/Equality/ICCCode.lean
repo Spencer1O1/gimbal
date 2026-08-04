@@ -646,6 +646,56 @@ def pushPos (ws : List (PosEntry sig)) (o : Origin sig) (ty : Object sig.nBases)
       Origin.ble a.origin b.origin
   else ws
 
+theorem mem_pushPos_iff (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty : Object sig.nBases) (e : PosEntry sig) :
+    e ∈ pushPos ws o ty ↔
+      (objectPolarity ty == .pos ∧ e = ⟨o, ty⟩) ∨ e ∈ ws := by
+  dsimp only [pushPos]
+  cases hpol : objectPolarity ty == Polarity.pos with
+  | false =>
+      simp
+  | true =>
+      have hperm :=
+        List.mergeSort_perm ({ origin := o, ty := ty } :: ws)
+          (fun a b => Origin.ble a.origin b.origin)
+      constructor
+      · intro he
+        have : e ∈ { origin := o, ty := ty } :: ws := (hperm.mem_iff).1 he
+        cases this with
+        | head => exact Or.inl ⟨rfl, rfl⟩
+        | tail _ hmem => exact Or.inr hmem
+      · intro h
+        refine (hperm.mem_iff).2 ?_
+        cases h with
+        | inl h =>
+            obtain ⟨_, heq⟩ := h
+            subst heq
+            exact List.Mem.head _
+        | inr hmem => exact List.Mem.tail _ hmem
+
+/--
+`pushPos` preserves origin-nodup when the pushed origin is absent from `ws`.
+-/
+theorem nodup_pushPos (ws : List (PosEntry sig)) (o : Origin sig)
+    (ty : Object sig.nBases)
+    (hn : (ws.map (·.origin)).Nodup)
+    (hfresh : ∀ e ∈ ws, e.origin ≠ o) :
+    ((pushPos ws o ty).map (·.origin)).Nodup := by
+  dsimp only [pushPos]
+  cases hpol : objectPolarity ty == Polarity.pos with
+  | false =>
+      simpa using hn
+  | true =>
+      have hperm :=
+        List.mergeSort_perm ({ origin := o, ty := ty } :: ws)
+          (fun a b => Origin.ble a.origin b.origin)
+      refine (List.Perm.nodup_iff (hperm.map (·.origin))).2 ?_
+      rw [List.map_cons, List.nodup_cons]
+      refine ⟨?_, hn⟩
+      intro hmem
+      obtain ⟨e, he, ho⟩ := List.mem_map.1 hmem
+      exact hfresh e he (by simpa using ho)
+
 /--
 `pushPos` either leaves the worklist alone (negative type) or inserts one
 entry and reorders; weight gains exactly `objectWeight ty` when polarity is

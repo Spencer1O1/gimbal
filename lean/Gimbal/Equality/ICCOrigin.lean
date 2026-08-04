@@ -264,6 +264,58 @@ theorem WellFormed.there {Γ : Ctx sig} {A : Object sig.nBases}
 
 end OriginEnv
 
+/--
+Counter indices appearing in `o` are strictly below the encoder's next slots.
+Hypotheses are unbounded (phase-entry); splits inherit the parent's bounds.
+-/
+def Origin.counterBounded (o : Origin sig) (domNext obsNext : Nat) : Prop :=
+  match o with
+  | .hyp _ => True
+  | .dom i => i < domNext
+  | .obs i => i < obsNext
+  | .split p _ => Origin.counterBounded p domNext obsNext
+
+theorem Origin.counterBounded_mono_dom {o : Origin sig} {d d' obs : Nat}
+    (h : Origin.counterBounded o d obs) (hle : d ≤ d') :
+    Origin.counterBounded o d' obs := by
+  induction o with
+  | hyp _ => trivial
+  | dom i => exact Nat.lt_of_lt_of_le h hle
+  | obs _ => exact h
+  | split p _ ih => exact ih h
+
+theorem Origin.counterBounded_mono_obs {o : Origin sig} {dom o₁ o₂ : Nat}
+    (h : Origin.counterBounded o dom o₁) (hle : o₁ ≤ o₂) :
+    Origin.counterBounded o dom o₂ := by
+  induction o with
+  | hyp _ => trivial
+  | dom _ => exact h
+  | obs i => exact Nat.lt_of_lt_of_le h hle
+  | split p _ ih => exact ih h
+
+theorem Origin.counterBounded_hyp (i domNext obsNext : Nat) :
+    Origin.counterBounded (.hyp (sig := sig) i) domNext obsNext :=
+  trivial
+
+theorem Origin.not_counterBounded_dom_eq (domNext obsNext : Nat) :
+    ¬ Origin.counterBounded (.dom (sig := sig) domNext) domNext obsNext :=
+  Nat.lt_irrefl _
+
+theorem Origin.not_counterBounded_obs_eq (domNext obsNext : Nat) :
+    ¬ Origin.counterBounded (.obs (sig := sig) obsNext) domNext obsNext :=
+  Nat.lt_irrefl _
+
+/-- An origin is never equal to a one-step split of itself. -/
+theorem Origin.ne_split_self (o : Origin sig) (side : Bool) :
+    o ≠ .split o side := by
+  induction o generalizing side with
+  | hyp _ | obs _ | dom _ =>
+      intro h; cases h
+  | split p _s ih =>
+      intro h
+      injection h with hp _
+      exact ih _ hp
+
 /-! ### Positive worklist entries -/
 
 /-- A processable positive assumption: its origin and formula. -/
@@ -1235,6 +1287,69 @@ theorem posCollect_snoc {Δ : Ctx sig} {A : Object sig.nBases}
 
 theorem posCollect_empty (ε : OriginEnv (Ctx.empty : Ctx sig)) :
     OriginEnv.posCollect ε = [] := rfl
+
+/-- Every collected entry is realized by a live variable. -/
+theorem posCollect_mem_exists {Γ : Ctx sig} (ε : OriginEnv Γ)
+    {e : PosEntry sig} (he : e ∈ OriginEnv.posCollect ε) :
+    ∃ (A : Object sig.nBases) (x : Var Γ A), ε x = e.origin ∧ A = e.ty := by
+  induction Γ with
+  | empty =>
+      rw [posCollect_empty] at he; cases he
+  | snoc Δ A ih =>
+      rw [posCollect_snoc] at he
+      split at he
+      · cases he with
+        | head =>
+            exact ⟨A, .here, rfl, rfl⟩
+        | tail _ hmem =>
+            obtain ⟨B, x, hx, hty⟩ := ih (fun {_} z => ε (.there z)) hmem
+            exact ⟨B, .there x, hx, hty⟩
+      · obtain ⟨B, x, hx, hty⟩ := ih (fun {_} z => ε (.there z)) he
+        exact ⟨B, .there x, hx, hty⟩
+
+/-- Under `WellFormed`, collected entries are determined by their origin. -/
+theorem posCollect_origin_inj {Γ : Ctx sig} (ε : OriginEnv Γ)
+    (hwf : OriginEnv.WellFormed ε)
+    {e₁ e₂ : PosEntry sig}
+    (he₁ : e₁ ∈ OriginEnv.posCollect ε) (he₂ : e₂ ∈ OriginEnv.posCollect ε)
+    (ho : e₁.origin = e₂.origin) : e₁ = e₂ := by
+  obtain ⟨A, x, hx, hty₁⟩ := posCollect_mem_exists ε he₁
+  obtain ⟨B, y, hy, hty₂⟩ := posCollect_mem_exists ε he₂
+  have hε : ε x = ε y := by rw [hx, hy, ho]
+  obtain ⟨hAB, hEq⟩ := hwf.injective x y hε
+  cases hAB
+  cases (eq_of_heq hEq)
+  have hty : e₁.ty = e₂.ty := hty₁.symm.trans hty₂
+  match e₁, e₂ with
+  | ⟨o₁, t₁⟩, ⟨o₂, t₂⟩ =>
+      dsimp at ho hty
+      simp [ho, hty]
+
+/-- Origins appearing in `posCollect` are pairwise distinct. -/
+theorem posCollect_origins_nodup {Γ : Ctx sig} (ε : OriginEnv Γ)
+    (hwf : OriginEnv.WellFormed ε) :
+    ((OriginEnv.posCollect ε).map (·.origin)).Nodup := by
+  induction Γ with
+  | empty =>
+      simp [posCollect_empty]
+  | snoc Δ A ih =>
+      have hwf' : OriginEnv.WellFormed (fun {_B} x => ε (.there x)) :=
+        OriginEnv.WellFormed.there ε hwf
+      have ih' := ih (fun {_} x => ε (.there x)) hwf'
+      rw [posCollect_snoc]
+      split
+      · rw [List.map_cons, List.nodup_cons]
+        refine ⟨?_, ih'⟩
+        intro hmem
+        obtain ⟨e, he, ho⟩ := List.mem_map.1 hmem
+        obtain ⟨B, x, hx, _⟩ :=
+          posCollect_mem_exists (fun {_} z => ε (.there z)) he
+        have : ε (.there x) = ε (.here : Var (Δ ▻ A) A) := by
+          simpa [hx] using ho
+        obtain ⟨hAB, hEq⟩ := hwf.injective (.there x) .here this
+        cases hAB
+        exact nomatch (eq_of_heq hEq)
+      · exact ih'
 
 theorem posCollect_env_eq {Γ : Ctx sig} {ε ε' : OriginEnv Γ}
     (hε : ∀ {A} (x : Var Γ A), ε x = ε' x) :
