@@ -646,6 +646,8 @@ theorem mem_buildSchedule_storedNeutral {n : Nat} {σ : ReachState n}
   obtain `NeutralParentLt` from that field (not a free hypothesis).
 * Bridge lemmas: sized typeAt, `selectNeutralLe` from `rankOfNeutralSlot`,
   schedule → stored new-neutral, `StoredNeutralDomain` → `reconOk` shape.
+* `WitnessDepsOk` / `deps_sound` centralize certified dependency contents;
+  structural lemmas expose η / inl / inr parent indices with `parents_lt` ranks.
 
 Remaining for `ReconstructTotalityPackage`:
 * measure induction wiring case lemmas + domain inheritance for `invOf`;
