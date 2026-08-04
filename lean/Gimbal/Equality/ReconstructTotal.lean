@@ -461,6 +461,181 @@ theorem invertibleArg_etaProd_inside_of_ranked {σ : ReachState sig.nBases}
     InvertibleArgDomain cert ambientRank hyps (.prod L R) :=
   InvertibleArgDomain.of_ranked_lt cert ambientRank hyps (.prod L R) hfind hr hlt
 
+/-! ## Bridge lemmas for WF totality -/
+
+theorem ReachCell.slotWitness_empty (b : SlotNew) :
+    ReachCell.empty.slotWitness b = none := by
+  cases b <;> rfl
+
+theorem ReachState.lt_cells_of_slotWitness {n : Nat} {σ : ReachState n}
+    {i : Nat} {b : SlotNew} {w : Witness}
+    (h : (σ.getCell i).slotWitness b = some w) : i < σ.cells.size := by
+  cases hc : σ.cells[i]? with
+  | none =>
+      have heq : σ.getCell i = ReachCell.empty := by
+        simp [ReachState.getCell, hc]
+      rw [heq, ReachCell.slotWitness_empty] at h
+      cases h
+  | some c =>
+      exact (Array.getElem?_eq_some_iff.mp hc).1
+
+theorem ReachState.typeAt_isSome_of_lt_sized {n : Nat} {σ : ReachState n}
+    {i : Nat} (hsz : ReachState.Sized σ) (hi : i < σ.cells.size) :
+    ∃ A, σ.typeAt i = some A := by
+  have hi' : i < σ.types.size := by
+    rw [ReachState.Sized] at hsz
+    rwa [← hsz]
+  refine ⟨σ.types[i], ?_⟩
+  simp [ReachState.typeAt, Array.getElem?_eq_getElem hi']
+
+theorem ReachCell.neutralWitness_slot {c : ReachCell} {w : Witness}
+    (h : c.neutralWitness = some w) :
+    (c.newNeutral = true ∧ c.slotWitness true = some w) ∨
+      (c.newNeutral = false ∧ c.slotWitness false = some w) := by
+  dsimp [ReachCell.neutralWitness, ReachCell.newNeutral, ReachCell.slotWitness] at h ⊢
+  cases hn : c.newWitness with
+  | some wN =>
+      simp only [hn] at h ⊢
+      cases hneN : Witness.isNeutral wN
+      · simp only [hneN] at h
+        cases ho : c.oldWitness with
+        | some wO =>
+            simp only [ho] at h ⊢
+            cases hneO : Witness.isNeutral wO
+            · simp [hneO] at h
+            · simp only [hneO] at h
+              cases h
+              exact Or.inr ⟨by simp [hn, hneN], rfl⟩
+        | none => simp [ho] at h
+      · simp only [hneN] at h
+        cases h
+        exact Or.inl ⟨by simp [hn, hneN], rfl⟩
+  | none =>
+      simp only [hn] at h ⊢
+      cases ho : c.oldWitness with
+      | some wO =>
+          simp only [ho] at h ⊢
+          cases hneO : Witness.isNeutral wO
+          · simp [hneO] at h
+          · simp only [hneO] at h
+            cases h
+            exact Or.inr ⟨by simp [hn], rfl⟩
+      | none => simp [ho] at h
+
+theorem ReachCell.neutralWitness_isNeutral {c : ReachCell} {w : Witness}
+    (h : c.neutralWitness = some w) : Witness.isNeutral w = true := by
+  dsimp [ReachCell.neutralWitness] at h
+  split at h
+  · next wN =>
+      split at h
+      · cases h; assumption
+      · split at h
+        · next wO =>
+            split at h
+            · cases h; assumption
+            · cases h
+        · cases h
+  · next =>
+      split at h
+      · next wO =>
+          split at h
+          · cases h; assumption
+          · cases h
+      · cases h
+
+theorem ReachRankCert.selectNeutralLe_isSome_of_ranked_neutral {n : Nat}
+    {σ : ReachState n} (cert : ReachRankCert σ) (i ambient : Nat)
+    {b : SlotNew} {w : Witness} {r : Nat}
+    (hw : (σ.getCell i).slotWitness b = some w)
+    (hne : Witness.isNeutral w = true)
+    (hr : cert.rank i b = some r)
+    (hle : r ≤ ambient) :
+    ∃ w' r', cert.selectNeutralLe i ambient = some (w', r') := by
+  have htry :=
+    cert.tryNeutralSlot_eq_some i b (fun r => decide (r ≤ ambient)) hw hne hr
+      (decide_eq_true hle)
+  cases b with
+  | true =>
+      refine ⟨w, r, ?_⟩
+      simpa [ReachRankCert.selectNeutralLe, htry]
+  | false =>
+      cases hnew : cert.tryNeutralSlot i true (fun r => decide (r ≤ ambient)) with
+      | some wr =>
+          refine ⟨wr.1, wr.2, ?_⟩
+          simp [ReachRankCert.selectNeutralLe, hnew]
+      | none =>
+          refine ⟨w, r, ?_⟩
+          simpa [ReachRankCert.selectNeutralLe, hnew, htry]
+
+theorem ReachRankCert.selectNeutralLe_of_rankOfNeutralSlot {n : Nat}
+    {σ : ReachState n} (cert : ReachRankCert σ) (i ambient : Nat) {r : Nat}
+    (hr : cert.rankOfNeutralSlot i = some r) (hle : r ≤ ambient) :
+    ∃ w r', cert.selectNeutralLe i ambient = some (w, r') := by
+  dsimp [ReachRankCert.rankOfNeutralSlot] at hr
+  cases hnw : (σ.getCell i).neutralWitness with
+  | none => simp [hnw] at hr
+  | some w =>
+      simp only [hnw] at hr
+      have hne := ReachCell.neutralWitness_isNeutral hnw
+      rcases ReachCell.neutralWitness_slot hnw with ⟨hnew, hw⟩ | ⟨hnew, hw⟩
+      · simp only [hnew, ↓reduceIte] at hr
+        exact cert.selectNeutralLe_isSome_of_ranked_neutral i ambient hw hne hr hle
+      · simp only [hnew, Bool.false_eq_true, ↓reduceIte] at hr
+        exact cert.selectNeutralLe_isSome_of_ranked_neutral i ambient hw hne hr hle
+
+theorem CertifiedComplete.sized {Γ : ReachCtx sig.nBases} {goal : Object sig.nBases}
+    (C : CertifiedComplete (sig := sig) Γ goal) :
+    ReachState.Sized C.result.state := by
+  rw [show C.result.state = runReachability Γ goal from C.soundFor]
+  exact runReachability_sized Γ goal
+
+theorem StoredNeutralDomain.typeAt_reconOk {Γ : ReachCtx sig.nBases}
+    {goal : Object sig.nBases} (C : CertifiedComplete (sig := sig) Γ goal)
+    {i : Nat} {b : SlotNew} {w : Witness}
+    (hdom : StoredNeutralDomain C.result.cert i b w) :
+    ∃ (A : Object sig.nBases),
+      C.result.state.typeAt i = some A ∧
+        WitnessReconShape C.result.state Γ.hyps A w := by
+  obtain ⟨hw, hne, _hrs⟩ := hdom
+  have hi := ReachState.lt_cells_of_slotWitness hw
+  obtain ⟨A, hA⟩ := ReachState.typeAt_isSome_of_lt_sized C.sized hi
+  have hwMem :
+      (C.result.state.getCell i).oldWitness = some w ∨
+        (C.result.state.getCell i).newWitness = some w := by
+    cases b with
+    | false => exact Or.inl (by simpa [ReachCell.slotWitness] using hw)
+    | true => exact Or.inr (by simpa [ReachCell.slotWitness] using hw)
+  exact ⟨A, hA, C.sound.reconOk i A w hA hwMem hne⟩
+
+theorem mem_buildSchedule_storedNeutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) {P : Object n} {w : Witness}
+    (h : (P, w) ∈ (buildSchedule σ).entries) :
+    ∃ i, σ.typeAt i = some P ∧
+      (σ.getCell i).slotWitness true = some w ∧
+        Witness.isNeutral w = true ∧
+          (cert.rank i true).isSome = true := by
+  rw [buildSchedule, Array.mem_filterMap] at h
+  obtain ⟨i, _, hi⟩ := h
+  dsimp [scheduleEntryAt] at hi
+  cases hty : σ.typeAt i with
+  | none => simp [hty] at hi
+  | some A =>
+      simp only [hty] at hi
+      split at hi
+      · next hpol =>
+          cases hw : (σ.getCell i).newWitness with
+          | none => simp [hw] at hi
+          | some w' =>
+              simp only [hw] at hi
+              split at hi
+              · next hne =>
+                  cases hi
+                  refine ⟨i, hty, by simpa [ReachCell.slotWitness, hw], hne, ?_⟩
+                  have hiff := cert.rank_iff i true
+                  simpa [ReachCell.slotWitness, hw] using hiff.symm
+              · cases hi
+      · cases hi
+
 /-! ## Status
 
 * `InvertibleArgDomain` tightened (no polarity shortcut); hypApp/expApp inhabitation
@@ -469,11 +644,12 @@ theorem invertibleArg_etaProd_inside_of_ranked {σ : ReachState sig.nBases}
   (recursive premises: bounded selection + IH on lower measure).
 * `ReachRankCert.neutralParent_lt` threads fire-time neutral parents; selectors
   obtain `NeutralParentLt` from that field (not a free hypothesis).
+* Bridge lemmas: sized typeAt, `selectNeutralLe` from `rankOfNeutralSlot`,
+  schedule → stored new-neutral, `StoredNeutralDomain` → `reconOk` shape.
 
 Remaining for `ReconstructTotalityPackage`:
-* discharge recursive `selectNeutralLt` premises via
-  `selectNeutralLt_of_fstType` / `_sndType` / `_appTy` in the WF induction;
-* invertible / requested / consistency / inconsistent-never;
+* measure induction wiring case lemmas + domain inheritance for `invOf`;
+* specialize the five package conjuncts;
 * fueled migration and reachability cleanup remain blocked until the package lands.
 -/
 
