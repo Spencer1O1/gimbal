@@ -65,12 +65,12 @@ def findHypVar (hyps : Array (Object sig.nBases)) (A : Object sig.nBases) :
       | none => pure ()
     return none
 
-private inductive ReconstructCmd (sig : Signature) where
+inductive ReconstructCmd (sig : Signature) where
   | neuOf (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
   | witness (hyps : Array (Object sig.nBases)) (w : Witness)
   | invOf (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
 
-private inductive ReconstructVal (sig : Signature) where
+inductive ReconstructVal (sig : Signature) where
   | neu (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
       (n : NegNeu (Ctx.ofHyps hyps) A) : ReconstructVal sig
   | wit (hyps : Array (Object sig.nBases))

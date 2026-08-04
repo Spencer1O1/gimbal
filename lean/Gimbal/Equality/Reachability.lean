@@ -247,6 +247,46 @@ def ReachState.setCell {n : Nat} (σ : ReachState n) (i : Nat) (c : ReachCell) :
 def ReachState.typeAt {n : Nat} (σ : ReachState n) (i : Nat) : Option (Object n) :=
   σ.types[i]?
 
+/--
+Index-range and result-type agreement for a **neutral** witness at cell type `A`.
+Intro forms are excluded (`False`) — they never justify `neuOf` / schedule
+reconstruction.
+-/
+def WitnessReconShape {n : Nat} (σ : ReachState n)
+    (hyps : Array (Object n)) (A : Object n) : Witness → Prop
+  | .ctxVar i => hyps[i]? = some A
+  | .fstHyp i => ∃ L R, hyps[i]? = some (.prod L R) ∧ A = L
+  | .sndHyp i => ∃ L R, hyps[i]? = some (.prod L R) ∧ A = R
+  | .fstType p => ∃ L R, σ.typeAt p = some (.prod L R) ∧ A = L
+  | .sndType p => ∃ L R, σ.typeAt p = some (.prod L R) ∧ A = R
+  | .app fn arg =>
+      ∃ Arg Ret,
+        hyps[fn]? = some (.exp Arg Ret) ∧ σ.typeAt arg = some Arg ∧ A = Ret
+  | .appTy fn arg =>
+      ∃ Arg Ret,
+        σ.typeAt fn = some (.exp Arg Ret) ∧ σ.typeAt arg = some Arg ∧ A = Ret
+  | .unit | .inl _ | .inr _ | .eta => False
+
+theorem WitnessReconShape.of_types_eq {n : Nat} {σ τ : ReachState n}
+    {hyps : Array (Object n)} {A : Object n} {w : Witness}
+    (ht : ∀ i, τ.typeAt i = σ.typeAt i)
+    (h : WitnessReconShape σ hyps A w) : WitnessReconShape τ hyps A w := by
+  cases w with
+  | ctxVar i => exact h
+  | fstHyp i => exact h
+  | sndHyp i => exact h
+  | fstType p =>
+      obtain ⟨L, R, hty, hA⟩ := h; exact ⟨L, R, (ht _).trans hty, hA⟩
+  | sndType p =>
+      obtain ⟨L, R, hty, hA⟩ := h; exact ⟨L, R, (ht _).trans hty, hA⟩
+  | app fn arg =>
+      obtain ⟨Arg, Ret, hfn, harg, hA⟩ := h
+      exact ⟨Arg, Ret, hfn, (ht _).trans harg, hA⟩
+  | appTy fn arg =>
+      obtain ⟨Arg, Ret, hfn, harg, hA⟩ := h
+      exact ⟨Arg, Ret, (ht _).trans hfn, (ht _).trans harg, hA⟩
+  | unit | inl _ | inr _ | eta => exact h
+
 /-! ### State extension order and the missing-facts measure -/
 
 variable {n : Nat}

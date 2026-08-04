@@ -192,6 +192,11 @@ structure ReachSound (Γ : ReachCtx n) (σ : ReachState n) : Prop where
   fitsOk : ∀ i A w, σ.typeAt i = some A →
     ((σ.getCell i).oldWitness = some w ∨ (σ.getCell i).newWitness = some w) →
     Witness.fits w A = true
+  /-- Neutral witnesses agree on hyp/type indices and reconstructed result type. -/
+  reconOk : ∀ i A w, σ.typeAt i = some A →
+    ((σ.getCell i).oldWitness = some w ∨ (σ.getCell i).newWitness = some w) →
+      Witness.isNeutral w = true →
+        WitnessReconShape σ Γ.hyps A w
 
 namespace ReachSound
 
@@ -421,20 +426,68 @@ theorem ReachCell.fits_of_record {n : Nat} {c : ReachCell} {b : Bool} {w w' : Wi
       rw [hrec] at hwit
       exact hpre w' hwit
 
+theorem ReachCell.shape_of_record {n : Nat} {σ : ReachState n}
+    {hyps : Array (Object n)} {c : ReachCell} {b : Bool} {w w' : Witness}
+    {A : Object n}
+    (hpre : ∀ w₀, (c.oldWitness = some w₀ ∨ c.newWitness = some w₀) →
+      Witness.isNeutral w₀ = true → WitnessReconShape σ hyps A w₀)
+    (hshape : Witness.isNeutral w = true → WitnessReconShape σ hyps A w)
+    (hwit : (c.record b w).oldWitness = some w' ∨ (c.record b w).newWitness = some w')
+    (hneu : Witness.isNeutral w' = true) :
+    WitnessReconShape σ hyps A w' := by
+  cases b with
+  | false =>
+    cases how : c.oldWitness with
+    | none =>
+      have hrec : c.record false w = { c with oldWitness := some w } := by
+        unfold ReachCell.record; rw [how]; rfl
+      rw [hrec] at hwit
+      cases hwit with
+      | inl holdW =>
+        have : w' = w := (Option.some.inj holdW).symm
+        subst this; exact hshape hneu
+      | inr hnewW =>
+        exact hpre w' (Or.inr hnewW) hneu
+    | some wOld =>
+      have hrec : c.record false w = c := by
+        unfold ReachCell.record; rw [how]; rfl
+      rw [hrec] at hwit
+      exact hpre w' hwit hneu
+  | true =>
+    cases hn : c.newWitness with
+    | none =>
+      have hrec : c.record true w = { c with newWitness := some w } := by
+        unfold ReachCell.record; rw [hn]; rfl
+      rw [hrec] at hwit
+      cases hwit with
+      | inl holdW =>
+        exact hpre w' (Or.inl holdW) hneu
+      | inr hnewW =>
+        have : w' = w := (Option.some.inj hnewW).symm
+        subst this; exact hshape hneu
+    | some wNew =>
+      have hrec : c.record true w = c := by
+        unfold ReachCell.record; rw [hn]; rfl
+      rw [hrec] at hwit
+      exact hpre w' hwit hneu
+
 theorem ReachSound.discoverAt {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) {i : Nat} {b : Bool} {w : Witness} {A : Object n}
     (hA : σ.typeAt i = some A)
     (hold : b = false → OldDeduction Γ A) (hnew : b = true → UsesNew Γ A)
     (heta : ∀ L R, w = .eta → A = .prod L R →
       isSimplyDeducible σ L = true ∧ isSimplyDeducible σ R = true)
-    (hfit : Witness.fits w A = true) :
+    (hfit : Witness.fits w A = true)
+    (hshape : Witness.isNeutral w = true → WitnessReconShape σ Γ.hyps A w) :
     ReachSound Γ (σ.discover i b w) := by
   have hle := σ.le_discover i b w
   have hAsimple : SimpleDeduction Γ A := by
     cases hb : b
     · exact (hold hb).toSimple
     · exact (hnew hb).toSimple
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  have htypes : ∀ j, (σ.discover i b w).typeAt j = σ.typeAt j := by
+    intro j; exact ReachState.typeAt_discover σ i b w j
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · intro j B hB hsome
     rw [ReachState.typeAt_discover] at hB
     rcases ReachState.getCell_discover σ i b w j with heq | ⟨rfl, heq⟩
@@ -510,14 +563,31 @@ theorem ReachSound.discoverAt {Γ : ReachCtx n} {σ : ReachState n}
         rwa [heq] at hwit
       exact ReachCell.fits_of_record
         (fun w₀ hw => h.fitsOk j A w₀ hA hw) hfit hwit'
+  · intro j B w' hB hwit hneu
+    rw [ReachState.typeAt_discover] at hB
+    rcases ReachState.getCell_discover σ i b w j with heq | ⟨hij, heq⟩
+    · exact WitnessReconShape.of_types_eq htypes
+        (h.reconOk j B w' hB (by rw [heq] at hwit; exact hwit) hneu)
+    · subst hij
+      have hAB : A = B := ReachState.typeAt_inj hA hB
+      subst hAB
+      have hwit' :
+          ((σ.getCell j).record b w).oldWitness = some w' ∨
+            ((σ.getCell j).record b w).newWitness = some w' := by
+        rwa [heq] at hwit
+      exact WitnessReconShape.of_types_eq htypes
+        (ReachCell.shape_of_record
+          (fun w₀ hw hneu₀ => h.reconOk j A w₀ hA hw hneu₀)
+          hshape hwit' hneu)
 
 theorem ReachSound.discoverAt_not_eta {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) {i : Nat} {b : Bool} {w : Witness} {A : Object n}
     (hA : σ.typeAt i = some A)
     (hold : b = false → OldDeduction Γ A) (hnew : b = true → UsesNew Γ A)
-    (hne : w ≠ .eta) (hfit : Witness.fits w A = true) :
+    (hne : w ≠ .eta) (hfit : Witness.fits w A = true)
+    (hshape : Witness.isNeutral w = true → WitnessReconShape σ Γ.hyps A w) :
     ReachSound Γ (σ.discover i b w) :=
-  h.discoverAt hA hold hnew (fun _ _ hw => (hne hw).elim) hfit
+  h.discoverAt hA hold hnew (fun _ _ hw => (hne hw).elim) hfit hshape
 
 theorem ReachSound.discoverDualAt {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) {i : Nat} {oldOk newOk : Bool} {w : Witness} {A : Object n}
@@ -526,7 +596,8 @@ theorem ReachSound.discoverDualAt {Γ : ReachCtx n} {σ : ReachState n}
     (hnew : newOk = true → UsesNew Γ A)
     (heta : ∀ L R, w = .eta → A = .prod L R →
       isSimplyDeducible σ L = true ∧ isSimplyDeducible σ R = true)
-    (hfit : Witness.fits w A = true) :
+    (hfit : Witness.fits w A = true)
+    (hshape : Witness.isNeutral w = true → WitnessReconShape σ Γ.hyps A w) :
     ReachSound Γ (σ.discoverDual i oldOk newOk w) := by
   unfold ReachState.discoverDual
   cases holdOk : oldOk with
@@ -536,35 +607,42 @@ theorem ReachSound.discoverDualAt {Γ : ReachCtx n} {σ : ReachState n}
     | true =>
       simp only [holdOk, hnewOk, ↓reduceIte]
       exact h.discoverAt hA (fun hb => by cases hb) (fun _ => hnew hnewOk) heta hfit
+        (fun hneu => WitnessReconShape.of_types_eq (fun _ => rfl) (hshape hneu))
   | true =>
     have h1 := h.discoverAt (b := false) (w := w) hA
-      (fun _ => hold holdOk) (fun hb => by cases hb) heta hfit
+      (fun _ => hold holdOk) (fun hb => by cases hb) heta hfit hshape
     cases hnewOk : newOk with
     | false => simpa [holdOk, hnewOk] using h1
     | true =>
       simp only [holdOk, hnewOk, ↓reduceIte]
-      refine h1.discoverAt ?_ (fun hb => by cases hb) (fun _ => hnew hnewOk) ?_ hfit
+      refine h1.discoverAt ?_ (fun hb => by cases hb) (fun _ => hnew hnewOk) ?_ hfit ?_
       · rw [ReachState.typeAt_discover]; exact hA
       · intro L R hw heq
         have ⟨hL, hR⟩ := heta L R hw heq
         exact ⟨isSimplyDeducible_of_le (σ.le_discover i false w) hL,
           isSimplyDeducible_of_le (σ.le_discover i false w) hR⟩
+      · intro hneu
+        exact WitnessReconShape.of_types_eq (fun j => ReachState.typeAt_discover σ i false w j)
+          (hshape hneu)
 
 theorem ReachSound.discoverDualAt_not_eta {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) {i : Nat} {oldOk newOk : Bool} {w : Witness} {A : Object n}
     (hA : σ.typeAt i = some A)
     (hold : oldOk = true → OldDeduction Γ A)
     (hnew : newOk = true → UsesNew Γ A)
-    (hne : w ≠ .eta) (hfit : Witness.fits w A = true) :
+    (hne : w ≠ .eta) (hfit : Witness.fits w A = true)
+    (hshape : Witness.isNeutral w = true → WitnessReconShape σ Γ.hyps A w) :
     ReachSound Γ (σ.discoverDual i oldOk newOk w) :=
-  h.discoverDualAt hA hold hnew (fun _ _ hw => (hne hw).elim) hfit
+  h.discoverDualAt hA hold hnew (fun _ _ hw => (hne hw).elim) hfit hshape
 
 theorem ReachSound.markHypAt {Γ : ReachCtx n} {σ : ReachState n}
     (h : ReachSound Γ σ) (k : Nat)
     (hpos : ∀ A, Γ.hyps[k]? = some A → objectPolarity A = .pos) :
     ReachSound Γ (σ.markHyp Γ k) := by
   have hle := σ.le_markHyp Γ k
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  have htypes : ∀ j, (σ.markHyp Γ k).typeAt j = σ.typeAt j := by
+    intro j; simp [ReachState.typeAt, ← (σ.le_markHyp Γ k).types]
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · intro j B hB hsome
     rw [ReachState.typeAt_markHyp] at hB
     rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨A, i, hA, hi, rfl, heq⟩
@@ -645,6 +723,25 @@ theorem ReachSound.markHypAt {Γ : ReachCtx n} {σ : ReachState n}
         simpa [ReachCell.recordHyp] using hwit
       exact ReachCell.fits_of_record
         (fun w₀ hw => h.fitsOk j A w₀ hty0 hw) hfit hwit'
+  · intro j B w' hB hwit hneu
+    rw [ReachState.typeAt_markHyp] at hB
+    rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨A, idx, hA, hi, hij, heq⟩
+    · exact WitnessReconShape.of_types_eq htypes
+        (h.reconOk j B w' hB (by rw [heq] at hwit; exact hwit) hneu)
+    · subst hij
+      have hty0 := ReachState.typeAt_of_findTypeIdx hi
+      have hAB : A = B := ReachState.typeAt_inj hty0 hB
+      subst hAB
+      have hshape : Witness.isNeutral (.ctxVar k) = true →
+          WitnessReconShape σ Γ.hyps A (.ctxVar k) := fun _ => hA
+      have hwit' : ((σ.getCell j).record (Γ.isNew k) (.ctxVar k)).oldWitness = some w' ∨
+          ((σ.getCell j).record (Γ.isNew k) (.ctxVar k)).newWitness = some w' := by
+        rw [heq] at hwit
+        simpa [ReachCell.recordHyp] using hwit
+      exact WitnessReconShape.of_types_eq htypes
+        (ReachCell.shape_of_record
+          (fun w₀ hw hneu₀ => h.reconOk j A w₀ hty0 hw hneu₀)
+          hshape hwit' hneu)
 
 /-! ### Preservation by each forward-chaining rule -/
 
@@ -676,6 +773,7 @@ theorem unitEtaRule_sound (h : ReachSound Γ σ) : ReachSound Γ (unitEtaRule σ
     exact h.discoverAt_not_eta (ReachState.typeAt_of_findTypeIdx hu)
       (fun _ => .unit trivial) (fun hb => by simp at hb) (fun h => by cases h)
       (by simp [Witness.fits])
+      (fun hneu => by simp [Witness.isNeutral] at hneu)
   · exact h
 
 theorem hypProdRule_sound (h : ReachSound Γ σ) (k : Nat) (L R : Object n)
@@ -696,9 +794,11 @@ theorem hypProdRule_sound (h : ReachSound Γ σ) (k : Nat) (L R : Object n)
           (ReachState.typeAt_of_findTypeIdx hl)
           (fun hb => .fstHyp k hk hb trivial) (fun hb => .fstHyp k hk hb)
           (fun h => by cases h) (by simp [Witness.fits])
+          (fun _ => ⟨L, R, hk, rfl⟩)
         refine h1.discoverAt_not_eta (w := .sndHyp k) ?_
           (fun hb => .sndHyp k hk hb trivial) (fun hb => .sndHyp k hk hb)
           (fun h => by cases h) (by simp [Witness.fits])
+          (fun _ => ⟨L, R, hk, rfl⟩)
         rw [ReachState.typeAt_discover]
         exact ReachState.typeAt_of_findTypeIdx hr
 
@@ -715,7 +815,8 @@ theorem hypAppRule_sound (h : ReachSound Γ σ) (k : Nat) (Arg Ret : Object n)
       dsimp only
       have hA : σ.typeAt aIdx = some Arg := ReachState.typeAt_of_findTypeIdx ha
       have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
-      refine h.discoverDualAt_not_eta (w := .app k aIdx) hR ?_ ?_ (fun h => by cases h) (by simp [Witness.fits])
+      refine h.discoverDualAt_not_eta (w := .app k aIdx) hR ?_ ?_ (fun h => by cases h)
+          (by simp [Witness.fits]) (fun _ => ⟨Arg, Ret, hk, hA, rfl⟩)
       · intro hold
         obtain ⟨hOld, hFn⟩ := Bool.and_eq_true_iff.mp hold
         exact .appHyp k hk (by simpa using hFn)
@@ -762,7 +863,8 @@ theorem prodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
           revert hnew; simp only [ReachCell.newNeutral]
           cases (σ.getCell ti).newWitness <;> simp
         exact .fst (h.new ti _ hti hn)
-      have h1 := h.discoverDualAt_not_eta (w := .fstType ti) hL0 holdN hnewN (fun h => by cases h) (by simp [Witness.fits])
+      have h1 := h.discoverDualAt_not_eta (w := .fstType ti) hL0 holdN hnewN (fun h => by cases h)
+          (by simp [Witness.fits]) (fun _ => ⟨L, R, hti, rfl⟩)
       have hRty :
           (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
               (.fstType ti)).typeAt rIdx = some R := by
@@ -779,7 +881,10 @@ theorem prodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
           revert hnew; simp only [ReachCell.newNeutral]
           cases (σ.getCell ti).newWitness <;> simp
         exact .snd (h.new ti _ hti hn)
-      have h2 := h1.discoverDualAt_not_eta (w := .sndType ti) hRty holdNR hnewNR (fun h => by cases h) (by simp [Witness.fits])
+      have h2 := h1.discoverDualAt_not_eta (w := .sndType ti) hRty holdNR hnewNR (fun h => by cases h)
+          (by simp [Witness.fits])
+          (fun _ => ⟨L, R, by
+            rw [ReachState.typeAt_discoverDual]; exact hti, rfl⟩)
       split
       · -- `!simplyDeducible`: maybe η
         split
@@ -805,6 +910,7 @@ theorem prodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
             rw [ReachState.typeAt_discoverDual, ReachState.typeAt_discoverDual]
             exact hR0
           refine h2.discoverDualAt (w := .eta) hti' ?_ ?_ ?_ (by simp [Witness.fits])
+              (fun hneu => by simp [Witness.isNeutral] at hneu)
           · intro hold
             obtain ⟨h1o, h2o⟩ := Bool.and_eq_true_iff.mp hold
             exact .pair
@@ -868,6 +974,7 @@ theorem expEtaRule_sound (h : ReachSound Γ σ) (ti : Nat) (Arg Ret : Object n)
           (fun hnew => .expEta (h.new rIdx Ret hR hnew))
           (fun _ _ _ heq => by cases heq)
           (by simp [Witness.fits])
+          (fun hneu => by simp [Witness.isNeutral] at hneu)
       · exact h
   · exact h
 
@@ -888,7 +995,8 @@ theorem expAppRule_sound (h : ReachSound Γ σ) (ti : Nat) (Arg Ret : Object n)
         · rename_i hadec
           have hA : σ.typeAt aIdx = some Arg := ReachState.typeAt_of_findTypeIdx ha
           have hR : σ.typeAt rIdx = some Ret := ReachState.typeAt_of_findTypeIdx hr
-          refine h.discoverDualAt_not_eta (w := .appTy ti aIdx) hR ?_ ?_ (fun h => by cases h) (by simp [Witness.fits])
+          refine h.discoverDualAt_not_eta (w := .appTy ti aIdx) hR ?_ ?_ (fun h => by cases h)
+              (by simp [Witness.fits]) (fun _ => ⟨Arg, Ret, hti, hA, rfl⟩)
           · intro hold
             obtain ⟨h1, h2⟩ := Bool.and_eq_true_iff.mp hold
             exact .appTy
@@ -924,6 +1032,7 @@ theorem coprodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
               (h.old lIdx L hL (by simpa [ReachCell.oldDeducible] using hold)) trivial)
             (fun hnew => .inl (h.new lIdx L hL hnew))
             (fun h => by cases h) (by simp [Witness.fits])
+            (fun hneu => by simp [Witness.isNeutral] at hneu)
         · split
           · rename_i hrc
             have hR : σ.typeAt rIdx = some R := ReachState.typeAt_of_findTypeIdx hr
@@ -932,6 +1041,7 @@ theorem coprodTypeRule_sound (h : ReachSound Γ σ) (ti : Nat) (L R : Object n)
                 (h.old rIdx R hR (by simpa [ReachCell.oldDeducible] using hold)) trivial)
               (fun hnew => .inr (h.new rIdx R hR hnew))
               (fun h => by cases h) (by simp [Witness.fits])
+              (fun hneu => by simp [Witness.isNeutral] at hneu)
           · exact h
   · exact h
 
@@ -980,7 +1090,7 @@ private theorem getCell_initial (types : Array (Object n)) (i : Nat) :
 theorem reachSound_of_empty (Γ : ReachCtx n) (σ : ReachState n)
     (hcell : ∀ i, σ.getCell i = ReachCell.empty) (hinc : σ.inconsistent = false) :
     ReachSound Γ σ := by
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
@@ -989,6 +1099,7 @@ theorem reachSound_of_empty (Γ : ReachCtx n) (σ : ReachState n)
   · intro hs; rw [hinc] at hs; simp at hs
   · intro i L R _ hetaW; rw [hcell i] at hetaW; simp at hetaW
   · intro i A w _ hwit; rw [hcell i] at hwit; simp at hwit
+  · intro i A w _ hwit _; rw [hcell i] at hwit; simp at hwit
 
 theorem mkReachState_sound (Γ : ReachCtx n) (goal : Object n) :
     ReachSound Γ (mkReachState Γ goal) := by

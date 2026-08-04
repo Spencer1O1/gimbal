@@ -14,8 +14,8 @@
 
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.ReachComplete
-import Gimbal.Equality.ReconstructTotal
 import Gimbal.Equality.Polarized
+import Mathlib.Tactic
 
 namespace Gimbal
 namespace Equality
@@ -109,6 +109,68 @@ theorem Witness.cellParents_ctxVar (i : Nat) :
     Witness.cellParents (.ctxVar i) = [] :=
   rfl
 
+/-! ## Centralized rule dependency lists
+
+Every certified wrapper must take deps from this table — do not invent ad-hoc
+parent lists at call sites. Provenance still matters: a fired old/new slot
+receives the deps for **that** derivation, not an unrelated ranked cell.
+-/
+
+namespace RuleDeps
+
+/-- Hypothesis projections: no cell parent. -/
+def hypProj : List Nat := []
+
+/-- Context binding / seed: no cell parent. -/
+def ctxVar : List Nat := []
+
+/-- Unit η-intro: no cell parent. -/
+def unit : List Nat := []
+
+/-- Type projection from a neutral product cell. -/
+def typeProj (prodIdx : Nat) : List Nat := [prodIdx]
+
+/-- Hypothesis application: argument cell (covers η-built args via `invOf`). -/
+def hypApp (argIdx : Nat) : List Nat := [argIdx]
+
+/-- Type application: function and argument cells. -/
+def typeApp (fnIdx argIdx : Nat) : List Nat := [fnIdx, argIdx]
+
+/-- Coproduct introduction: selected payload. -/
+def coprodIntro (payloadIdx : Nat) : List Nat := [payloadIdx]
+
+/-- Product η: both components. -/
+def productEta (lIdx rIdx : Nat) : List Nat := [lIdx, rIdx]
+
+/-- Function η: return type. -/
+def functionEta (retIdx : Nat) : List Nat := [retIdx]
+
+theorem hypProj_eq_cellParents_fstHyp (i : Nat) :
+    hypProj = Witness.cellParents (.fstHyp i) := rfl
+
+theorem hypProj_eq_cellParents_sndHyp (i : Nat) :
+    hypProj = Witness.cellParents (.sndHyp i) := rfl
+
+theorem typeProj_eq_cellParents_fstType (p : Nat) :
+    typeProj p = Witness.cellParents (.fstType p) := rfl
+
+theorem typeProj_eq_cellParents_sndType (p : Nat) :
+    typeProj p = Witness.cellParents (.sndType p) := rfl
+
+theorem hypApp_eq_cellParents (fnHyp argIdx : Nat) :
+    hypApp argIdx = Witness.cellParents (.app fnHyp argIdx) := rfl
+
+theorem typeApp_eq_cellParents (fnIdx argIdx : Nat) :
+    typeApp fnIdx argIdx = Witness.cellParents (.appTy fnIdx argIdx) := rfl
+
+theorem coprodIntro_eq_cellParents_inl (p : Nat) :
+    coprodIntro p = Witness.cellParents (.inl p) := rfl
+
+theorem coprodIntro_eq_cellParents_inr (p : Nat) :
+    coprodIntro p = Witness.cellParents (.inr p) := rfl
+
+end RuleDeps
+
 theorem Witness.isNeutral_fstHyp (i : Nat) :
     Witness.isNeutral (.fstHyp i) = true :=
   rfl
@@ -133,15 +195,15 @@ theorem reconObjectSize_pos {n : Nat} (A : Object n) : 0 < reconObjectSize A := 
 
 theorem reconObjectSize_prod_left_lt {n : Nat} (L R : Object n) :
     reconObjectSize L < reconObjectSize (.prod L R) := by
-  simp [reconObjectSize]; omega
+  simp [reconObjectSize]; try omega
 
 theorem reconObjectSize_prod_right_lt {n : Nat} (L R : Object n) :
     reconObjectSize R < reconObjectSize (.prod L R) := by
-  simp [reconObjectSize]; omega
+  simp [reconObjectSize]; try omega
 
 theorem reconObjectSize_exp_ret_lt {n : Nat} (Arg Ret : Object n) :
     reconObjectSize Ret < reconObjectSize (.exp Arg Ret) := by
-  simp [reconObjectSize]; omega
+  simp [reconObjectSize]; try omega
 
 /-! ## Reconstruction phase (lex component) -/
 
@@ -269,6 +331,9 @@ def ReachCell.slotWitness (c : ReachCell) (b : SlotNew) : Option Witness :=
 Rank of every stored deducibility witness (neutral **and** intro).
 Proof-only `deps` lists the cells that must already be ranked; these may be
 richer than `Witness.cellParents` (e.g. product η → both components).
+
+`retrievable_witnessed`: `markHyp` / `recordHyp` never leave a bare retrievable
+slot, so `simplyDeducible` always implies a ranked witness under this cert.
 -/
 structure ReachRankCert {n : Nat} (σ : ReachState n) where
   rank : Nat → SlotNew → Option Nat
@@ -285,6 +350,11 @@ structure ReachRankCert {n : Nat} (σ : ReachState n) where
         ∀ p ∈ deps i b,
           ∃ (bP : SlotNew) (rP : Nat),
             rank p bP = some rP ∧ rP < r
+  retrievable_witnessed :
+    ∀ (i : Nat),
+      (σ.getCell i).retrievable = true →
+        (σ.getCell i).oldWitness.isSome = true ∨
+          (σ.getCell i).newWitness.isSome = true
 
 /-- Preferred-slot rank via `neutralWitness` (new neutral, else old neutral). -/
 def ReachRankCert.rankOfPreferred {n : Nat} {σ : ReachState n}
@@ -296,7 +366,8 @@ def ReachRankCert.rankOfPreferred {n : Nat} {σ : ReachState n}
 
 /-- Empty certificate when no witnesses are stored. -/
 def ReachRankCert.empty {n : Nat} (σ : ReachState n)
-    (h : ∀ i, (σ.getCell i).oldWitness = none ∧ (σ.getCell i).newWitness = none) :
+    (h : ∀ i, (σ.getCell i).oldWitness = none ∧ (σ.getCell i).newWitness = none)
+    (hret : ∀ i, (σ.getCell i).retrievable = false) :
     ReachRankCert σ where
   rank := fun _ _ => none
   deps := fun _ _ => []
@@ -309,6 +380,10 @@ def ReachRankCert.empty {n : Nat} (σ : ReachState n)
     intro i b r hr
     have ⟨ho, hn⟩ := h i
     cases b <;> simp [hr] at *
+  retrievable_witnessed := by
+    intro i hr
+    rw [hret i] at hr
+    cases hr
 
 /-! ## Certified reachability result -/
 
@@ -431,6 +506,91 @@ theorem ParentsCertified_sndType_of_neutral {n : Nat} {σ : ReachState n}
   cases hp
   exact cert.ranked_of_neutral ti hNeu
 
+/-- `simplyDeducible` implies a ranked witness under a sound certificate. -/
+theorem ReachRankCert.ranked_of_simplyDeducible {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat)
+    (h : (σ.getCell i).simplyDeducible = true) :
+    ∃ (b : SlotNew) (r : Nat), cert.rank i b = some r := by
+  have ranked_of_isSome (b : SlotNew)
+      (hs : ((σ.getCell i).slotWitness b).isSome = true) :
+      ∃ r, cert.rank i b = some r := by
+    have hrs : (cert.rank i b).isSome = true := by
+      simpa [hs] using (cert.rank_iff i b).symm
+    cases hr : cert.rank i b with
+    | none => simp [hr] at hrs
+    | some r => exact ⟨r, rfl⟩
+  match hr : (σ.getCell i).retrievable,
+        ho : (σ.getCell i).oldWitness.isSome,
+        hn : (σ.getCell i).newWitness.isSome with
+  | true, _, _ =>
+      rcases cert.retrievable_witnessed i hr with hOld | hNew
+      · obtain ⟨r, hrk⟩ := ranked_of_isSome false (by simpa [ReachCell.slotWitness] using hOld)
+        exact ⟨false, r, hrk⟩
+      · obtain ⟨r, hrk⟩ := ranked_of_isSome true (by simpa [ReachCell.slotWitness] using hNew)
+        exact ⟨true, r, hrk⟩
+  | false, true, _ =>
+      obtain ⟨r, hrk⟩ := ranked_of_isSome false (by simpa [ReachCell.slotWitness] using ho)
+      exact ⟨false, r, hrk⟩
+  | false, false, true =>
+      obtain ⟨r, hrk⟩ := ranked_of_isSome true (by simpa [ReachCell.slotWitness] using hn)
+      exact ⟨true, r, hrk⟩
+  | false, false, false =>
+      simp [ReachCell.simplyDeducible, hr, ho, hn] at h
+
+theorem ReachRankCert.ranked_of_oldDeducible {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat)
+    (h : (σ.getCell i).oldDeducible = true) :
+    ∃ (r : Nat), cert.rank i false = some r := by
+  have hs : ((σ.getCell i).slotWitness false).isSome = true := by
+    simpa [ReachCell.oldDeducible, ReachCell.slotWitness] using h
+  have hrs : (cert.rank i false).isSome = true := by
+    simpa [hs] using (cert.rank_iff i false).symm
+  cases hr : cert.rank i false with
+  | none => simp [hr] at hrs
+  | some r => exact ⟨r, rfl⟩
+
+theorem RankedParents.singleton {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p : Nat)
+    (hp : ∃ (b : SlotNew) (r : Nat), cert.rank p b = some r) :
+    RankedParents cert [p] := by
+  intro q hq
+  simp only [List.mem_singleton] at hq
+  subst hq
+  exact hp
+
+theorem RankedParents.pair {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p q : Nat)
+    (hp : ∃ (b : SlotNew) (r : Nat), cert.rank p b = some r)
+    (hq : ∃ (b : SlotNew) (r : Nat), cert.rank q b = some r) :
+    RankedParents cert [p, q] := by
+  intro r hr
+  have : r = p ∨ r = q := by
+    simpa [List.mem_cons, List.mem_nil_iff] using hr
+  rcases this with rfl | rfl
+  · exact hp
+  · exact hq
+
+theorem RankedParents.singleton_of_simplyDeducible {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p : Nat)
+    (hp : (σ.getCell p).simplyDeducible = true) :
+    RankedParents cert [p] :=
+  RankedParents.singleton cert p (cert.ranked_of_simplyDeducible p hp)
+
+theorem RankedParents.pair_of_simplyDeducible {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p q : Nat)
+    (hp : (σ.getCell p).simplyDeducible = true)
+    (hq : (σ.getCell q).simplyDeducible = true) :
+    RankedParents cert [p, q] :=
+  RankedParents.pair cert p q
+    (cert.ranked_of_simplyDeducible p hp)
+    (cert.ranked_of_simplyDeducible q hq)
+
+theorem RankedParents.singleton_of_neutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p : Nat)
+    (hNeu : (σ.getCell p).oldNeutral = true ∨ (σ.getCell p).newNeutral = true) :
+    RankedParents cert [p] :=
+  RankedParents.singleton cert p (cert.ranked_of_neutral p hNeu)
+
 /-- Strict upper bound: max of `(slotRank + 1)` over both slots of every parent. -/
 def RankedParents.freshRank {n : Nat} {σ : ReachState n}
     {cert : ReachRankCert σ} {ps : List Nat}
@@ -536,6 +696,13 @@ theorem ReachCell.slotWitness_recordHyp (c : ReachCell) (b : SlotNew) (w : Witne
     (c.recordHyp b w).slotWitness b' = (c.record b w).slotWitness b' := by
   cases b' <;> simp [ReachCell.recordHyp, ReachCell.slotWitness]
 
+/-- `record` always occupies the targeted provenance slot. -/
+theorem ReachCell.slotWitness_record_isSome (c : ReachCell) (b : SlotNew) (w : Witness) :
+    ((c.record b w).slotWitness b).isSome = true := by
+  cases b
+  · cases ho : c.oldWitness <;> simp [ReachCell.slotWitness, ReachCell.record, ho]
+  · cases hn : c.newWitness <;> simp [ReachCell.slotWitness, ReachCell.record, hn]
+
 def ReachRankCert.castState {n : Nat} {σ τ : ReachState n}
     (h : σ = τ) (cert : ReachRankCert σ) : ReachRankCert τ :=
   h ▸ cert
@@ -636,6 +803,22 @@ def ReachRankCert.extendFresh {n : Nat} {σ : ReachState n}
         rw [hfresh, hrP] at hiff
         cases hiff
       rw [if_neg hne]; exact hrP
+  retrievable_witnessed := by
+    intro j hr
+    by_cases hj : j = i
+    · have hji : i = j := hj.symm; subst hji
+      -- Fresh record into `b` occupies that slot.
+      cases b
+      · left
+        have ho : (σ.getCell i).oldWitness = none := by
+          simpa [ReachCell.slotWitness] using hfresh
+        simp [ReachState.getCell_setCell_self hi, ReachCell.record, ho]
+      · right
+        have hn : (σ.getCell i).newWitness = none := by
+          simpa [ReachCell.slotWitness] using hfresh
+        simp [ReachState.getCell_setCell_self hi, ReachCell.record, hn]
+    · rw [ReachState.getCell_setCell_ne (Ne.symm hj)] at hr ⊢
+      exact cert.retrievable_witnessed j hr
 
 /-- Unified extend: occupied is a no-op; fresh records `deps` and a new rank. -/
 def ReachRankCert.extend {n : Nat} {σ : ReachState n}
@@ -666,24 +849,72 @@ def ReachRankCert.ofMarkInconsistentIf {n : Nat} {σ : ReachState n}
   parents_lt := by
     intro i b r hr p hp
     exact cert.parents_lt i b r hr p hp
+  retrievable_witnessed := by
+    intro i hr
+    rw [ReachState.getCell_markInconsistentIf] at hr ⊢
+    exact cert.retrievable_witnessed i hr
 
-/-- Certificate depends only on witness slots, not `retrievable`. -/
-def ReachRankCert.ofSameSlots {n : Nat} {σ τ : ReachState n}
-    (cert : ReachRankCert σ)
-    (h : ∀ i b, (τ.getCell i).slotWitness b = (σ.getCell i).slotWitness b) :
-    ReachRankCert τ where
+/-- Lift cert across `record` → `recordHyp` (slots identical; retrievable may become true). -/
+def ReachRankCert.ofRecordHyp {n : Nat} {σ : ReachState n} {i : Nat} {b : SlotNew}
+    {w : Witness}
+    (cert : ReachRankCert (σ.setCell i ((σ.getCell i).record b w)))
+    (hi : i < σ.cells.size) :
+    ReachRankCert (σ.setCell i ((σ.getCell i).recordHyp b w)) where
   rank := cert.rank
   deps := cert.deps
   rank_iff := by
-    intro i b
-    rw [h i b]
-    exact cert.rank_iff i b
+    intro j b'
+    have hslots :
+        ((σ.setCell i ((σ.getCell i).recordHyp b w)).getCell j).slotWitness b' =
+          ((σ.setCell i ((σ.getCell i).record b w)).getCell j).slotWitness b' := by
+      by_cases hj : j = i
+      · subst hj
+        rw [ReachState.getCell_setCell_self hi, ReachState.getCell_setCell_self hi]
+        exact ReachCell.slotWitness_recordHyp _ b w b'
+      · rw [ReachState.getCell_setCell_ne (Ne.symm hj),
+          ReachState.getCell_setCell_ne (Ne.symm hj)]
+    rw [hslots]
+    exact cert.rank_iff j b'
   deps_none := by
-    intro i b hnone
-    exact cert.deps_none i b (by simpa [h i b] using hnone)
+    intro j b' hnone
+    have hslots :
+        ((σ.setCell i ((σ.getCell i).recordHyp b w)).getCell j).slotWitness b' =
+          ((σ.setCell i ((σ.getCell i).record b w)).getCell j).slotWitness b' := by
+      by_cases hj : j = i
+      · subst hj
+        rw [ReachState.getCell_setCell_self hi, ReachState.getCell_setCell_self hi]
+        exact ReachCell.slotWitness_recordHyp _ b w b'
+      · rw [ReachState.getCell_setCell_ne (Ne.symm hj),
+          ReachState.getCell_setCell_ne (Ne.symm hj)]
+    exact cert.deps_none j b' (hslots ▸ hnone)
   parents_lt := by
-    intro i b r hr p hp
-    exact cert.parents_lt i b r hr p hp
+    intro j b' r hr p hp
+    exact cert.parents_lt j b' r hr p hp
+  retrievable_witnessed := by
+    intro j hr
+    by_cases hj : j = i
+    · have hji : i = j := hj.symm; subst hji
+      rw [ReachState.getCell_setCell_self hi]
+      have hsome :
+          (((σ.getCell i).record b w).slotWitness b).isSome = true :=
+        ReachCell.slotWitness_record_isSome _ b w
+      have hslot :
+          ((σ.getCell i).recordHyp b w).slotWitness b =
+            ((σ.getCell i).record b w).slotWitness b :=
+        ReachCell.slotWitness_recordHyp _ b w b
+      cases b
+      · left
+        simpa [ReachCell.slotWitness, hslot] using hsome
+      · right
+        simpa [ReachCell.slotWitness, hslot] using hsome
+    · rw [ReachState.getCell_setCell_ne (Ne.symm hj)] at hr ⊢
+      -- Other cells match the `record` state, which cert already covers.
+      have hr' :
+          ((σ.setCell i ((σ.getCell i).record b w)).getCell j).retrievable = true := by
+        rwa [ReachState.getCell_setCell_ne (Ne.symm hj)]
+      have hit := cert.retrievable_witnessed j hr'
+      rw [ReachState.getCell_setCell_ne (Ne.symm hj)] at hit
+      exact hit
 
 theorem ReachRankCert.castState_rank {n : Nat} {σ τ : ReachState n}
     (h : σ = τ) (cert : ReachRankCert σ) :
@@ -860,24 +1091,12 @@ def certifiedMarkHyp {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
           if hi : i < σ.cells.size then
             let b := Γ.isNew hypIdx
             let w : Witness := .ctxVar hypIdx
-            let deps : List Nat := []
+            let deps : List Nat := RuleDeps.hypProj
             let hpar : RankedParents cert deps := RankedParents_nil cert
-            let σRec := σ.setCell i ((σ.getCell i).record b w)
             let σHyp := σ.setCell i ((σ.getCell i).recordHyp b w)
             let certRec := ReachRankCert.extend cert i b w deps hi hpar
-            have hslots :
-                ∀ j b', (σHyp.getCell j).slotWitness b' =
-                  (σRec.getCell j).slotWitness b' := by
-              intro j b'
-              by_cases hj : j = i
-              · subst hj
-                rw [ReachState.getCell_setCell_self hi,
-                  ReachState.getCell_setCell_self hi]
-                exact ReachCell.slotWitness_recordHyp _ b w b'
-              · rw [ReachState.getCell_setCell_ne (Ne.symm hj),
-                  ReachState.getCell_setCell_ne (Ne.symm hj)]
             ⟨σHyp.markInconsistentIf A,
-              (certRec.ofSameSlots hslots).ofMarkInconsistentIf A⟩
+              (certRec.ofRecordHyp hi).ofMarkInconsistentIf A⟩
           else
             ⟨σ.markInconsistentIf A, cert.ofMarkInconsistentIf A⟩
 
@@ -896,26 +1115,772 @@ theorem certifiedMarkHyp_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
           · next hi =>
               simp [hA, hiIdx, ReachState.setCell, dif_neg hi]
 
+theorem RankedParents.of_certifiedDiscoverDual {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (oldOk newOk : Bool) (w : Witness)
+    (deps : List Nat)
+    (h : (oldOk = true ∨ newOk = true) → RankedParents cert deps)
+    (ps : List Nat) (hp : RankedParents cert ps) :
+    RankedParents (certifiedDiscoverDual σ cert i oldOk newOk w deps h).cert ps := by
+  cases oldOk <;> cases newOk
+  · exact hp
+  · exact RankedParents.of_certifiedDiscover σ cert i true w deps (h (Or.inr rfl)) ps hp
+  · exact RankedParents.of_certifiedDiscover σ cert i false w deps (h (Or.inl rfl)) ps hp
+  · have h₀ := h (Or.inl rfl)
+    exact RankedParents.of_certifiedDiscover
+      (certifiedDiscover σ cert i false w deps h₀).state
+      (certifiedDiscover σ cert i false w deps h₀).cert i true w deps
+      (RankedParents.of_certifiedDiscover σ cert i false w deps h₀ deps h₀) ps
+      (RankedParents.of_certifiedDiscover σ cert i false w deps h₀ ps hp)
+
+theorem CertifiedReachResult.project_ite {n : Nat} (b : Bool)
+    (c₁ c₂ : CertifiedReachResult n) :
+    (if b then c₁ else c₂).project = if b then c₁.project else c₂.project := by
+  cases b <;> rfl
+
+/-! ## Certified forward-chaining rules
+
+Each wrapper mirrors the computational rule's control flow and records deps from
+`RuleDeps`. A slot may fire only when `RankedParents` holds for **that**
+derivation's dependency list — otherwise the certified term is uninhabited.
+-/
+
+private theorem bool_and_left {a b : Bool} (h : (a && b) = true) : a = true := by
+  cases a <;> cases b <;> simp_all
+
+private theorem bool_and_right {a b : Bool} (h : (a && b) = true) : b = true := by
+  cases a <;> cases b <;> simp_all
+
+private theorem simplyDeducible_of_oldDeducible (c : ReachCell)
+    (h : c.oldDeducible = true) : c.simplyDeducible = true := by
+  simp only [ReachCell.simplyDeducible, ReachCell.oldDeducible] at h ⊢
+  simp [h]
+
+def certifiedSeedHypRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) : CertifiedReachResult n :=
+  match Γ.hyps[i]? with
+  | some A =>
+      if objectPolarity A == .pos then certifiedMarkHyp Γ σ cert i else ⟨σ, cert⟩
+  | none => ⟨σ, cert⟩
+
+theorem certifiedSeedHypRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) :
+    (certifiedSeedHypRule Γ σ cert i).project = seedHypRule Γ σ i := by
+  unfold certifiedSeedHypRule seedHypRule
+  cases Γ.hyps[i]? with
+  | none => rfl
+  | some A =>
+      cases hpol : (objectPolarity A == Polarity.pos) with
+      | false => simp [hpol, CertifiedReachResult.project]
+      | true =>
+          simp only [hpol, ↓reduceIte]
+          exact certifiedMarkHyp_project Γ σ cert i
+
+def certifiedUnitEtaRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx (.unit : Object n) with
+  | some uIdx =>
+      certifiedDiscover σ cert uIdx false .unit RuleDeps.unit (RankedParents_nil cert)
+  | none => ⟨σ, cert⟩
+
+theorem certifiedUnitEtaRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) :
+    (certifiedUnitEtaRule σ cert).project = unitEtaRule σ := by
+  unfold certifiedUnitEtaRule unitEtaRule
+  cases σ.findTypeIdx (.unit : Object n) with
+  | none => rfl
+  | some uIdx =>
+      exact certifiedDiscover_project σ cert uIdx false .unit RuleDeps.unit
+        (RankedParents_nil cert)
+
+def certifiedHypProdRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (L R : Object n) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx (.prod L R), σ.findTypeIdx L, σ.findTypeIdx R with
+  | some _pIdx, some lIdx, some rIdx =>
+      let c₁ := certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+        RuleDeps.hypProj (RankedParents_nil cert)
+      certifiedDiscover c₁.state c₁.cert rIdx (Γ.isNew i) (.sndHyp i)
+        RuleDeps.hypProj
+        (RankedParents.of_certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+          RuleDeps.hypProj (RankedParents_nil cert) RuleDeps.hypProj
+          (RankedParents_nil cert))
+  | _, _, _ => ⟨σ, cert⟩
+
+theorem certifiedHypProdRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (L R : Object n) :
+    (certifiedHypProdRule Γ σ cert i L R).project = hypProdRule Γ σ i L R := by
+  unfold certifiedHypProdRule hypProdRule
+  cases hP : σ.findTypeIdx (.prod L R) with
+  | none => simp [hP, CertifiedReachResult.project]
+  | some pIdx =>
+    cases hL : σ.findTypeIdx L with
+    | none => simp [hP, hL, CertifiedReachResult.project]
+    | some lIdx =>
+      cases hR : σ.findTypeIdx R with
+      | none => simp [hP, hL, hR, CertifiedReachResult.project]
+      | some rIdx =>
+          simp only [hP, hL, hR]
+          have h₁ := certifiedDiscover_project σ cert lIdx (Γ.isNew i) (.fstHyp i)
+            RuleDeps.hypProj (RankedParents_nil cert)
+          have h₂ := certifiedDiscover_project
+            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+              RuleDeps.hypProj (RankedParents_nil cert)).state
+            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+              RuleDeps.hypProj (RankedParents_nil cert)).cert
+            rIdx (Γ.isNew i) (.sndHyp i) RuleDeps.hypProj
+            (RankedParents.of_certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+              RuleDeps.hypProj (RankedParents_nil cert) RuleDeps.hypProj
+              (RankedParents_nil cert))
+          simp only [CertifiedReachResult.project] at h₁ h₂ ⊢
+          rw [h₂, h₁]
+
+def certifiedHypAppRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (Arg Ret : Object n) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+  | some aIdx, some rIdx =>
+      certifiedDiscoverDual σ cert rIdx
+        ((σ.getCell aIdx).oldDeducible && !Γ.isNew i)
+        ((σ.getCell aIdx).simplyDeducible &&
+          ((σ.getCell aIdx).usesNew || Γ.isNew i))
+        (.app i aIdx) (RuleDeps.hypApp aIdx)
+        (fun hfire => by
+          have hsimp : (σ.getCell aIdx).simplyDeducible = true := by
+            cases hfire with
+            | inl ho =>
+              exact simplyDeducible_of_oldDeducible _
+                (bool_and_left ho)
+            | inr hn =>
+              exact bool_and_left hn
+          exact RankedParents.singleton_of_simplyDeducible cert aIdx hsimp)
+  | _, _ => ⟨σ, cert⟩
+
+theorem certifiedHypAppRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (Arg Ret : Object n) :
+    (certifiedHypAppRule Γ σ cert i Arg Ret).project = hypAppRule Γ σ i Arg Ret := by
+  unfold certifiedHypAppRule hypAppRule
+  cases ha : σ.findTypeIdx Arg with
+  | none => simp [ha, CertifiedReachResult.project]
+  | some aIdx =>
+    cases hr : σ.findTypeIdx Ret with
+    | none => simp [ha, hr, CertifiedReachResult.project]
+    | some rIdx =>
+        simp only [ha, hr]
+        exact certifiedDiscoverDual_project σ cert rIdx
+          ((σ.getCell aIdx).oldDeducible && !Γ.isNew i)
+          ((σ.getCell aIdx).simplyDeducible &&
+            ((σ.getCell aIdx).usesNew || Γ.isNew i))
+          (.app i aIdx) (RuleDeps.hypApp aIdx) _
+
+def certifiedHypRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) : CertifiedReachResult n :=
+  match Γ.hyps[i]? with
+  | some (.prod L R) => certifiedHypProdRule Γ σ cert i L R
+  | some (.exp Arg Ret) => certifiedHypAppRule Γ σ cert i Arg Ret
+  | _ => ⟨σ, cert⟩
+
+theorem certifiedHypRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) :
+    (certifiedHypRule Γ σ cert i).project = hypRule Γ σ i := by
+  unfold certifiedHypRule hypRule
+  cases Γ.hyps[i]? with
+  | none => rfl
+  | some A =>
+      cases A with
+      | prod L R => exact certifiedHypProdRule_project Γ σ cert i L R
+      | exp Arg Ret => exact certifiedHypAppRule_project Γ σ cert i Arg Ret
+      | _ => rfl
+
+/-- Relate proof-carrying `dite` on a `Bool` to computational `ite`. -/
+theorem CertifiedReachResult.project_dite_bool {n : Nat} (b : Bool)
+    (t : b = true → CertifiedReachResult n) (e : CertifiedReachResult n)
+    (sT sE : ReachState n)
+    (ht : ∀ (h : b = true), (t h).project = sT)
+    (he : e.project = sE) :
+    (if h : b = true then t h else e).project = (if b then sT else sE) := by
+  cases b with
+  | false => simpa using he
+  | true => simpa using ht rfl
+
+/-- Computational core shared with `prodTypeRule` after index resolution. -/
+def prodTypeRule.core {n : Nat} (σ : ReachState n) (ti lIdx rIdx : Nat) : ReachState n :=
+  let σ₁ :=
+    (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
+      (.fstType ti)).discoverDual
+      rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+  if (σ.getCell ti).simplyDeducible then σ₁
+  else if (σ₁.getCell lIdx).simplyDeducible && (σ₁.getCell rIdx).simplyDeducible then
+    σ₁.discoverDual ti
+      ((σ₁.getCell lIdx).oldDeducible && (σ₁.getCell rIdx).oldDeducible)
+      ((σ₁.getCell lIdx).usesNew || (σ₁.getCell rIdx).usesNew)
+      .eta
+  else σ₁
+
+theorem prodTypeRule_eq_core {n : Nat} (σ : ReachState n) (ti : Nat) (L R : Object n)
+    {lIdx rIdx : Nat}
+    (hl : σ.findTypeIdx L = some lIdx) (hr : σ.findTypeIdx R = some rIdx) :
+    prodTypeRule σ ti L R = prodTypeRule.core σ ti lIdx rIdx := by
+  unfold prodTypeRule prodTypeRule.core
+  simp only [hl, hr]
+  cases (σ.getCell ti).simplyDeducible <;> rfl
+
+def certifiedProdTypeRule.go {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti lIdx rIdx : Nat) : CertifiedReachResult n :=
+  let c₁ := certifiedDiscoverDual σ cert lIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+    (RuleDeps.typeProj ti)
+    (fun h => RankedParents.singleton_of_neutral cert ti h)
+  let c₂ := certifiedDiscoverDual c₁.state c₁.cert rIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+    (RuleDeps.typeProj ti)
+    (fun h =>
+      RankedParents.of_certifiedDiscoverDual σ cert lIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+        (RuleDeps.typeProj ti)
+        (fun h0 => RankedParents.singleton_of_neutral cert ti h0)
+        (RuleDeps.typeProj ti)
+        (RankedParents.singleton_of_neutral cert ti h))
+  if (σ.getCell ti).simplyDeducible then c₂
+  else if hcomp :
+      ((c₂.state.getCell lIdx).simplyDeducible &&
+        (c₂.state.getCell rIdx).simplyDeducible) = true then
+    certifiedDiscoverDual c₂.state c₂.cert ti
+      ((c₂.state.getCell lIdx).oldDeducible && (c₂.state.getCell rIdx).oldDeducible)
+      ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
+      .eta (RuleDeps.productEta lIdx rIdx)
+      (fun _ =>
+        RankedParents.pair_of_simplyDeducible c₂.cert lIdx rIdx
+          (bool_and_left hcomp) (bool_and_right hcomp))
+  else
+    c₂
+
+def certifiedProdTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (L R : Object n) : CertifiedReachResult n :=
+  match σ.findTypeIdx L, σ.findTypeIdx R with
+  | some lIdx, some rIdx => certifiedProdTypeRule.go σ cert ti lIdx rIdx
+  | _, _ => ⟨σ, cert⟩
+
+theorem certifiedProdTypeRule.go_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti lIdx rIdx : Nat) :
+    (certifiedProdTypeRule.go σ cert ti lIdx rIdx).project =
+      prodTypeRule.core σ ti lIdx rIdx := by
+  unfold certifiedProdTypeRule.go prodTypeRule.core
+  have h₁ := certifiedDiscoverDual_project σ cert lIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+    (RuleDeps.typeProj ti)
+    (fun h => RankedParents.singleton_of_neutral cert ti h)
+  set c₁ := certifiedDiscoverDual σ cert lIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+    (RuleDeps.typeProj ti)
+    (fun h => RankedParents.singleton_of_neutral cert ti h)
+  have h₂ := certifiedDiscoverDual_project c₁.state c₁.cert rIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+    (RuleDeps.typeProj ti)
+    (fun h =>
+      RankedParents.of_certifiedDiscoverDual σ cert lIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+        (RuleDeps.typeProj ti)
+        (fun h0 => RankedParents.singleton_of_neutral cert ti h0)
+        (RuleDeps.typeProj ti)
+        (RankedParents.singleton_of_neutral cert ti h))
+  set c₂ := certifiedDiscoverDual c₁.state c₁.cert rIdx
+    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+    (RuleDeps.typeProj ti)
+    (fun h =>
+      RankedParents.of_certifiedDiscoverDual σ cert lIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+        (RuleDeps.typeProj ti)
+        (fun h0 => RankedParents.singleton_of_neutral cert ti h0)
+        (RuleDeps.typeProj ti)
+        (RankedParents.singleton_of_neutral cert ti h))
+  have hσ₁ : c₂.project =
+      (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
+        (.fstType ti)).discoverDual
+        rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti) := by
+    simp only [CertifiedReachResult.project] at h₁ h₂ ⊢
+    rw [h₂, h₁]
+  cases hsd : (σ.getCell ti).simplyDeducible with
+  | true =>
+      simp only [hsd, ↓reduceIte, CertifiedReachResult.project]
+      exact hσ₁
+  | false =>
+      simp only [hsd, Bool.false_eq_true, ↓reduceIte]
+      refine Eq.trans
+        (CertifiedReachResult.project_dite_bool
+          ((c₂.state.getCell lIdx).simplyDeducible &&
+            (c₂.state.getCell rIdx).simplyDeducible)
+          (fun hcomp =>
+            certifiedDiscoverDual c₂.state c₂.cert ti
+              ((c₂.state.getCell lIdx).oldDeducible &&
+                (c₂.state.getCell rIdx).oldDeducible)
+              ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
+              .eta (RuleDeps.productEta lIdx rIdx)
+              (fun _ =>
+                RankedParents.pair_of_simplyDeducible c₂.cert lIdx rIdx
+                  (bool_and_left hcomp) (bool_and_right hcomp)))
+          c₂
+          (c₂.state.discoverDual ti
+            ((c₂.state.getCell lIdx).oldDeducible &&
+              (c₂.state.getCell rIdx).oldDeducible)
+            ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
+            .eta)
+          c₂.project
+          (fun hcomp =>
+            certifiedDiscoverDual_project c₂.state c₂.cert ti
+              ((c₂.state.getCell lIdx).oldDeducible &&
+                (c₂.state.getCell rIdx).oldDeducible)
+              ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
+              .eta (RuleDeps.productEta lIdx rIdx) _)
+          rfl) ?_
+      set σ₁ :=
+        (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
+          (.fstType ti)).discoverDual
+          rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+      have heq : c₂.state = σ₁ := hσ₁
+      cases hcomp :
+          ((c₂.state.getCell lIdx).simplyDeducible &&
+            (c₂.state.getCell rIdx).simplyDeducible) with
+      | false =>
+          simp only [hcomp, ↓reduceIte, heq]
+          have hcomp' :
+              ((σ₁.getCell lIdx).simplyDeducible &&
+                (σ₁.getCell rIdx).simplyDeducible) = false := by
+            simpa [← heq] using hcomp
+          simp only [hcomp', ↓reduceIte]
+          exact hσ₁
+      | true =>
+          simp only [hcomp, ↓reduceIte, heq]
+          have hcomp' :
+              ((σ₁.getCell lIdx).simplyDeducible &&
+                (σ₁.getCell rIdx).simplyDeducible) = true := by
+            simpa [← heq] using hcomp
+          simp only [hcomp', ↓reduceIte, heq]
+
+theorem certifiedProdTypeRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti : Nat) (L R : Object n) :
+    (certifiedProdTypeRule σ cert ti L R).project = prodTypeRule σ ti L R := by
+  unfold certifiedProdTypeRule
+  cases hl : σ.findTypeIdx L with
+  | none => simp [hl, prodTypeRule, CertifiedReachResult.project]
+  | some lIdx =>
+    cases hr : σ.findTypeIdx R with
+    | none => simp [hl, hr, prodTypeRule, CertifiedReachResult.project]
+    | some rIdx =>
+        simp only [hl, hr]
+        rw [certifiedProdTypeRule.go_project, prodTypeRule_eq_core σ ti L R hl hr]
+
+def certifiedExpEtaRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (Ret : Object n) : CertifiedReachResult n :=
+  if (σ.getCell ti).simplyDeducible then ⟨σ, cert⟩
+  else
+    match σ.findTypeIdx Ret with
+    | none => ⟨σ, cert⟩
+    | some rIdx =>
+        if hret : (σ.getCell rIdx).simplyDeducible = true then
+          certifiedDiscoverDual σ cert ti
+            (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew .eta
+            (RuleDeps.functionEta rIdx)
+            (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hret)
+        else
+          ⟨σ, cert⟩
+
+theorem certifiedExpEtaRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti : Nat) (Ret : Object n) :
+    (certifiedExpEtaRule σ cert ti Ret).project = expEtaRule σ ti Ret := by
+  simp only [certifiedExpEtaRule, expEtaRule]
+  cases (σ.getCell ti).simplyDeducible with
+  | true => simp [CertifiedReachResult.project]
+  | false =>
+      simp only [Bool.not_false, ↓reduceIte]
+      cases hr : σ.findTypeIdx Ret with
+      | none => simp [hr, CertifiedReachResult.project]
+      | some rIdx =>
+          simp only [hr]
+          exact CertifiedReachResult.project_dite_bool
+            (σ.getCell rIdx).simplyDeducible
+            (fun hret =>
+              certifiedDiscoverDual σ cert ti
+                (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew .eta
+                (RuleDeps.functionEta rIdx)
+                (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hret))
+            ⟨σ, cert⟩
+            (σ.discoverDual ti (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew .eta)
+            σ
+            (fun hret =>
+              certifiedDiscoverDual_project σ cert ti
+                (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew .eta
+                (RuleDeps.functionEta rIdx) _)
+            rfl
+
+def certifiedExpAppRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (Arg Ret : Object n) : CertifiedReachResult n :=
+  if hfn : (σ.getCell ti).simplyDeducible = true then
+    match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+    | some aIdx, some rIdx =>
+        if harg : (σ.getCell aIdx).simplyDeducible = true then
+          certifiedDiscoverDual σ cert rIdx
+            ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+            ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+            (.appTy ti aIdx) (RuleDeps.typeApp ti aIdx)
+            (fun _ => RankedParents.pair_of_simplyDeducible cert ti aIdx hfn harg)
+        else
+          ⟨σ, cert⟩
+    | _, _ => ⟨σ, cert⟩
+  else
+    ⟨σ, cert⟩
+
+theorem certifiedExpAppRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti : Nat) (Arg Ret : Object n) :
+    (certifiedExpAppRule σ cert ti Arg Ret).project = expAppRule σ ti Arg Ret := by
+  simp only [certifiedExpAppRule, expAppRule]
+  refine Eq.trans
+    (CertifiedReachResult.project_dite_bool
+      (σ.getCell ti).simplyDeducible
+      (fun hfn =>
+        match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+        | some aIdx, some rIdx =>
+            if harg : (σ.getCell aIdx).simplyDeducible = true then
+              certifiedDiscoverDual σ cert rIdx
+                ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+                ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+                (.appTy ti aIdx) (RuleDeps.typeApp ti aIdx)
+                (fun _ => RankedParents.pair_of_simplyDeducible cert ti aIdx hfn harg)
+            else ⟨σ, cert⟩
+        | _, _ => ⟨σ, cert⟩)
+      ⟨σ, cert⟩
+      (match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+       | some aIdx, some rIdx =>
+           if (σ.getCell aIdx).simplyDeducible then
+             σ.discoverDual rIdx
+               ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+               ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+               (.appTy ti aIdx)
+           else σ
+       | _, _ => σ)
+      σ
+      (fun hfn => by
+        cases ha : σ.findTypeIdx Arg with
+        | none => simp [ha, CertifiedReachResult.project]
+        | some aIdx =>
+          cases hr : σ.findTypeIdx Ret with
+          | none => simp [ha, hr, CertifiedReachResult.project]
+          | some rIdx =>
+              simp only [ha, hr]
+              exact CertifiedReachResult.project_dite_bool
+                (σ.getCell aIdx).simplyDeducible
+                (fun harg =>
+                  certifiedDiscoverDual σ cert rIdx
+                    ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+                    ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+                    (.appTy ti aIdx) (RuleDeps.typeApp ti aIdx)
+                    (fun _ =>
+                      RankedParents.pair_of_simplyDeducible cert ti aIdx hfn harg))
+                ⟨σ, cert⟩
+                (σ.discoverDual rIdx
+                  ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+                  ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+                  (.appTy ti aIdx))
+                σ
+                (fun harg =>
+                  certifiedDiscoverDual_project σ cert rIdx
+                    ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
+                    ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
+                    (.appTy ti aIdx) (RuleDeps.typeApp ti aIdx) _)
+                rfl)
+      rfl)
+    rfl
+
+def certifiedCoprodTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (L R : Object n) : CertifiedReachResult n :=
+  if (σ.getCell ti).simplyDeducible then ⟨σ, cert⟩
+  else
+    match σ.findTypeIdx L, σ.findTypeIdx R with
+    | some lIdx, some rIdx =>
+        if hL : (σ.getCell lIdx).simplyDeducible = true then
+          certifiedDiscoverDual σ cert ti
+            (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+            (.inl lIdx) (RuleDeps.coprodIntro lIdx)
+            (fun _ => RankedParents.singleton_of_simplyDeducible cert lIdx hL)
+        else if hR : (σ.getCell rIdx).simplyDeducible = true then
+          certifiedDiscoverDual σ cert ti
+            (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+            (.inr rIdx) (RuleDeps.coprodIntro rIdx)
+            (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hR)
+        else
+          ⟨σ, cert⟩
+    | _, _ => ⟨σ, cert⟩
+
+theorem certifiedCoprodTypeRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti : Nat) (L R : Object n) :
+    (certifiedCoprodTypeRule σ cert ti L R).project = coprodTypeRule σ ti L R := by
+  simp only [certifiedCoprodTypeRule, coprodTypeRule]
+  cases (σ.getCell ti).simplyDeducible with
+  | true => simp [CertifiedReachResult.project]
+  | false =>
+      simp only [Bool.not_false, ↓reduceIte]
+      cases hl : σ.findTypeIdx L with
+      | none => simp [hl, CertifiedReachResult.project]
+      | some lIdx =>
+        cases hr : σ.findTypeIdx R with
+        | none => simp [hl, hr, CertifiedReachResult.project]
+        | some rIdx =>
+            simp only [hl, hr]
+            refine Eq.trans
+              (CertifiedReachResult.project_dite_bool
+                (σ.getCell lIdx).simplyDeducible
+                (fun hL =>
+                  certifiedDiscoverDual σ cert ti
+                    (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+                    (.inl lIdx) (RuleDeps.coprodIntro lIdx)
+                    (fun _ => RankedParents.singleton_of_simplyDeducible cert lIdx hL))
+                (if hR : (σ.getCell rIdx).simplyDeducible = true then
+                  certifiedDiscoverDual σ cert ti
+                    (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+                    (.inr rIdx) (RuleDeps.coprodIntro rIdx)
+                    (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hR)
+                 else ⟨σ, cert⟩)
+                (σ.discoverDual ti (σ.getCell lIdx).oldDeducible
+                  (σ.getCell lIdx).usesNew (.inl lIdx))
+                (if (σ.getCell rIdx).simplyDeducible then
+                  σ.discoverDual ti (σ.getCell rIdx).oldDeducible
+                    (σ.getCell rIdx).usesNew (.inr rIdx)
+                 else σ)
+                (fun hL =>
+                  certifiedDiscoverDual_project σ cert ti
+                    (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+                    (.inl lIdx) (RuleDeps.coprodIntro lIdx) _)
+                (CertifiedReachResult.project_dite_bool
+                  (σ.getCell rIdx).simplyDeducible
+                  (fun hR =>
+                    certifiedDiscoverDual σ cert ti
+                      (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+                      (.inr rIdx) (RuleDeps.coprodIntro rIdx)
+                      (fun _ =>
+                        RankedParents.singleton_of_simplyDeducible cert rIdx hR))
+                  ⟨σ, cert⟩
+                  (σ.discoverDual ti (σ.getCell rIdx).oldDeducible
+                    (σ.getCell rIdx).usesNew (.inr rIdx))
+                  σ
+                  (fun hR =>
+                    certifiedDiscoverDual_project σ cert ti
+                      (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+                      (.inr rIdx) (RuleDeps.coprodIntro rIdx) _)
+                  rfl))
+              rfl
+
+def certifiedTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) : CertifiedReachResult n :=
+  match σ.typeAt ti with
+  | some (.prod L R) => certifiedProdTypeRule σ cert ti L R
+  | some (.exp Arg Ret) =>
+      let c₁ := certifiedExpEtaRule σ cert ti Ret
+      certifiedExpAppRule c₁.state c₁.cert ti Arg Ret
+  | some (.coprod L R) => certifiedCoprodTypeRule σ cert ti L R
+  | _ => ⟨σ, cert⟩
+
+theorem certifiedTypeRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (ti : Nat) :
+    (certifiedTypeRule σ cert ti).project = typeRule σ ti := by
+  unfold certifiedTypeRule typeRule
+  cases hA : σ.typeAt ti with
+  | none => rfl
+  | some A =>
+      cases A with
+      | prod L R => exact certifiedProdTypeRule_project σ cert ti L R
+      | exp Arg Ret =>
+          have h₁ := certifiedExpEtaRule_project σ cert ti Ret
+          have h₂ := certifiedExpAppRule_project
+            (certifiedExpEtaRule σ cert ti Ret).state
+            (certifiedExpEtaRule σ cert ti Ret).cert ti Arg Ret
+          simp only [CertifiedReachResult.project] at h₁ h₂ ⊢
+          rw [h₂, h₁]
+      | coprod L R => exact certifiedCoprodTypeRule_project σ cert ti L R
+      | _ => rfl
+
+/-! ## Certified sweep / step / runner -/
+
+def certifiedFoldl {n : Nat} {α : Type}
+    (f : CertifiedReachResult n → α → CertifiedReachResult n)
+    (l : List α) (c : CertifiedReachResult n) : CertifiedReachResult n :=
+  l.foldl f c
+
+theorem certifiedFoldl_project {n : Nat} {α : Type}
+    (f : CertifiedReachResult n → α → CertifiedReachResult n)
+    (g : ReachState n → α → ReachState n)
+    (hg : ∀ (c : CertifiedReachResult n) (a : α), (f c a).project = g c.project a)
+    (l : List α) (c : CertifiedReachResult n) :
+    (certifiedFoldl f l c).project = l.foldl g c.project := by
+  induction l generalizing c with
+  | nil => rfl
+  | cons a rest ih =>
+      simp only [certifiedFoldl, List.foldl]
+      rw [← hg c a]
+      exact ih (f c a)
+
+def certifiedReachSweep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) : CertifiedReachResult n :=
+  let c0 : CertifiedReachResult n := ⟨σ, cert⟩
+  let cSeed := certifiedFoldl
+    (fun c i => certifiedSeedHypRule Γ c.state c.cert i) (List.range Γ.hyps.size) c0
+  let cUnit := certifiedUnitEtaRule cSeed.state cSeed.cert
+  certifiedFoldl (fun c i => certifiedHypRule Γ c.state c.cert i)
+    (List.range Γ.hyps.size) cUnit
+
+theorem certifiedReachSweep_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) :
+    (certifiedReachSweep Γ σ cert).project = reachSweep Γ σ := by
+  unfold certifiedReachSweep reachSweep
+  have hSeed := certifiedFoldl_project
+    (fun c i => certifiedSeedHypRule Γ c.state c.cert i) (seedHypRule Γ)
+    (fun c i => certifiedSeedHypRule_project Γ c.state c.cert i)
+    (List.range Γ.hyps.size) (⟨σ, cert⟩ : CertifiedReachResult n)
+  set cSeed := certifiedFoldl
+    (fun c i => certifiedSeedHypRule Γ c.state c.cert i) (List.range Γ.hyps.size)
+    (⟨σ, cert⟩ : CertifiedReachResult n)
+  have hUnit := certifiedUnitEtaRule_project cSeed.state cSeed.cert
+  set cUnit := certifiedUnitEtaRule cSeed.state cSeed.cert
+  have hHyp := certifiedFoldl_project
+    (fun c i => certifiedHypRule Γ c.state c.cert i) (hypRule Γ)
+    (fun c i => certifiedHypRule_project Γ c.state c.cert i)
+    (List.range Γ.hyps.size) cUnit
+  simp only [CertifiedReachResult.project] at hSeed hUnit hHyp ⊢
+  rw [hHyp, hUnit, hSeed]
+
+def certifiedReachStep {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) : CertifiedReachResult n :=
+  let cSweep := certifiedReachSweep Γ σ cert
+  certifiedFoldl (fun c ti => certifiedTypeRule c.state c.cert ti)
+    (List.range cSweep.state.types.size) cSweep
+
+theorem certifiedReachStep_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) :
+    (certifiedReachStep Γ σ cert).project = reachStep Γ σ := by
+  unfold certifiedReachStep reachStep
+  have hSweep := certifiedReachSweep_project Γ σ cert
+  set cSweep := certifiedReachSweep Γ σ cert
+  have hsize : cSweep.state.types.size = (reachSweep Γ σ).types.size := by
+    simp only [← hSweep, CertifiedReachResult.project]
+  have hType := certifiedFoldl_project
+    (fun c ti => certifiedTypeRule c.state c.cert ti) typeRule
+    (fun c ti => certifiedTypeRule_project c.state c.cert ti)
+    (List.range cSweep.state.types.size) cSweep
+  simp only [CertifiedReachResult.project] at hSweep hType ⊢
+  rw [hType, hsize, hSweep]
+
+/-- Empty certificate for a freshly allocated cell table. -/
+def ReachRankCert.emptyTable {n : Nat} (types : Array (Object n)) :
+    ReachRankCert
+      ({ types := types
+         cells := Array.replicate types.size ReachCell.empty
+         inconsistent := false } : ReachState n) :=
+  ReachRankCert.empty _
+    (fun i => by
+      simp only [ReachState.getCell, Array.getElem?_replicate]
+      split_ifs <;> simp [Option.getD, ReachCell.empty])
+    (fun i => by
+      simp only [ReachState.getCell, Array.getElem?_replicate]
+      split_ifs <;> simp [Option.getD, ReachCell.empty])
+
+def certifiedMkReachState {n : Nat} (Γ : ReachCtx n) (goal : Object n) :
+    CertifiedReachResult n :=
+  let types := subformulaClosure (Γ.roots goal)
+  let σ0 : ReachState n :=
+    { types := types
+      cells := Array.replicate types.size ReachCell.empty
+      inconsistent := false }
+  certifiedFoldl (fun c i => certifiedSeedHypRule Γ c.state c.cert i)
+    (List.range Γ.hyps.size) ⟨σ0, ReachRankCert.emptyTable types⟩
+
+theorem certifiedMkReachState_project {n : Nat} (Γ : ReachCtx n) (goal : Object n) :
+    (certifiedMkReachState Γ goal).project = mkReachState Γ goal := by
+  unfold certifiedMkReachState mkReachState
+  exact certifiedFoldl_project
+    (fun c i => certifiedSeedHypRule Γ c.state c.cert i) (seedHypRule Γ)
+    (fun c i => certifiedSeedHypRule_project Γ c.state c.cert i) _ _
+
+def certifiedRunReachabilityFrom {n : Nat} (Γ : ReachCtx n)
+    (c : CertifiedReachResult n) : CertifiedReachResult n :=
+  if c.state.weight < (certifiedReachStep Γ c.state c.cert).state.weight then
+    certifiedRunReachabilityFrom Γ (certifiedReachStep Γ c.state c.cert)
+  else
+    certifiedReachStep Γ c.state c.cert
+termination_by c.state.capacity - c.state.weight
+decreasing_by
+  rename_i hlt
+  have hproj := certifiedReachStep_project Γ c.state c.cert
+  have hcap :
+      (certifiedReachStep Γ c.state c.cert).state.capacity = c.state.capacity := by
+    have hs := (reachStep_le Γ c.state).size
+    simp only [ReachState.capacity]
+    have : (certifiedReachStep Γ c.state c.cert).state.cells.size = c.state.cells.size := by
+      change (certifiedReachStep Γ c.state c.cert).project.cells.size = c.state.cells.size
+      rw [hproj]; exact hs.symm
+    simp [this]
+  have hbound :=
+    ReachState.weight_le_capacity (certifiedReachStep Γ c.state c.cert).state
+  omega
+
+theorem certifiedRunReachabilityFrom_project {n : Nat} (Γ : ReachCtx n)
+    (c : CertifiedReachResult n) :
+    (certifiedRunReachabilityFrom Γ c).project =
+      runReachabilityFrom Γ c.project := by
+  induction c using certifiedRunReachabilityFrom.induct (Γ := Γ) with
+  | case1 c hlt ih =>
+      have hstep := certifiedReachStep_project Γ c.state c.cert
+      rw [certifiedRunReachabilityFrom, if_pos hlt, runReachabilityFrom]
+      have hlt' : c.project.weight < (reachStep Γ c.project).weight := by
+        simp only [CertifiedReachResult.project] at hlt hstep ⊢
+        rwa [← hstep]
+      rw [if_pos hlt']
+      simpa [← hstep, CertifiedReachResult.project] using ih
+  | case2 c hlt =>
+      have hstep := certifiedReachStep_project Γ c.state c.cert
+      rw [certifiedRunReachabilityFrom, if_neg hlt, runReachabilityFrom]
+      have hlt' : ¬ c.project.weight < (reachStep Γ c.project).weight := by
+        simp only [CertifiedReachResult.project] at hlt hstep ⊢
+        rwa [← hstep]
+      rw [if_neg hlt']
+      simpa [← hstep, CertifiedReachResult.project] using hstep
+
+/-- Fully certified reachability runner. Projects to `runReachability`. -/
+def certifiedRunReachability {n : Nat} (Γ : ReachCtx n) (goal : Object n) :
+    CertifiedReachResult n :=
+  certifiedRunReachabilityFrom Γ (certifiedMkReachState Γ goal)
+
+theorem certifiedRunReachability_project {n : Nat} (Γ : ReachCtx n)
+    (goal : Object n) :
+    (certifiedRunReachability Γ goal).project = runReachability Γ goal := by
+  unfold certifiedRunReachability runReachability
+  rw [certifiedRunReachabilityFrom_project, certifiedMkReachState_project]
+
+theorem certifiedRunReachability_soundFor {n : Nat} (Γ : ReachCtx n)
+    (goal : Object n) :
+    (certifiedRunReachability Γ goal).soundFor Γ goal :=
+  certifiedRunReachability_project Γ goal
+
 /-! ## Status
 
-**Landed without `sorry`:** assign-once; proof-only ranks for **all** stored
-witnesses (intro and neutral) with stored `deps`; `RankedParents` /
-`ParentsCertified`; `certifiedDiscover` / `Dual` / `MarkHyp` with explicit deps;
-`ReachCell.neutralWitness` for `neuOf`; richer `cellParents` for `.app` /
-`.appTy` (argument included); lex measure demos for
-`app → invOf → neuOf` and `appTy`.
+**Landed:** proof-only full-rank certificates; centralized `RuleDeps`; certified
+wrappers for every forward-chaining rule; `certifiedReachSweep` /
+`certifiedReachStep` / `certifiedRunReachability` with
+`project = runReachability`.
 
-**Paused:** full `certifiedReachStep` / type-rule wrappers. Resume only after the
-η-argument application fixture reconstructs under the measure above.
+**Stop condition:** a fresh slot is ranked only under `RankedParents` for the
+deps of **that** derivation (`RuleDeps`); missing parents make the certified
+term uninhabited.
 
-**Stop condition:** never invent ranks for missing parents — require
-`RankedParents` before fresh extend; η/intro deps are rule-site lists stored in
-`ReachRankCert.deps` (not on computational `Witness`).
+**Source of truth (intended final):** `certifiedRunReachability` is the retained
+engine; computational `runReachability` stays as the projection reference until
+the post-`ReconstructTotalityPackage` cleanup collapses the mirror.
+
+**Next stage (not this pass):** well-founded reconstruction / totality package.
+Afterwards: delete superseded measure demos, collapse duplicate wrappers, remove
+fueled reconstruct once callers migrate — target a net-negative cleanup commit.
 -/
 
 /-! ## Totality scope (neutral only)
 
-`ReconstructWitnessTotal` / `StoredWitnessReconstructs` already restrict to
+`ReconstructWitnessTotal` / `StoredWitnessReconstructs` restrict to
 `Witness.isNeutral`. Intro-only `.unit` / `.inl` / `.inr` / `.eta` must **not**
 be over-quantified into `neuOfType` success — they justify invertible arguments
 only (`Witness.isNeutral = false`).
@@ -926,26 +1891,16 @@ theorem Witness.not_neutral_eta : Witness.isNeutral .eta = false := rfl
 theorem Witness.not_neutral_inl (i : Nat) : Witness.isNeutral (.inl i) = false := rfl
 theorem Witness.not_neutral_inr (i : Nat) : Witness.isNeutral (.inr i) = false := rfl
 
-/-! ## Inconsistent completed state → reconstructible `.never` -/
-
-theorem InconsistentNeverTotal_of_ranked_package {sig : Signature}
-    (h : ReconstructTotalityPackage sig) : InconsistentNeverTotal sig :=
-  h.2.2
-
 /-! ## Migration-cost comparison (spike conclusion)
 
 | Design | Pros | Cons | Verdict |
 |---|---|---|---|
-| **A. Proof-only `ReachRankCert` / certified runner** | No contamination of `ReachCell` equality, schedule identity, or observation identity; `project` = existing `runReachability` state | Must thread certificates through every `markHyp`/`discover` rule; `setCell` transport lemmas are sticky | **Preferred** if maintainable |
-| **B. Runtime `discoverGen` on `ReachCell`/`Witness`** | Local measure at each record site; easy WF | Must exclude gen from semantic equality, canonical scheduling, `PairEntry`/`Witness` identity; risks leaking into compare | Use **only if A is unmaintainable** |
-| **C. Structural derivation trees** | Intrinsic WF; no parallel rank map | Heavier than current parent-pointer witnesses; changes reconstruction API | Possible long-term; not needed if A works |
+| **A. Proof-only `ReachRankCert` / certified runner** | No contamination of `ReachCell` equality; `project` = `runReachability` | Temporary control-flow mirror until cleanup | **Preferred** — now landed |
+| **B. Runtime `discoverGen`** | Easy local WF | Contaminates equality | Rejected |
+| **C. Structural derivation trees** | Intrinsic WF | Heavier API | Defer |
 
-**Recommendation:** pursue **A**. Assign-once makes rank stable. Parent relation
-is small and closed. Lex measure handles the `.fst`/`.snd` size increase.
-
-Dependency once A lands:
-`certified reachability → ranked witness graph → reconstruction totality →
-retained schedule adapter → certified producer → EncodeTotal`.
+**Final source of truth:** `certifiedRunReachability`. After totality, collapse the
+computational mirror so only one engine remains.
 -/
 
 end Equality

@@ -1,127 +1,124 @@
 /-
-  8D reconstruction-totality gate.
+  8D reconstruction-totality package over `certifiedRunReachability`.
 
-  Typing of successful reconstruction is already proved
-  (`wellNeg_reconstructWitness` / `wellNeg_neuOfType`). This module states the
-  *totality* obligation for stored witnesses in a completed reachability state,
-  audits every `reconstructGo` recursive edge, and records why well-founded
-  recursion is blocked until a discovery-rank / parent-DAG package exists.
+  Domains (not arbitrary state / witnesses / commands):
+  * stored neutral witness — `StoredNeutralDomain`
+  * reconstructible invertible value — `InvertibleArgDomain`
+  * requested neutral known-retrievable — `RequestedNeutralDomain`
 
-  **Gate status: BLOCKED — missing provenance rank (proof-only certificate).**
-  Design spike: `ReachCertified.lean` (prefer `ReachRankCert` around the runner;
-  do not add observable `discoverGen` to `ReachCell` unless the proof-only path
-  proves unmaintainable).
-  Do not feed an `Option`-propagating reachability adapter into EncodeTotal
-  until this gate closes.
+  Intro-only witnesses never imply neutral reconstruction.
+  Worker: well-founded `reconstructGoWF` (rank × phase × object size).
 -/
 
-import Gimbal.Equality.ReachComplete
+import Gimbal.Equality.ReconstructWF
 import Gimbal.Equality.ReachSound
 import Gimbal.Equality.Saturation
-import Gimbal.Equality.SatTotal
 
 namespace Gimbal
 namespace Equality
 
 variable {sig : Signature}
 
-/-! ## Failure accounting (retained ordered-code path)
-
-| Source | Blocks retained EncodeIx / ordered-code reference? |
-|---|---|
-| `reconstructWitness = none` | **Yes** — genuine reference-path blocker |
-| reconstructed type `P' ≠ P` | **Yes** — genuine reference-path blocker |
-| inconsistent `neuOfType … .never = none` | **Yes** — genuine reference-path blocker |
-| `checkOldInvariant` / `exactsAllUseNew` | **No** — deferred `compareSatRec` only; not on the retained ordered-code path |
-
-`SatTotal` discharges schedule **exhaustion** only. Reconstruction failures remain
-open here; old-invariant failure must not be treated as a retained-path blocker.
--/
-
-/-! ## Recursive edges of `reconstructGo`
-
-Worker: `Saturation.reconstructGo`. Wrappers: `neuOfType` → `.neuOf`,
-`reconstructWitness` → `.witness`. Every call decrements fuel by 1; fuel is the
-**only** decrease present in the implementation.
-
-### `.neuOf hyps A`
-* `findHypVar` hit → `.var` (terminal).
-* else `σ.findTypeIdx A` / `getCell.witness` → recurse `.witness hyps w`.
-
-### `.witness hyps w`
-* `.ctxVar hypIdx` → `Ctx.varOldest` (terminal).
-* `.fstHyp` / `.sndHyp hypIdx` → `Ctx.varOldest` then project (terminal; no cell parent).
-* `.fstType` / `.sndType pIdx` → `σ.typeAt pIdx` (expect prod) → `.neuOf hyps (.prod L R)`
-  (**type size increases** toward the parent product; `cellParents = [pIdx]`).
-* `.app fnHypIdx argIdx` → hyps + `σ.typeAt argIdx` → `.invOf hyps Arg`
-  (argument cell is a reconstruction parent: `invOf` may η-split and eventually
-  `neuOf` component neutrals; `cellParents = [argIdx]`).
-* `.appTy fnTypeIdx argIdx` → `.neuOf` function **and** `.invOf` argument
-  (`cellParents = [fnIdx, argIdx]`).
-* `.unit` / `.inl` / `.inr` / `.eta` → always `none` (intro forms; not neutrals).
-
-### `.invOf hyps A`
-* prefer `.neuOf hyps A`, else:
-  * `.unit` terminal; `.prod` / `.coprod` → `.invOf` on components (`objectSize` ↓);
-  * `.exp` → `.invOf (hyps.push Arg) Ret` (`objectSize Ret` ↓).
-
-**Structural decrease that works locally:** `objectSize` on intro `invOf` splits.
-**Structural decrease that fails on witness→parent edges:** type size goes *up*
-to the parent connective. Termination of those edges needs a rank on the
-**stored witness graph** (discovery generation or proved parent-DAG path length).
--/
-
-/-! ## Fixed-point invariant required (not yet proved as a reconstruction package)
-
-For a completed `runReachability Γ goal` state `σ` (`runReachability_fixed`,
-`runReachability_sound`), every *stored* witness used by reconstruction must
-satisfy:
-
-1. **Index range:** every `hypIdx` / `ofTypeIdx` / `fnTypeIdx` / `argTypeIdx` in
-   `w` is in range for `Γ.hyps` / `σ.types`.
-2. **Parent deducible:** every parent cell referred to by `w` is simply
-   deducible (or retrievable) in `σ`.
-3. **Type match:** witness shape matches the owning / requested cell type
-   (e.g. `.fst i` only if `typeAt i = some (.prod …)`; reconstructed head type
-   equals the cell / schedule entry type).
-4. **Well-founded dependencies:** the parent-pointer graph on cells is
-   well-founded (acyclic with a finite rank).
-
-Existing theorems give `ReachFixed` / `ReachSound` / sized tables / subformula
-closure. They do **not** yet package (1)–(4) for `reconstructGo`.
--/
-
-/-! ## Missing provenance / rank field
-
-`Witness` carries untyped parent indices only (`Reachability.lean`).
-`ReachCell` stores `retrievable` / `oldWitness` / `newWitness` — first discovery
-is operational (`record` keeps the first witness) but **no `discoverGen : Nat`**
-(or equivalent) is retained.
-
-Without an explicit generation (or a proved longest-path measure on the parent
-DAG derived from the discover rules), witness→parent edges have **no** semantic
-decrease: `objectSize` increases, and fuel is not an invariant of the state.
-
-**Gate decision:** stop. Do not attempt well-founded `reconstructGo` on the
-current layout. Preferred sticky fix: record `discoverGen` at `discover` /
-`markHyp` time with the invariant that every parent index has strictly smaller
-gen and a simply-deducible cell of the expected shape. Alternative: prove
-parent-DAG acyclicity + path-length from the rule set without a stored field
-(larger sticky obligation; same conceptual gap).
--/
-
-/-! ## Corrected totality statement (open)
-
-The previous `ReconstructWitnessTotal` in `ICCEncodeScheduleIx` quantified over
-all fuel (including 0), all states, and all witnesses (including intro forms that
-always fail). That Prop is uninhabited and is replaced by the scoped form below.
--/
+/-! ## Certified completion package -/
 
 /--
-A stored neutral witness reconstructs at its owning cell type under matching
-hyps, for some fuel (to be replaced by well-founded recursion once a rank
-exists).
+Completed certified reachability: projects to the computational runner and
+carries index-range / result-type agreement (`ReachSound.reconOk`) plus ranks.
 -/
+structure CertifiedComplete (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases) where
+  result : CertifiedReachResult sig.nBases
+  soundFor : result.soundFor Γ goal
+  sound : ReachSound Γ result.state
+
+def certifiedComplete (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases) :
+    CertifiedComplete (sig := sig) Γ goal where
+  result := certifiedRunReachability Γ goal
+  soundFor := certifiedRunReachability_soundFor Γ goal
+  sound := by
+    have hproj := certifiedRunReachability_project Γ goal
+    have hs := runReachability_sound Γ goal
+    rw [← hproj] at hs
+    simpa [CertifiedReachResult.project] using hs
+
+/-! ## Domain-scoped totality predicates (WF API) -/
+
+/-- Every stored **neutral** witness reconstructs at its cell type under `Γ.hyps`. -/
+def StoredWitnessReconstructsWF {Γ : ReachCtx sig.nBases}
+    {goal : Object sig.nBases} (C : CertifiedComplete (sig := sig) Γ goal)
+    (i : Nat) (b : SlotNew) (w : Witness) : Prop :=
+  ∃ (A : Object sig.nBases) (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) A),
+    C.result.state.typeAt i = some A ∧
+      Witness.isNeutral w = true ∧
+      reconstructWitnessWF (sig := sig) C.result.cert i b Γ.hyps w = some ⟨A, n⟩
+
+def ReconstructWitnessTotalWF (sig : Signature) : Prop :=
+  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
+    let C := certifiedComplete (sig := sig) Γ goal
+    ∀ (i : Nat) (b : SlotNew) (w : Witness),
+      StoredNeutralDomain C.result.cert i b w →
+        StoredWitnessReconstructsWF C i b w
+
+/-- Consistency schedule entries reconstruct at the declared type. -/
+def ConsistencyWitnessTotalWF (sig : Signature) : Prop :=
+  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
+    let C := certifiedComplete (sig := sig) Γ goal
+    let σ := C.result.state
+    ∀ (P : Object sig.nBases) (w : Witness),
+      (buildSchedule σ).entries.any (fun e => e.1 == P && e.2 == w) = true →
+        ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) P),
+          ∃ i b,
+            σ.typeAt i = some P ∧
+              (σ.getCell i).slotWitness b = some w ∧
+                reconstructWitnessWF (sig := sig) C.result.cert i b Γ.hyps w =
+                  some ⟨P, n⟩
+
+/-- Inconsistent completed states supply a reconstructable `.never` neutral. -/
+def InconsistentNeverTotalWF (sig : Signature) : Prop :=
+  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
+    let C := certifiedComplete (sig := sig) Γ goal
+    C.result.state.inconsistent = true →
+      (neuOfTypeWF (sig := sig) C.result.cert Γ.hyps
+          (.never : Object sig.nBases)).isSome = true
+
+/--
+Invertible arguments under a strictly larger ambient rank reconstruct
+(when `InvertibleArgDomain` holds).
+-/
+def InvertibleArgTotalWF (sig : Signature) : Prop :=
+  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
+    let C := certifiedComplete (sig := sig) Γ goal
+    ∀ (ambientRank : Nat) (A : Object sig.nBases),
+      InvertibleArgDomain C.result.cert ambientRank A →
+        (invOfTypeWF (sig := sig) C.result.cert ambientRank Γ.hyps A).isSome = true
+
+/--
+Requested neutrals that are hyp-or-ranked-retrievable reconstruct.
+-/
+def RequestedNeutralTotalWF (sig : Signature) : Prop :=
+  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
+    let C := certifiedComplete (sig := sig) Γ goal
+    ∀ (A : Object sig.nBases),
+      RequestedNeutralDomain C.result.cert Γ.hyps A →
+        (neuOfTypeWF (sig := sig) C.result.cert Γ.hyps A).isSome = true
+
+/--
+Full package: stored neutrals, invertible args, consistency, inconsistent-never,
+and the none / type-mismatch branches are unreachable on domain-valid inputs.
+-/
+def ReconstructTotalityPackage (sig : Signature) : Prop :=
+  ReconstructWitnessTotalWF sig ∧
+    ConsistencyWitnessTotalWF sig ∧
+    InconsistentNeverTotalWF sig ∧
+    InvertibleArgTotalWF sig ∧
+    RequestedNeutralTotalWF sig
+
+/-! ## Legacy fueled names (migration bridge)
+
+Prefer the WF predicates above. These aliases keep older call sites compiling
+until fueled reconstruction is removed.
+-/
+
+/-- @deprecated use `StoredWitnessReconstructsWF` -/
 def StoredWitnessReconstructs (σ : ReachState sig.nBases)
     (hyps : Array (Object sig.nBases)) (i : Nat) (w : Witness) : Prop :=
   ∃ (A : Object sig.nBases) (n : NegNeu (Ctx.ofHyps (sig := sig) hyps) A),
@@ -129,10 +126,7 @@ def StoredWitnessReconstructs (σ : ReachState sig.nBases)
       Witness.isNeutral w = true ∧
       ∃ fuel, reconstructWitness (sig := sig) fuel σ hyps w = some ⟨A, n⟩
 
-/--
-8D gate (open / blocked on discovery rank): every stored *neutral* witness in a
-completed reachability state reconstructs at its cell type under `Γ.hyps`.
--/
+/-- @deprecated use `ReconstructWitnessTotalWF` -/
 def ReconstructWitnessTotal (sig : Signature) : Prop :=
   ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
     let σ := runReachability (n := sig.nBases) Γ goal
@@ -142,7 +136,7 @@ def ReconstructWitnessTotal (sig : Signature) : Prop :=
           Witness.isNeutral w = true →
             StoredWitnessReconstructs (sig := sig) σ Γ.hyps i w
 
-/-- Schedule consistency entries reconstruct at the declared type. -/
+/-- @deprecated use `ConsistencyWitnessTotalWF` -/
 def ConsistencyWitnessTotal (sig : Signature) : Prop :=
   ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
     let σ := runReachability (n := sig.nBases) Γ goal
@@ -151,7 +145,7 @@ def ConsistencyWitnessTotal (sig : Signature) : Prop :=
         ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) P) (fuel : Nat),
           reconstructWitness (sig := sig) fuel σ Γ.hyps w = some ⟨P, n⟩
 
-/-- Inconsistent completed states supply a reconstructable `.never` neutral. -/
+/-- @deprecated use `InconsistentNeverTotalWF` -/
 def InconsistentNeverTotal (sig : Signature) : Prop :=
   ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
     let σ := runReachability (n := sig.nBases) Γ goal
@@ -159,27 +153,61 @@ def InconsistentNeverTotal (sig : Signature) : Prop :=
       ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) .never) (fuel : Nat),
         neuOfType (sig := sig) fuel σ Γ.hyps .never = some n
 
-/--
-Derived package once `ReconstructWitnessTotal` / `InconsistentNeverTotal` close:
-consistency witnesses succeed at the declared type; inconsistent `neuOfType`
-cannot return `none` on valid completed states. Correctness
-(`wellNeg_reconstructWitness`) stays separate — reuse after existence.
--/
-def ReconstructTotalityPackage (sig : Signature) : Prop :=
-  ReconstructWitnessTotal sig ∧
-    ConsistencyWitnessTotal sig ∧
-    InconsistentNeverTotal sig
+theorem InconsistentNeverTotalWF_of_package {sig : Signature}
+    (h : ReconstructTotalityPackage sig) : InconsistentNeverTotalWF sig :=
+  h.2.2.1
+
+/-! ## Leaf reconstruction from `WitnessReconShape` -/
+
+theorem reconstructGoWF_ctxVar {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (hypIdx : Nat)
+    {A : Object sig.nBases}
+    (hshape : WitnessReconShape σ hyps A (.ctxVar hypIdx)) :
+    ∃ n, reconstructGoWF (sig := sig) cert ambientRank (.witness hyps (.ctxVar hypIdx)) =
+      some (.wit hyps ⟨A, n⟩) := by
+  obtain ⟨x, hx⟩ := Ctx.varOldest_eq_of_getElem? (sig := sig) hyps hypIdx hshape
+  refine ⟨.var x, ?_⟩
+  simp [reconstructGoWF, hx]
+
+theorem reconstructGoWF_fstHyp {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (hypIdx : Nat)
+    {A : Object sig.nBases}
+    (hshape : WitnessReconShape σ hyps A (.fstHyp hypIdx)) :
+    ∃ n, reconstructGoWF (sig := sig) cert ambientRank (.witness hyps (.fstHyp hypIdx)) =
+      some (.wit hyps ⟨A, n⟩) := by
+  obtain ⟨L, R, hhyps, hA⟩ := hshape
+  subst hA
+  obtain ⟨x, hx⟩ := Ctx.varOldest_eq_of_getElem? (sig := sig) hyps hypIdx hhyps
+  refine ⟨.fst (NegNeu.cast (by rfl) (.var x)), ?_⟩
+  simp [reconstructGoWF, hhyps, hx]
+
+theorem reconstructGoWF_sndHyp {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (hypIdx : Nat)
+    {A : Object sig.nBases}
+    (hshape : WitnessReconShape σ hyps A (.sndHyp hypIdx)) :
+    ∃ n, reconstructGoWF (sig := sig) cert ambientRank (.witness hyps (.sndHyp hypIdx)) =
+      some (.wit hyps ⟨A, n⟩) := by
+  obtain ⟨L, R, hhyps, hA⟩ := hshape
+  subst hA
+  obtain ⟨x, hx⟩ := Ctx.varOldest_eq_of_getElem? (sig := sig) hyps hypIdx hhyps
+  refine ⟨.snd (NegNeu.cast (by rfl) (.var x)), ?_⟩
+  simp [reconstructGoWF, hhyps, hx]
 
 /-! ## Status
 
-* **Correctness (success ⇒ WellNeg):** proved (`wellNeg_reconstructWitness`).
-* **Totality (existence):** blocked — missing `discoverGen` / parent-DAG rank.
-* **Fuel:** implementation artifact; not an invariant of `σ`. Replace with WF
-  recursion after the rank lands; a derived finite bound is acceptable only if
-  proved from the state invariant (no fixed constant).
-* **Next:** add discovery rank (or prove parent-DAG WF), then prove
-  `ReconstructTotalityPackage`, then make the reachability adapter total and
-  feed EncodeTotal.
+Landed infrastructure for `ReconstructTotalityPackage`:
+* WF worker `reconstructGoWF` (rank × phase × size) with rank-bounded
+  `selectNeutralLt` / `selectNeutralLe` (no invOf→neuOf phase-only decrease)
+* `WitnessReconShape` + `ReachSound.reconOk` (index-range / result-type)
+* Domain predicates + package Prop over `certifiedRunReachability`
+* Leaf reconstruction for `.ctxVar` / `.fstHyp` / `.sndHyp`
+
+Remaining: WF induction for `.fstType` / `.sndType` / `.app` / `.appTy`,
+invertible / requested / consistency / inconsistent-never, then fueled migration
+and reachability cleanup.
 -/
 
 end Equality

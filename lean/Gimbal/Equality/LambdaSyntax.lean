@@ -74,6 +74,58 @@ def varOldest (hyps : Array (Object sig.nBases)) (i : Nat) :
   else
     none
 
+private theorem varFromEnd_ofList_getLast {sig : Signature}
+    (ys : List (Object sig.nBases)) (B : Object sig.nBases) :
+    ∃ x, varFromEnd (sig := sig) (ofList (ys ++ [B])) 0 = some ⟨B, x⟩ := by
+  rw [ofList_concat_singleton]
+  simp [varFromEnd]
+
+private theorem varFromEnd_ofList_succ {sig : Signature}
+    (ys : List (Object sig.nBases)) (B : Object sig.nBases) (k : Nat)
+    {A : Object sig.nBases} {x : Var (ofList ys) A}
+    (h : varFromEnd (sig := sig) (ofList ys) k = some ⟨A, x⟩) :
+    ∃ y, varFromEnd (sig := sig) (ofList (ys ++ [B])) (k + 1) = some ⟨A, y⟩ := by
+  rw [ofList_concat_singleton]
+  simp [varFromEnd, h]
+
+private theorem varFromEnd_ofList_reverse {sig : Signature} :
+    ∀ (xs : List (Object sig.nBases)) (k : Nat) {A : Object sig.nBases},
+      xs.reverse[k]? = some A →
+        ∃ x, varFromEnd (sig := sig) (ofList xs) k = some ⟨A, x⟩
+  | [], k, A, h => by simp at h
+  | xs, k, A, h => by
+      have hne : xs ≠ [] := fun he => by subst he; simp at h
+      obtain ⟨ys, B, rfl⟩ : ∃ ys B, xs = ys ++ [B] := by
+        obtain ⟨ys, B, hconcat⟩ := (List.eq_nil_or_concat xs).resolve_left hne
+        exact ⟨ys, B, by simpa [List.concat_eq_append] using hconcat⟩
+      cases k with
+      | zero =>
+          have hB : A = B := by
+            simp [List.reverse_append, List.getElem?_cons_zero] at h
+            exact h.symm
+          subst hB
+          exact varFromEnd_ofList_getLast ys A
+      | succ k =>
+          simp [List.reverse_append, List.getElem?_cons_succ] at h
+          obtain ⟨x, hx⟩ := varFromEnd_ofList_reverse ys k h
+          exact varFromEnd_ofList_succ ys B k hx
+
+/-- If `hyps[i]? = some A`, then `varOldest` returns a variable of that type. -/
+theorem varOldest_eq_of_getElem? (hyps : Array (Object sig.nBases)) (i : Nat)
+    {A : Object sig.nBases} (h : hyps[i]? = some A) :
+    ∃ x, varOldest (sig := sig) hyps i = some ⟨A, x⟩ := by
+  have hi : i < hyps.size := (Array.getElem?_eq_some_iff.mp h).1
+  simp only [varOldest, hi, ↓reduceIte, ofHyps]
+  have hlen : hyps.toList.length = hyps.size := Array.length_toList
+  have hrev : hyps.toList.reverse[hyps.size - 1 - i]? = some A := by
+    have hidx : hyps.size - 1 - i < hyps.toList.length := by
+      simp [hlen]; omega
+    rw [List.getElem?_reverse hidx]
+    have : hyps.toList.length - 1 - (hyps.size - 1 - i) = i := by omega
+    rw [this]
+    simpa [Array.getElem?_toList] using h
+  simpa using varFromEnd_ofList_reverse hyps.toList (hyps.size - 1 - i) hrev
+
 /-- Weaken a variable across one newest binder. -/
 def weakenVar {Γ : Ctx sig} {A B : Object sig.nBases}
     (x : Var Γ A) : Var (Γ ▻ B) A :=
