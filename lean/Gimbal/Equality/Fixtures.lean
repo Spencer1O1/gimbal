@@ -273,6 +273,7 @@ example : isSimplyDeducible prodState (.base 1) = true := by
 
 private abbrev Sig2 : Signature := ⟨2, #[]⟩
 private abbrev Sig1 : Signature := ⟨1, #[]⟩
+private abbrev Sig3 : Signature := ⟨3, #[]⟩
 
 /-! ### Split product projections (hyp vs type) and η tightening -/
 
@@ -418,6 +419,75 @@ def mixedNeuEtaNoFabricatedNewProj : Bool :=
   | _, _, _ => false
 
 example : mixedNeuEtaNoFabricatedNewProj = true := by native_decide
+
+/-! ### Neutral selector + η-argument application (invOf deps) -/
+
+/-- Preferred `witness` can be intro while `neutralWitness` still finds a neutral. -/
+def neutralWitnessIgnoresNewEta : Bool :=
+  let c : ReachCell :=
+    { oldWitness := some (.ctxVar 0), newWitness := some .eta }
+  (match c.witness with | some .eta => true | _ => false) &&
+    (match c.neutralWitness with | some (.ctxVar 0) => true | _ => false)
+
+example : neutralWitnessIgnoresNewEta = true := by native_decide
+
+/--
+Crafted dual provenance on a product cell: old `.app` (neutral) + new `.eta`.
+`neuOf` must use `neutralWitness`, not preferred `witness`.
+-/
+def mixedOldNeutralNewEtaNeuOfOk : Bool :=
+  let Γ : ReachCtx 2 := ⟨#[.exp (.unit) (.prod (.base 0) (.base 1)), .base 0], 0⟩
+  let σ0 := mkReachState Γ (.prod (.base 0) (.base 1))
+  match σ0.findTypeIdx (.prod (.base 0) (.base 1)),
+      σ0.findTypeIdx (.unit : Object 2) with
+  | some p, some u =>
+    let σ1 := σ0.discover u false .unit
+    let σ2 := σ1.discover p false (.app 0 u)
+    let σ3 := σ2.discover p true .eta
+    let c := σ3.getCell p
+    (match c.witness with | some .eta => true | _ => false) &&
+      (match c.neutralWitness with | some (.app _ _) => true | _ => false) &&
+      (match neuOfType (sig := Sig2) 64 σ3 Γ.hyps (.prod (.base 0) (.base 1)) with
+       | some _ => true
+       | none => false)
+  | _, _ => false
+
+example : mixedOldNeutralNewEtaNeuOfOk = true := by native_decide
+
+/--
+`f : (X × Y) → R` with `x : X`, `y : Y`: argument product is η-only; application
+still reconstructs by `invOf` splitting to component neutrals.
+-/
+def etaArgAppCtx : ReachCtx 3 where
+  hyps := #[
+    .exp (.prod (.base 0) (.base 1)) (.base 2),
+    .base 0,
+    .base 1
+  ]
+  newFrom := 0
+
+def etaArgAppState : ReachState 3 :=
+  runReachability etaArgAppCtx (.base 2)
+
+def etaArgAppReconstructOk : Bool :=
+  let σ := etaArgAppState
+  match σ.findTypeIdx (.prod (.base 0) (.base 1)),
+      σ.findTypeIdx (.base 2) with
+  | some p, some r =>
+    let pc := σ.getCell p
+    let isEta :=
+      (match pc.oldWitness with | some .eta => true | _ => false) ||
+        (match pc.newWitness with | some .eta => true | _ => false)
+    match (σ.getCell r).witness with
+    | some (.app 0 p') =>
+      isEta && !pc.oldNeutral && !pc.newNeutral && p' == p &&
+        (match reconstructWitness (sig := Sig3) 64 σ etaArgAppCtx.hyps (.app 0 p) with
+         | some ⟨A, _⟩ => A == .base 2
+         | none => false)
+    | _ => false
+  | _, _ => false
+
+example : etaArgAppReconstructOk = true := by native_decide
 
 /-- Old-only deduction: `Y` reachable without `Γnew` is not scheduled. -/
 def oldOnlyCtx : ReachCtx 2 where
@@ -1031,8 +1101,6 @@ def twoAppCtx : ReachCtx 3 where
     .base 0
   ]
   newFrom := 2
-
-private abbrev Sig3 : Signature := ⟨3, #[]⟩
 
 def twoAppScheduleSize : Nat :=
   (buildSchedule (runReachability twoAppCtx (.unit : Object 3))).size

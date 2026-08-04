@@ -97,11 +97,29 @@ def ReachCell.newNeutral (c : ReachCell) : Bool :=
   | some w => Witness.isNeutral w
   | none => false
 
-/-- Preferred witness: uses-new if present, otherwise old-only. -/
+/-- Preferred witness: uses-new if present, otherwise old-only.
+Used for scheduling / first-discovery display; **not** for `neuOf`
+(see `neutralWitness`). -/
 def ReachCell.witness (c : ReachCell) : Option Witness :=
   match c.newWitness with
   | some w => some w
   | none => c.oldWitness
+
+/-- Neutral-only selector for reconstruction: prefer a uses-new **neutral**,
+else an old-only **neutral**. Intro/η witnesses are ignored so a mixed
+old-neutral / new-η cell still reconstructs. -/
+def ReachCell.neutralWitness (c : ReachCell) : Option Witness :=
+  match c.newWitness with
+  | some w =>
+      if Witness.isNeutral w then some w
+      else
+        match c.oldWitness with
+        | some w' => if Witness.isNeutral w' then some w' else none
+        | none => none
+  | none =>
+      match c.oldWitness with
+      | some w => if Witness.isNeutral w then some w else none
+      | none => none
 
 /-! ### Provenance lattice order
 

@@ -93,7 +93,7 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
           match σ.findTypeIdx A with
           | none => none
           | some i =>
-            match (σ.getCell i).witness with
+            match (σ.getCell i).neutralWitness with
             | none => none
             | some w =>
               match reconstructGo fuel σ (.witness hyps w) with

@@ -53,8 +53,11 @@ Worker: `Saturation.reconstructGo`. Wrappers: `neuOfType` → `.neuOf`,
 * `.fstHyp` / `.sndHyp hypIdx` → `Ctx.varOldest` then project (terminal; no cell parent).
 * `.fstType` / `.sndType pIdx` → `σ.typeAt pIdx` (expect prod) → `.neuOf hyps (.prod L R)`
   (**type size increases** toward the parent product; `cellParents = [pIdx]`).
-* `.app fnHypIdx argIdx` → hyps + `σ.typeAt argIdx` → `.invOf hyps Arg`.
-* `.appTy fnTypeIdx argIdx` → `σ.typeAt` → `.neuOf hyps (.exp …)` and `.invOf hyps Arg`.
+* `.app fnHypIdx argIdx` → hyps + `σ.typeAt argIdx` → `.invOf hyps Arg`
+  (argument cell is a reconstruction parent: `invOf` may η-split and eventually
+  `neuOf` component neutrals; `cellParents = [argIdx]`).
+* `.appTy fnTypeIdx argIdx` → `.neuOf` function **and** `.invOf` argument
+  (`cellParents = [fnIdx, argIdx]`).
 * `.unit` / `.inl` / `.inr` / `.eta` → always `none` (intro forms; not neutrals).
 
 ### `.invOf hyps A`
