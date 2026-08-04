@@ -247,11 +247,20 @@ Blocked / WIP:
    * **production** — `ContReadyCert` / `StageEncodeReady` for the
      pre-saturation continuation (focusing / intro phase);
    * **preservation** — proof-relevant `ApplyPairObsReadyCert` so schedule
-     application transports that certificate (mixed atom+coprod composes
-     without `*DerivedContShape`).
+     application transports that certificate (mixed atom+coprod *wrap*
+     composes without `*DerivedContShape`).
+
+   **STOP (acceptance not met):** full `ContReadyCert → atomPushCont` transport
+   is blocked on EncodeReady naturality (`rightExp_lam` / `letPos` binder
+   `pushPos` worklists), not on missing schedule-shape cases. Coprod
+   `StageEncodeReady (.case …)` cannot hold under bases-only `ofHyps` worklists.
+   Only nil-schedule acceptance
+   (`stageEncodeReady_applyPairObsGo_nil`) has sole premise `ContReadyCert`.
+   Do not add `*DerivedContShape`; do not migrate totality / drop `ready` yet.
+   Fallback remains direct ordered `ICCCode` production if naturality stalls.
 
    Do not switch `referenceCompare` or claim characterization until the stash
-   is eliminated via this split (or the direct-`ICCCode` production fallback).
+   is eliminated via this split (or the direct-`ICCCode` fallback).
    Historical enumeration lemmas remain as a green checkpoint; do not add more
    nil-rest / DerivedContShape / exact-schedule disjunctions.)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and

@@ -1,9 +1,8 @@
 /-
   Milestone 8F readiness certificate spike (induction-boundary correction).
 
-  Status: **design spike only**. Enumeration of Raw→EncodeReady via
-  `AtomDerivedContShape` / `CoprodDerivedContShape` / nil-rest disjunctions is
-  **paused** (green checkpoint `192dae5` kept). This module does not switch
+  Status: compositional preservation attempt after pausing Raw→EncodeReady
+  enumeration at green checkpoint `192dae5`. This module does not switch
   `referenceCompare`, does not drop `ValidEncodeFragment.ready`, and does not
   use provisional `EncodeTotal_holds`.
 
@@ -24,15 +23,12 @@
   1. **Preservation** — proof-relevant `ApplyPairObsReadyCert`: schedule steps
      transport a stage readiness certificate from the input continuation to the
      saturated result (compositional in entries; no result-shape predicates).
-  2. **Production** — `ContReadyCert` (here: `StageEncodeReady` at phase entry):
-     inhabited when the reference/focusing phase builds the pre-saturation
-     continuation, not reconstructed after the fact from `WellInv` alone.
+  2. **Production** — `ContReadyCert` / `StageEncodeReady` at phase entry:
+     inhabited when focusing / intro builds the pre-saturation continuation.
 
-  Preferred direction (boss): preserve readiness compositionally during
-  production. Fallback if InvTm certification still demands history
-  reconstruction: emit ordered `ICCCode` directly during the reference phase.
-
-  Full refactor is deferred until this spike’s composition principle is accepted.
+  Acceptance test (not yet met for general schedules):
+  `ContReadyCert cont → applyPairObsGo … = .ok t → StageEncodeReady t`
+  with no manually supplied mid-term readiness.
 -/
 
 import Gimbal.Equality.ICCCode
@@ -71,9 +67,6 @@ theorem PhaseEncodeReady.toStage {hyps : Array (Object sig.nBases)}
 /--
 Production obligation: the continuation fed to `applyPairObs` already carries
 stage readiness. This is **not** derivable from `WellInv` alone (empty schedule).
-
-Inhabiting this is the focusing / invertible-intro phase’s job when it builds
-`t₀` / `u₀` (and when binder re-entry builds new continuations under `hyps.push`).
 -/
 abbrev ContReadyCert {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) : Prop :=
@@ -82,20 +75,14 @@ abbrev ContReadyCert {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
 /-! ### Preservation certificate (`applyPairObsGo`) -/
 
 /--
-Proof-relevant certificate that schedule application produced `t` **while
-preserving** stage readiness from the input continuation.
-
-Constructors follow evaluator structure (`nil` / atom `letPos` / coprod `case` /
-inconsistent abort), not ad-hoc result-shape predicates
-(`AtomDerivedContShape`, …). Recursive premises are themselves certificates (or
-stage readiness of recursive results), so mixed multi-entry schedules compose.
+Proof-relevant certificate that schedule application produced `t` while
+preserving stage readiness. Constructors follow evaluator structure.
 -/
 inductive ApplyPairObsReadyCert : ∀ {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases},
     Nat → ReachState sig.nBases → Array (Object sig.nBases) →
     List (PairEntry sig hyps) → InvTm (Ctx.ofHyps hyps) A →
     InvTm (Ctx.ofHyps hyps) A → Prop where
-  /-- Empty schedule returns the continuation unchanged. -/
   | nil {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
       {fuel : Nat} {σ : ReachState sig.nBases}
       {cont t : InvTm (Ctx.ofHyps hyps) A}
@@ -104,11 +91,6 @@ inductive ApplyPairObsReadyCert : ∀ {hyps : Array (Object sig.nBases)}
         .ok t)
       (heq : t = cont) :
       ApplyPairObsReadyCert (fuel + 1) σ hyps [] cont t
-  /--
-  Atom observation: readiness of the pushed recursive body (from a rest
-  certificate / IH) wraps to outer `letPos` via existing atom packaging.
-  No continuation-shape predicate on `cont`.
-  -/
   | exactAtom {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
       {fuel : Nat} {σ : ReachState sig.nBases}
       {nP : NegNeu (Ctx.ofHyps hyps) P}
@@ -124,11 +106,6 @@ inductive ApplyPairObsReadyCert : ∀ {hyps : Array (Object sig.nBases)}
       (ht : t = .foc (.letPos nP (InvTm.castCtx (Ctx.ofHyps_push hyps P) body')))
       (hwrap : StageEncodeReady t) :
       ApplyPairObsReadyCert (fuel + 1) σ hyps (.exact P nP :: rest) cont t
-  /--
-  Coproduct observation: branch readiness under the two pushes wraps to outer
-  `case`. Again, premises are stage readiness of branches — not
-  `CoprodDerivedContShape` on the parent continuation.
-  -/
   | exactCoprod {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBases}
       {fuel : Nat} {σ : ReachState sig.nBases}
       {n : NegNeu (Ctx.ofHyps hyps) (.coprod L R)}
@@ -149,7 +126,6 @@ inductive ApplyPairObsReadyCert : ∀ {hyps : Array (Object sig.nBases)}
       ApplyPairObsReadyCert (fuel + 1) σ hyps
         (.exact (.coprod L R) n :: rest) cont t
 
-/-- Preservation extract: a schedule certificate implies stage readiness of the result. -/
 theorem ApplyPairObsReadyCert.stageReady {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {fuel : Nat} {σ : ReachState sig.nBases}
     {entries : List (PairEntry sig hyps)}
@@ -163,7 +139,6 @@ theorem ApplyPairObsReadyCert.stageReady {hyps : Array (Object sig.nBases)}
   | exactAtom _ _ _ _ _ _ hwrap => exact hwrap
   | exactCoprod _ _ _ _ _ hwrap => exact hwrap
 
-/-- Empty schedule: preservation is identity on the production certificate. -/
 theorem applyPairObsReadyCert_nil {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} {fuel : Nat} {σ : ReachState sig.nBases}
     {cont : InvTm (Ctx.ofHyps hyps) A}
@@ -172,13 +147,8 @@ theorem applyPairObsReadyCert_nil {hyps : Array (Object sig.nBases)}
   refine .nil hcont ?_ rfl
   simp [applyPairObsGo]
 
-/-! ### Composition principle (no result-shape predicates) -/
+/-! ### Atom wrap glue (mid readiness → parent; no cont-shape hyp) -/
 
-/--
-Atom step as pure preservation glue: given stage readiness of the recursive
-body (from the rest schedule’s certificate), wrap with the existing atom
-packaging. The parent continuation’s *syntax shape* is not inspected.
--/
 theorem stageEncodeReady_of_atom_push_body
     {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
     {nP : NegNeu (Ctx.ofHyps hyps) P}
@@ -191,10 +161,6 @@ theorem stageEncodeReady_of_atom_push_body
       (.foc (.letPos nP (InvTm.castCtx (Ctx.ofHyps_push hyps P) body))) :=
   encodeReady_applyObsNeu_atom_of_push_body_ready (n := nP) hws hfr hbody
 
-/--
-`exactAtom` with `hwrap` discharged from body readiness + packaging
-(not from a continuation-shape predicate).
--/
 theorem spike_exactAtom_wrap_from_body
     {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
     {fuel : Nat} {σ : ReachState sig.nBases}
@@ -216,13 +182,7 @@ theorem spike_exactAtom_wrap_from_body
   refine .exactAtom hP hNotCoprod hcont hbody hok rfl ?_
   exact stageEncodeReady_of_atom_push_body (nP := nP) hws hfr hbody
 
-/--
-Spike: **mixed** `exact atom :: (rest that yields a stage-ready mid-term)`.
-
-Typical mid-term: outer `.case` from an exact coprod under the atom push,
-obtained via `exactCoprod` / branch `StageEncodeReady`. One atom wrap then
-yields parent readiness. No `AtomDerivedContShape` / `CoprodDerivedContShape`.
--/
+/-- Mixed atom-then-coprod composition: mid ready ⇒ parent ready (one wrap). -/
 theorem spike_mixed_atom_then_coprod_pres
     {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
     {nP : NegNeu (Ctx.ofHyps hyps) P}
@@ -237,7 +197,6 @@ theorem spike_mixed_atom_then_coprod_pres
       (.foc (.letPos nP (InvTm.castCtx (Ctx.ofHyps_push hyps P) mid))) :=
   stageEncodeReady_of_atom_push_body (nP := nP) hws hfr hmid
 
-/-- Mixed schedule certificate: mid readiness (e.g. from nested coprod) + atom wrap. -/
 theorem spike_mixed_atom_coprod_cert
     {hyps : Array (Object sig.nBases)} {P A : Object sig.nBases}
     {fuel : Nat} {σ : ReachState sig.nBases}
@@ -258,19 +217,8 @@ theorem spike_mixed_atom_coprod_cert
       (.foc (.letPos nP (InvTm.castCtx (Ctx.ofHyps_push hyps P) mid))) :=
   spike_exactAtom_wrap_from_body hP hNotCoprod hcont hws hfr hmid hok
 
-/-! ### Full pipeline certificate (proposed) -/
+/-! ### Pipeline certificate (proposed) -/
 
-/--
-Proof-relevant witness for one reference saturation phase (`Type`, not `Prop`,
-so it can retain schedule data).
-
-* `contReady` — production (focusing / intro) certificate for the pre-schedule
-  continuation;
-* `applyCert` — preservation certificate for `applyPairObs` / `applyPairObsGo`.
-
-`CertifiedReferenceProduced` should eventually be inhabited from this, not from
-stashed `ValidEncodeFragment.ready` or from post-hoc shape reconstruction.
--/
 structure ReferencePhaseReadyCert {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} (t : InvTm (Ctx.ofHyps hyps) A) where
   fuel : Nat
@@ -292,36 +240,119 @@ theorem ReferencePhaseReadyCert.toPhaseEncodeReady {hyps : Array (Object sig.nBa
     (c : ReferencePhaseReadyCert t) : PhaseEncodeReady t :=
   c.stageReady.toPhase
 
-/-! ### Collapse / migration notes (spike conclusions as comments)
+/-! ## Cut transport + evaluator induction attempt -/
 
-Existing restricted lemmas in `ICCTotal` largely become *instances* of
-production or of one preservation constructor:
+theorem encodeReady_nil_of_basesOnly {Γ : Ctx sig} {A : Object sig.nBases}
+    {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+    {domNest obsSlot : Nat} {t : InvTm Γ A}
+    (hws : worklistBasesOnly ws)
+    (h : EncodeReady ws ε domNest obsSlot t) :
+    EncodeReady ([] : List (PosEntry sig)) ε domNest obsSlot t := by
+  induction ws with
+  | nil => exact h
+  | cons e ws ih =>
+      have ⟨b, hb⟩ := hws e (List.Mem.head _)
+      exact ih (fun e' he' => hws e' (List.Mem.tail _ he'))
+        (encodeReady_tail_of_base_head ⟨b, hb⟩ h)
 
-* `encodeReady_applyPairObsGo_nil` / empty WellInv-intro →ready
-  → `ApplyPairObsReadyCert.nil` + production `ContReadyCert`
-* `encodeReady_applyObsNeu_atom_of_push_body_ready` / coprod-var packaging
-  → wrap discharge inside `spike_exactAtom_wrap_from_body` / coprod analogue
-* `AtomDerivedContShape` / `CoprodDerivedContShape` / nil-rest Raw fragments
-  → **retire** once production inhabits `ContReadyCert` and preservation is
-  proved by induction on entries (no post-hoc shape search)
+theorem InvTm.abstr_weaken_unit {Γ : Ctx sig} {P : Object sig.nBases}
+    (m : NegNeu Γ P) :
+    InvTm.abstr (.here : Var (Γ ▻ P) P) (NegNeu.weaken (B := P) m)
+      (InvTm.weaken (B := P) (.unit : InvTm Γ .unit)) =
+      (.unit : InvTm (Γ ▻ P) .unit) := by
+  simp only [InvTm.weaken_unit, InvTm.abstr_unit]
 
-Still required for a full refactor (not done here):
+theorem InvTm.abstr_weaken_pair {Γ : Ctx sig} {P L R : Object sig.nBases}
+    (m : NegNeu Γ P) (t : InvTm Γ L) (u : InvTm Γ R) :
+    InvTm.abstr (.here : Var (Γ ▻ P) P) (NegNeu.weaken (B := P) m)
+      (InvTm.weaken (B := P) (.pair t u)) =
+      .pair
+        (InvTm.abstr .here (NegNeu.weaken (B := P) m) (InvTm.weaken (B := P) t))
+        (InvTm.abstr .here (NegNeu.weaken (B := P) m) (InvTm.weaken (B := P) u)) := by
+  simp only [InvTm.weaken, InvTm.rename, InvTm.abstr]
 
-1. `ContReadyCert` transport under `atomPushCont` / `coprodPushCont*`
-   (cut/abstr preserves stage readiness) — replaces shape-derived push ready.
-2. Induction `applyPairObsGo … = .ok t → ContReadyCert cont →
-   ApplyPairObsReadyCert … t` under the real evaluator (consistency witnesses,
-   rest maps, inconsistency).
-3. Focusing / `completeInvRec` / binder re-entry produces `ContReadyCert`.
-4. Migrate `RawReferenceProduced` → carry `ReferencePhaseReadyCert` (or keep raw
-   and require cert separately for encode totality).
+/-! ### ContReadyCert under `atomPushCont` (closed fragment only) -/
 
-Fallback: have the reference phase emit `ICCCode` alongside (or instead of)
-saturated `InvTm`, so ordered readiness is definitional in the producer.
+theorem contReadyCert_atomPushCont_unit
+    {hyps : Array (Object sig.nBases)} {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps))) :
+    ContReadyCert (atomPushCont nP
+      (.unit : InvTm (Ctx.ofHyps hyps) .unit)) :=
+  encodeReady_atomPushCont_unit nP hws
 
-Expected migration cost: medium — quarantine enumeration lemmas as historical;
-new induction lives in this module / thin wrappers; `ICCTotal` stops growing
-shape cases. Do **not** delete green checkpoint lemmas until the preservation
-induction closes a mixed schedule end-to-end from `ContReadyCert cont` alone
-(transport under cut still open).
+theorem contReadyCert_atomPushCont_foc_pos
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (p : PosNeu (Ctx.ofHyps hyps) A)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    ContReadyCert (atomPushCont nP (.foc (.pos (.done p)))) :=
+  encodeReady_atomPushCont_foc_pos nP p hws hfr
+
+theorem contReadyCert_atomPushCont_foc_neg
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (nP : NegNeu (Ctx.ofHyps hyps) (.base b))
+    (n : NegNeu (Ctx.ofHyps hyps) A)
+    (hws : worklistBasesOnly
+      (OriginEnv.posWorklist (OriginEnv.ofHyps hyps)))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    ContReadyCert (atomPushCont nP (.foc (.neg (.done n)))) :=
+  encodeReady_atomPushCont_foc_neg nP n hws hfr
+
+/-! ### STOP — abstraction insufficient for full acceptance
+
+**Blocked (EncodeReady naturality, not schedule-shape cases):**
+
+1. Full `ContReadyCert cont → ContReadyCert (atomPushCont nP cont)` by
+   induction on `EncodeReady` fails at:
+   * `rightExp_lam` — body under `pushPos [] (.dom 0) Arg` (non-empty when Arg
+     is positive); needs `Rename.ext (Rename.weaken)` readiness naturality.
+   * `EncodeReadyFoc.letPos` — body under `pushPos [] (.obs k) Q`; cut-then-obs
+     vs obs-then-cut needs obsSlot/rekey × abstr naturality.
+2. Coprod: `StageEncodeReady (.case …)` cannot hold under bases-only `ofHyps`
+   worklists (`forcedRule` strips to `.focus`, requiring `.foc`). Needs
+   `.leftCoprod` worklist alignment or a different stage readiness notion.
+   Gap in `StageEncodeReady := EncodeReady (posWorklist (ofHyps …))`.
+
+Adding `*DerivedContShape` / nil-rest disjunctions would re-enter the paused
+enumeration loop. Direct `ICCCode` production remains the fallback if these
+naturality lemmas stay out of reach.
+
+**Acceptance test:** not met for exact atom / coprod / consistency.
+Only the nil schedule is closed with sole premise `ContReadyCert cont`.
+Do **not** migrate totality, drop `ValidEncodeFragment.ready`, or retire
+restricted `ICCTotal` lemmas.
 -/
+
+/-- Nil schedule: only readiness premise is `ContReadyCert cont`. -/
+theorem stageEncodeReady_applyPairObsGo_nil
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {fuel : Nat} {σ : ReachState sig.nBases}
+    {cont t : InvTm (Ctx.ofHyps hyps) A}
+    (hcont : ContReadyCert cont)
+    (hok : applyPairObsGo (fuel + 1) σ hyps ([] : List (PairEntry sig hyps)) cont =
+      .ok t) :
+    StageEncodeReady t := by
+  simp only [applyPairObsGo] at hok
+  cases hok
+  exact hcont
+
+theorem applyPairObsReadyCert_of_nil_ok
+    {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
+    {fuel : Nat} {σ : ReachState sig.nBases}
+    {cont t : InvTm (Ctx.ofHyps hyps) A}
+    (hcont : ContReadyCert cont)
+    (hok : applyPairObsGo (fuel + 1) σ hyps ([] : List (PairEntry sig hyps)) cont =
+      .ok t) :
+    ApplyPairObsReadyCert (fuel + 1) σ hyps [] cont t := by
+  simp only [applyPairObsGo] at hok
+  cases hok
+  exact applyPairObsReadyCert_nil hcont
+
+end Equality
+end Gimbal
