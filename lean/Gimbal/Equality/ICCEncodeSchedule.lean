@@ -2,8 +2,8 @@
   Certified schedule composition at `AtSaturationBoundary`.
 
   Proof-relevant schedule results + generic nil and exact-atom recursive clauses.
-  Exact-coproduct clause scaffolding is present; packaging is blocked on a
-  skip1 / rekey InvCert commuting law (see STOP report in-file).
+  Exact-coproduct scaffolding + skip-binder transport spike: observation origin
+  is not recoverable from legacy ofHyps branch states (see in-file STOP).
 
   Does **not** change `applyObsNeu`, RawReference, totality, or `referenceCompare`.
   Consistency schedule clauses are deferred.
@@ -328,50 +328,300 @@ def afterExactCoprodL_retained
             rw [Ctx.ofHyps_push hyps P]
   EncodeIx.castCtx hctx.symm sSplit
 
+/-! ## Skip-binder transport spike (exact-coproduct prerequisite)
+
+Contexts are intentionally unequal: legacy `Γ ▻ L` embeds into retained
+`Γ ▻ .coprod L R ▻ L` by `Rename.skip1`. This section defines that embedding,
+the legacy↔retained state transition, and checks whether the retained
+observation origin is recoverable from the legacy branch state.
+-/
+
+/-- Snoc-form rename: `(Γ ▻ L) → (Γ ▻ .coprod L R ▻ L)`. -/
+abbrev branchEmbedRenameL {Γ : Ctx sig} (L R : Object sig.nBases) :
+    Rename sig (Γ ▻ L) (Γ ▻ .coprod L R ▻ L) :=
+  Rename.skip1 (B := .coprod L R)
+
+abbrev branchEmbedRenameR {Γ : Ctx sig} (L R : Object sig.nBases) :
+    Rename sig (Γ ▻ R) (Γ ▻ .coprod L R ▻ R) :=
+  Rename.skip1 (B := .coprod L R)
+
+/--
+`ofHyps` legacy term → retained snoc context via `ofHyps_push` then `skip1`.
+No appeal to a finished expected term.
+-/
+def branchEmbedTermL
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    {X : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps (hyps.push L)) X) :
+    InvTm (Ctx.ofHyps hyps ▻ .coprod L R ▻ L) X :=
+  InvTm.rename (branchEmbedRenameL (Γ := Ctx.ofHyps hyps) L R)
+    (InvTm.castCtx (Ctx.ofHyps_push hyps L) t)
+
+def branchEmbedTermR
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    {X : Object sig.nBases}
+    (t : InvTm (Ctx.ofHyps (hyps.push R)) X) :
+    InvTm (Ctx.ofHyps hyps ▻ .coprod L R ▻ R) X :=
+  InvTm.rename (branchEmbedRenameR (Γ := Ctx.ofHyps hyps) L R)
+    (InvTm.castCtx (Ctx.ofHyps_push hyps R) t)
+
+/-- Retained left split state (snoc form) — target of packaging. -/
+def retainedSplitL
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    EncodeIx (sig := sig) (Ctx.ofHyps hyps ▻ .coprod L R ▻ L) :=
+  (s.bindObs (.coprod L R)).splitL (obsEntryOf s (.coprod L R)) L
+
+def retainedSplitR
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    EncodeIx (sig := sig) (Ctx.ofHyps hyps ▻ .coprod L R ▻ R) :=
+  (s.bindObs (.coprod L R)).splitR (obsEntryOf s (.coprod L R)) R
+
+/-- Observation origin introduced by `bindObs` at parent `s` (explicit, not defeq). -/
+def retainedObsOrigin (s : EncodeIx (sig := sig) Γ) : Origin sig :=
+  .obs (sig := sig) s.obsNext
+
+/--
+Explicit transition witness between legacy `afterExactCoprodL` and `retainedSplitL`.
+Bundles the related states; equality of the two EncodeIx values is not claimed.
+-/
+structure BranchStateTransitionL
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) where
+  /-- Parent saturation boundary (needed for singleton-split worklist). -/
+  boundary : AtSaturationBoundary s
+
+/-- Counters agree (both stepped past the retained observation). -/
+theorem branchState_domNext_eq
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    (afterExactCoprodL L R s).domNext = (retainedSplitL L R s).domNext :=
+  rfl
+
+theorem branchState_obsNext_eq
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    (afterExactCoprodL L R s).obsNext = (retainedSplitL L R s).obsNext :=
+  rfl
+
+theorem afterExactCoprodL_ws_nil
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    (afterExactCoprodL L R s).ws = [] :=
+  rfl
+
+/--
+Under a parent boundary, retained left worklist is `pushPos` of the split
+entry onto the empty tail (singleton when `L` is positive; empty when negative).
+-/
+theorem retainedSplitL_ws_of_boundary
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    (hb : AtSaturationBoundary s) :
+    (retainedSplitL L R s).ws =
+      pushPos ([] : List (PosEntry sig))
+        (.split (retainedObsOrigin s) false) L := by
+  have hpos : objectPolarity (.coprod L R : Object sig.nBases) = .pos := by
+    simp [objectPolarity_coprod]
+  have hwsObs :
+      (s.bindObs (.coprod L R)).ws = [obsEntryOf s (.coprod L R)] :=
+    bindObs_ws_of_boundary s (.coprod L R) hb hpos
+  simp only [retainedSplitL, retainedObsOrigin, EncodeIx.splitL, hwsObs, obsEntryOf,
+    List.tail_cons]
+
+/-- Retained env at the L binder is the split of the retained observation. -/
+theorem retainedSplitL_env_here
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    (retainedSplitL L R s).env (Var.here : Var _ L) =
+      .split (retainedObsOrigin s) false :=
+  rfl
+
+/--
+Pullback of retained env along `skip1`: L carries `split obs false`;
+Γ variables read through parent `s.env` (obs binder skipped).
+-/
+theorem retainedSplitL_env_rename_skip1_here
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    OriginEnv.rename (branchEmbedRenameL (Γ := Ctx.ofHyps hyps) L R)
+        (retainedSplitL L R s).env
+        (Var.here : Var (Ctx.ofHyps hyps ▻ L) L) =
+      .split (retainedObsOrigin s) false :=
+  rfl
+
+theorem retainedSplitL_env_rename_skip1_there
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) :
+    OriginEnv.rename (branchEmbedRenameL (Γ := Ctx.ofHyps hyps) L R)
+        (retainedSplitL L R s).env (.there x) =
+      s.env x :=
+  rfl
+
+/-- Legacy `ofHyps` env on the newest binder is a hyp — never the retained obs. -/
+theorem afterExactCoprodL_env_here_is_hyp
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    (afterExactCoprodL L R s).env (OriginEnv.herePush hyps L) =
+      Origin.hyp (sig := sig) hyps.size := by
+  simpa [afterExactCoprodL] using OriginEnv.ofHyps_here_push hyps L
+
+/-- Every legacy `ofHyps` origin is a `hyp` (no `obs` / `split` / `dom`). -/
+theorem afterExactCoprodL_env_is_hyp
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps (hyps.push L)) A) :
+    ∃ i, (afterExactCoprodL L R s).env x = .hyp (sig := sig) i :=
+  ⟨(hyps.push L).size - 1 - Var.toRawIdx x, by
+    simp [afterExactCoprodL, OriginEnv.ofHyps]⟩
+
+/-- The retained observation origin does not appear anywhere in the legacy env. -/
+theorem afterExactCoprodL_env_ne_obsOrigin
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps (hyps.push L)) A) :
+    (afterExactCoprodL L R s).env x ≠ retainedObsOrigin s := by
+  obtain ⟨i, hi⟩ := afterExactCoprodL_env_is_hyp L R s x
+  intro h
+  simp [hi, retainedObsOrigin] at h
+
+/--
+Pullback mismatch on `here`: retained skip1-pullback carries `split obs`,
+while legacy `ofHyps` weaken carries `hyp hyps.size`.
+-/
+theorem branchEmbed_env_here_mismatch
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    OriginEnv.rename (branchEmbedRenameL (Γ := Ctx.ofHyps hyps) L R)
+        (retainedSplitL L R s).env
+        (Var.here : Var (Ctx.ofHyps hyps ▻ L) L) ≠
+      OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps)
+        (.hyp (sig := sig) hyps.size)
+        (Var.here : Var (Ctx.ofHyps hyps ▻ L) L) := by
+  intro h
+  have hret := retainedSplitL_env_rename_skip1_here L R s
+  simp only [OriginEnv.weaken, OriginEnv.snoc] at h
+  have : (Origin.split (retainedObsOrigin s) false : Origin sig) =
+      .hyp (sig := sig) hyps.size := by
+    rw [← hret, h]
+  cases this
+
 /-!
-### STOP — exact-coproduct schedule clause
+### Attempted certificate transport
 
-**Intended clause** (atom-parallel):
+Target law (generic in the produced term/cert):
 
 ```
-certifiedSchedule_exactCoprod s hfr nSum rest fuel σ
-  (recL : CertifiedSchedule (afterExactCoprodL L R s)
-            (mapRestExactCoprodL … rest) A)
-  (recR : CertifiedSchedule (afterExactCoprodR L R s)
-            (mapRestExactCoprodR … rest) A)
-  : CertifiedSchedule s (.exact (.coprod L R) nSum :: rest) A
+Produced (afterExactCoprodL L R s) X →
+Produced (retainedSplitL L R s) X
 ```
 
-packaging via `retainedCoprodObsCertified` with branch `Produced` at the
-**derived** `(bindObs).splitL/splitR` states (not recovered from term syntax),
-using real `mapRestAbstractSumInl/Inr` and `coprodPushContL/R` for the
-empty-rest / η-continuation specialization.
+with term `branchEmbedTermL L R p.term`.
 
-**Blocked — context / rekey mismatch (not discharged by specializing branches):**
+The retained *target state* (incl. `.obs s.obsNext` in `env`) is built from
+parent `s`, not from the legacy `Produced` package. The legacy state’s env is
+`OriginEnv.ofHyps (hyps.push L)`, which by `afterExactCoprodL_env_ne_obsOrigin`
+never mentions that observation. Pullback along `skip1` therefore cannot be
+matched to the legacy env (`branchEmbed_env_here_mismatch`: `split obs` vs
+`hyp`).
 
-1. **Evaluator schedule index** — `mapRestExactCoprodL` yields
-   `PairEntry sig (hyps.push L)` at `Ctx.ofHyps (hyps.push L)`.
-2. **Retained encode branch index** — `retainedCoprodObsCertified` requires
-   `Produced` at `(s.bindObs (.coprod L R)).splitL e L`, context
-   `Ctx.ofHyps hyps ▻ .coprod L R ▻ L`
-   (`≃ ofHyps (hyps.push (.coprod L R) |>.push L)` via `afterExactCoprodL_retained`).
-3. **Term bridge** is `Rename.skip1` after `InvTm.castCtx (ofHyps_push hyps L)`,
-   not a `castCtx` on equal contexts (unlike `afterExactAtom` ↔ `(bindObs).pop`).
-4. **Missing generic commuting law** — `InvCert` / `EncodeReady` transport along
-   that skip1 + env/worklist rekey from the evaluator branch state
-   (`afterExactCoprodL`, empty ws, `ofHyps (hyps.push L)` env) to the retained
-   `splitL` state. Schedule-algebra side is partially closed in `ICCTotal`
-   (`leftCoprod_branch_schedule_gap` /
-   `posWorklist_rekey_weaken_hyp_to_split`); **EncodeReady transport under
-   `rekeyHypToSplit` + retained Sum-binder extension remains open**. Dropping the
-   left-coprod / split head is not a valid readiness consume for this rule.
+So InvCert transport that requires env agreement under the embedding cannot
+be obtained from the legacy certificate alone: the observation identity was
+discarded when `afterExactCoprodL` replaced `s.env` by `ofHyps`.
+-/
 
-Per instructions: do **not** resolve by equality to an expected finished term or
-by continuation-shape specialization. Consistency / never / public evaluator
-still deferred.
+/-- Term component of the would-be transport (always definable). -/
+def produced_branchEmbedTermL
+    {hyps : Array (Object sig.nBases)} {L R X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    (p : Produced (afterExactCoprodL L R s) X) :
+    InvTm (Ctx.ofHyps hyps ▻ .coprod L R ▻ L) X :=
+  branchEmbedTermL L R p.term
 
-`twoObsSchedule` keeps `CertifiedSchedule.ofProduced` for the inner coprod until
-this law exists.
+/--
+Spike test: an arbitrary certified legacy branch (`.unit`), no shape
+classification beyond inhabitance of `Produced`.
+-/
+def spikeLegacyUnit
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    Produced (afterExactCoprodL L R s) (.unit : Object sig.nBases) where
+  term := .unit
+  cert := by
+    change EncodeReady (afterExactCoprodL L R s).ws
+      (afterExactCoprodL L R s).env
+      (afterExactCoprodL L R s).domNext
+      (afterExactCoprodL L R s).obsNext
+      (.unit : InvTm _ .unit)
+    simpa [afterExactCoprodL] using
+      encodeReady_unit_nil (OriginEnv.ofHyps (hyps.push L))
+        s.domNext (s.obsNext + 1)
+
+theorem spikeLegacyUnit_embed_term
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    produced_branchEmbedTermL s (spikeLegacyUnit L R s) =
+      (.unit : InvTm (Ctx.ofHyps hyps ▻ .coprod L R ▻ L) .unit) := by
+  simp [produced_branchEmbedTermL, branchEmbedTermL, spikeLegacyUnit,
+    InvTm.castCtx_unit, InvTm.rename]
+
+/--
+Unit is encode-ready under *any* env at empty worklist, so the renamed unit
+is ready at `retainedSplitL.pop` under the retained env — but that still uses
+parent-derived `retainedSplitL`, not recovery from legacy env.
+-/
+theorem spikeUnit_ready_at_retained_pop
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps))
+    (hb : AtSaturationBoundary s) :
+    EncodeReady (sig := sig)
+      (retainedSplitL L R s).pop.ws
+      (retainedSplitL L R s).env
+      (retainedSplitL L R s).domNext
+      (retainedSplitL L R s).obsNext
+      (.unit : InvTm _ .unit) := by
+  have htail : (retainedSplitL L R s).pop.ws = [] := by
+    rw [EncodeIx.pop, retainedSplitL_ws_of_boundary L R s hb]
+    dsimp only [pushPos]
+    split
+    · simp [List.mergeSort_singleton]
+    · rfl
+  simpa [htail] using
+    encodeReady_unit_nil (retainedSplitL L R s).env
+      (retainedSplitL L R s).domNext (retainedSplitL L R s).obsNext
+
+/-!
+### Transport-spike STOP
+
+**Outcome:** the generic skip-binder *term* embedding is fine
+(`branchEmbedTermL` / `produced_branchEmbedTermL`). Counter and singleton-split
+worklist compatibility under `AtSaturationBoundary` are fine
+(`branchState_domNext_eq`, `branchState_obsNext_eq`,
+`retainedSplitL_ws_of_boundary`).
+
+**Failure mode:** the retained observation origin
+(`retainedObsOrigin s = .obs s.obsNext`) is **not** present in
+`afterExactCoprodL`’s `OriginEnv.ofHyps (hyps.push L)`
+(`afterExactCoprodL_env_ne_obsOrigin`). The skip1 pullback of the retained env
+carries `split obs` on `here`, while the legacy ofHyps weaken carries `hyp`
+(`branchEmbed_env_here_mismatch`). That env is obtained from parent `s` via
+`bindObs`/`splitL`, not from the legacy `Produced` package.
+
+Therefore a generic
+`Produced legacy → Produced retainedSplit` certificate transport cannot be
+fed solely by the legacy state’s fields: the observation identity was
+discarded when the legacy branch state was built from `ofHyps`.
+
+**Representation conclusion:** `CertifiedSchedule` remains too coupled to
+legacy `PairEntry` / `ofHyps` contexts for the retained EncodeIx path.
+Repair is **retained-state-indexed schedule entries** (entries whose neutrals
+and readiness live under the retained `EncodeIx` after `bindObs`/`split`),
+not another ofHyps↔split rekey lemma.
+
+Do not resume the full exact-coproduct schedule clause until that
+representation shift is designed. Consistency / public evaluator still deferred.
 -/
 
 /-! ## Atom → coproduct example via `certifiedSchedule_exactAtom` -/
@@ -580,20 +830,17 @@ theorem twoObsCode_eq_hyps :
 /-!
 ### Stop report
 
-**Exact-atom clause:** landed — `certifiedSchedule_nil` / `certifiedSchedule_exactAtom`
-with arbitrary `rest` and arbitrary recursive `CertifiedSchedule`.
+**Exact-atom clause:** landed.
 
-**Exact-coproduct clause:** STOPPED. Scaffolding
-(`mapRestExactCoprodL/R`, `exactCoprodPushContL/R`, `afterExactCoprodL/R`,
-`afterExactCoprodL_retained`) typechecks. Packaging with
-`retainedCoprodObsCertified` needs a missing generic `InvCert`/`EncodeReady`
-commuting law along skip1 + rekey from evaluator `ofHyps (hyps.push L)` to
-retained `splitL` (see in-file STOP). Not resolved by finished-term equality
-or branch-shape specialization.
+**Exact-coproduct clause:** not resumed. Transport spike shows the skip1 *term*
+embedding and counter/worklist compatibility work, but
+`afterExactCoprodL`’s `ofHyps` env permanently discards the retained observation
+origin. Generic `Produced` cert transport to `retainedSplitL` cannot recover it.
+**Repair:** retained-state-indexed schedule entries — not more ofHyps rekey lemmas.
 
 **Example:** `twoObsSchedule` still uses `ofProduced` for the inner coprod.
 
-Public evaluator / comparator untouched. Consistency still deferred.
+Public evaluator / comparator untouched.
 -/
 
 end Equality
