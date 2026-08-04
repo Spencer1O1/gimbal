@@ -373,23 +373,42 @@ def reconstructGoWF {σ : ReachState sig.nBases}
                 | some (.inr _) => true
                 | _ => false
               | none => false
+            -- Positive payloads: `foc pos done`; negative: shift via `PosNeu.val`.
             let inlVal : Option (ReconstructVal sig) :=
               match reconstructGoWF cert ambientRank (.invOf hyps L) with
-              | some (.inv hyps' A' (.foc (.pos (.done p)))) =>
+              | some (.inv hyps' A' t) =>
                 if hH : hyps' = hyps then
                   if hA : A' = L then
-                    some (.inv hyps (.coprod L R)
-                      (.foc (.pos (.done (.inl (hA ▸ (hH ▸ p)))))))
+                    let t' : InvTm (Ctx.ofHyps hyps) L :=
+                      InvTm.castTy hA (InvTm.castHyps hH t)
+                    if objectPolarity L == .neg then
+                      some (.inv hyps (.coprod L R)
+                        (.foc (.pos (.done (.inl (.val t'))))))
+                    else
+                      match t' with
+                      | .foc (.pos (.done p)) =>
+                          some (.inv hyps (.coprod L R)
+                            (.foc (.pos (.done (.inl p)))))
+                      | _ => none
                   else none
                 else none
               | _ => none
             let inrVal : Option (ReconstructVal sig) :=
               match reconstructGoWF cert ambientRank (.invOf hyps R) with
-              | some (.inv hyps' A' (.foc (.pos (.done p)))) =>
+              | some (.inv hyps' A' t) =>
                 if hH : hyps' = hyps then
                   if hA : A' = R then
-                    some (.inv hyps (.coprod L R)
-                      (.foc (.pos (.done (.inr (hA ▸ (hH ▸ p)))))))
+                    let t' : InvTm (Ctx.ofHyps hyps) R :=
+                      InvTm.castTy hA (InvTm.castHyps hH t)
+                    if objectPolarity R == .neg then
+                      some (.inv hyps (.coprod L R)
+                        (.foc (.pos (.done (.inr (.val t'))))))
+                    else
+                      match t' with
+                      | .foc (.pos (.done p)) =>
+                          some (.inv hyps (.coprod L R)
+                            (.foc (.pos (.done (.inr p)))))
+                      | _ => none
                   else none
                 else none
               | _ => none

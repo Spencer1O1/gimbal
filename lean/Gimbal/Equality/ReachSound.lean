@@ -170,10 +170,61 @@ theorem ReachState.markHyp_inconsistent_of_never (σ : ReachState n) (Γ : Reach
   rw [hi]
   simp [ReachState.markInconsistentIf]
 
+theorem ReachState.markHyp_eq_of_findTypeIdx_none (σ : ReachState n) (Γ : ReachCtx n)
+    (k : Nat) {A : Object n}
+    (hA : Γ.hyps[k]? = some A) (hi : σ.findTypeIdx A = none) :
+    σ.markHyp Γ k = σ := by
+  unfold ReachState.markHyp
+  simp [hA, hi]
+
+theorem ReachState.getCell_markHyp_of_find (σ : ReachState n) (Γ : ReachCtx n)
+    (k i : Nat) {A : Object n}
+    (hA : Γ.hyps[k]? = some A) (hi : σ.findTypeIdx A = some i)
+    (hlt : i < σ.cells.size) :
+    (σ.markHyp Γ k).getCell i =
+      (σ.getCell i).recordHyp (Γ.isNew k) (.ctxVar k) := by
+  unfold ReachState.markHyp
+  simp [hA, hi, ReachState.getCell_markInconsistentIf]
+  exact ReachState.getCell_setCell_self hlt
+
+/-! ### Size invariant (cells ↔ types) -/
+
+/-- One cell per subformula-table entry. -/
+def ReachState.Sized (σ : ReachState n) : Prop :=
+  σ.cells.size = σ.types.size
+
+theorem ReachState.Sized.mono {σ τ : ReachState n} (h : ReachState.Le σ τ)
+    (hs : ReachState.Sized σ) : ReachState.Sized τ := by
+  unfold ReachState.Sized at hs ⊢
+  rw [← h.size, ← h.types]
+  exact hs
+
+theorem ReachState.lt_types_of_typeAt {σ : ReachState n} {i : Nat} {A : Object n}
+    (h : σ.typeAt i = some A) : i < σ.types.size :=
+  (Array.getElem?_eq_some_iff.mp h).1
+
+theorem ReachState.lt_cells_of_typeAt {σ : ReachState n} {i : Nat} {A : Object n}
+    (hsz : ReachState.Sized σ) (h : σ.typeAt i = some A) : i < σ.cells.size := by
+  rw [ReachState.Sized] at hsz
+  rw [hsz]
+  exact ReachState.lt_types_of_typeAt h
+
+/-- Recording always yields a simply-deducible cell. -/
+theorem ReachCell.simplyDeducible_record (c : ReachCell) (b : Bool) (w : Witness) :
+    (c.record b w).simplyDeducible = true := by
+  unfold ReachCell.simplyDeducible
+  rcases ReachCell.record_witnessed c b w with h | h <;> simp [h]
+
+/-- `recordHyp` is always simply deducible (retrievable). -/
+theorem ReachCell.simplyDeducible_recordHyp (c : ReachCell) (b : Bool) (w : Witness) :
+    (c.recordHyp b w).simplyDeducible = true := by
+  simp [ReachCell.simplyDeducible, ReachCell.recordHyp_retrievable]
+
 /-! ### The soundness invariant -/
 
 /-- Every recorded fact is backed by a derivation of the right provenance. -/
 structure ReachSound (Γ : ReachCtx n) (σ : ReachState n) : Prop where
+  sized : ReachState.Sized σ
   old : ∀ i A, σ.typeAt i = some A → (σ.getCell i).oldWitness.isSome = true →
     OldDeduction Γ A
   new : ∀ i A, σ.typeAt i = some A → (σ.getCell i).newWitness.isSome = true →
@@ -185,6 +236,10 @@ structure ReachSound (Γ : ReachCtx n) (σ : ReachState n) : Prop where
   neverFlagged : ∀ i, σ.typeAt i = some (.never : Object n) →
     (σ.getCell i).simplyDeducible = true → σ.inconsistent = true
   inconsistent : σ.inconsistent = true → SimpleDeduction Γ (.never : Object n)
+  /-- Inconsistency always coincides with a simply-deducible `.never` cell. -/
+  inconsistentNever : σ.inconsistent = true →
+    ∃ i, σ.typeAt i = some (.never : Object n) ∧
+      (σ.getCell i).simplyDeducible = true
   /-- An η witness on a product was written from already-SD components. -/
   etaProd : ∀ i L R, σ.typeAt i = some (.prod L R) →
     ((σ.getCell i).oldWitness = some .eta ∨ (σ.getCell i).newWitness = some .eta) →
@@ -549,7 +604,8 @@ theorem ReachSound.discoverAt {Γ : ReachCtx n} {σ : ReachState n}
     · exact (hnew hb).toSimple
   have htypes : ∀ j, (σ.discover i b w).typeAt j = σ.typeAt j := by
     intro j; exact ReachState.typeAt_discover σ i b w j
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact ReachState.Sized.mono hle h.sized
   · intro j B hB hsome
     rw [ReachState.typeAt_discover] at hB
     rcases ReachState.getCell_discover σ i b w j with heq | ⟨rfl, heq⟩
@@ -592,6 +648,18 @@ theorem ReachSound.discoverAt {Γ : ReachCtx n} {σ : ReachState n}
     · exact h.inconsistent hinc
     · have : A = (.never : Object n) := ReachState.typeAt_inj hA hnever
       exact this ▸ hAsimple
+  · intro hinc
+    rcases ReachState.inconsistent_discover hinc with hinc0 | hnever
+    · obtain ⟨j, hty, hsd⟩ := h.inconsistentNever hinc0
+      refine ⟨j, by rw [ReachState.typeAt_discover]; exact hty, ?_⟩
+      rcases ReachState.getCell_discover σ i b w j with heq | ⟨_, heq⟩
+      · rwa [heq]
+      · rw [heq]; exact ReachCell.simplyDeducible_record _ _ _
+    · refine ⟨i, by rw [ReachState.typeAt_discover]; exact hnever, ?_⟩
+      have hlt := ReachState.lt_cells_of_typeAt h.sized hA
+      unfold ReachState.discover
+      rw [hA, ReachState.getCell_markInconsistentIf, ReachState.getCell_setCell_self hlt]
+      exact ReachCell.simplyDeducible_record _ _ _
   · intro j L R hB hetaW
     rw [ReachState.typeAt_discover] at hB
     rcases ReachState.getCell_discover σ i b w j with heq | ⟨hij, heq⟩
@@ -729,7 +797,8 @@ theorem ReachSound.markHypAt {Γ : ReachCtx n} {σ : ReachState n}
   have hle := σ.le_markHyp Γ k
   have htypes : ∀ j, (σ.markHyp Γ k).typeAt j = σ.typeAt j := by
     intro j; simp [ReachState.typeAt, ← (σ.le_markHyp Γ k).types]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact ReachState.Sized.mono hle h.sized
   · intro j B hB hsome
     rw [ReachState.typeAt_markHyp] at hB
     rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨A, i, hA, hi, rfl, heq⟩
@@ -776,6 +845,30 @@ theorem ReachSound.markHypAt {Γ : ReachCtx n} {σ : ReachState n}
     rcases ReachState.inconsistent_markHyp hinc with hinc | hnever
     · exact h.inconsistent hinc
     · exact .hyp k hnever rfl trivial trivial
+  · intro hinc
+    rcases ReachState.inconsistent_markHyp hinc with hinc0 | hnever
+    · obtain ⟨j, hty, hsd⟩ := h.inconsistentNever hinc0
+      refine ⟨j, by rw [ReachState.typeAt_markHyp]; exact hty, ?_⟩
+      rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨_, _, _, _, _, heq⟩
+      · rwa [heq]
+      · rw [heq]; exact ReachCell.simplyDeducible_recordHyp _ _ _
+    · cases hi : σ.findTypeIdx (.never : Object n) with
+      | none =>
+          have hinc0 : σ.inconsistent = true := by
+            rwa [ReachState.markHyp_eq_of_findTypeIdx_none σ Γ k hnever hi] at hinc
+          obtain ⟨j, hty, hsd⟩ := h.inconsistentNever hinc0
+          refine ⟨j, by rw [ReachState.typeAt_markHyp]; exact hty, ?_⟩
+          rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨_, _, _, _, _, heq⟩
+          · rwa [heq]
+          · rw [heq]; exact ReachCell.simplyDeducible_recordHyp _ _ _
+      | some i =>
+          refine ⟨i, ?_, ?_⟩
+          · rw [ReachState.typeAt_markHyp]
+            exact ReachState.typeAt_of_findTypeIdx hi
+          · rw [ReachState.getCell_markHyp_of_find σ Γ k i hnever hi
+                (ReachState.lt_cells_of_typeAt h.sized
+                  (ReachState.typeAt_of_findTypeIdx hi))]
+            exact ReachCell.simplyDeducible_recordHyp _ _ _
   · intro j L R hB hetaW
     rw [ReachState.typeAt_markHyp] at hB
     rcases ReachState.getCell_markHyp σ Γ k j with heq | ⟨A, idx, hA, hi, hij, heq⟩
@@ -1213,14 +1306,17 @@ private theorem getCell_initial (types : Array (Object n)) (i : Nat) :
   · rw [if_neg hi]
 
 theorem reachSound_of_empty (Γ : ReachCtx n) (σ : ReachState n)
+    (hsz : ReachState.Sized σ)
     (hcell : ∀ i, σ.getCell i = ReachCell.empty) (hinc : σ.inconsistent = false) :
     ReachSound Γ σ := by
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact hsz
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
   · intro i A _ hs; rw [hcell i] at hs; simp at hs
   · intro i hs; rw [hcell i] at hs; simp at hs
   · intro i _ hs; rw [hcell i] at hs; simp [ReachCell.simplyDeducible] at hs
+  · intro hs; rw [hinc] at hs; simp at hs
   · intro hs; rw [hinc] at hs; simp at hs
   · intro i L R _ hetaW; rw [hcell i] at hetaW; simp at hetaW
   · intro i Arg Ret _ hetaW; rw [hcell i] at hetaW; simp at hetaW
@@ -1231,7 +1327,12 @@ theorem mkReachState_sound (Γ : ReachCtx n) (goal : Object n) :
     ReachSound Γ (mkReachState Γ goal) := by
   unfold mkReachState
   refine foldl_sound (seedHypRule Γ) (fun _ k hs => seedHypRule_sound hs k) _ _ ?_
-  exact reachSound_of_empty Γ _ (fun i => getCell_initial _ i) rfl
+  refine reachSound_of_empty Γ _ ?_ (fun i => getCell_initial _ i) rfl
+  -- Initial table: `replicate types.size` cells.
+  show ReachState.Sized
+      { types := subformulaClosure (Γ.roots goal)
+        cells := Array.replicate (subformulaClosure (Γ.roots goal)).size ReachCell.empty }
+  simp [ReachState.Sized]
 
 theorem runReachabilityFrom_sound (Γ : ReachCtx n) (σ : ReachState n) :
     ReachSound Γ σ → ReachSound Γ (runReachabilityFrom Γ σ) := by

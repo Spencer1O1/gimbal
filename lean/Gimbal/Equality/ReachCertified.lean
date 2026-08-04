@@ -205,6 +205,14 @@ theorem reconObjectSize_exp_ret_lt {n : Nat} (Arg Ret : Object n) :
     reconObjectSize Ret < reconObjectSize (.exp Arg Ret) := by
   simp [reconObjectSize]; try omega
 
+theorem reconObjectSize_coprod_left_lt {n : Nat} (L R : Object n) :
+    reconObjectSize L < reconObjectSize (.coprod L R) := by
+  simp [reconObjectSize]; try omega
+
+theorem reconObjectSize_coprod_right_lt {n : Nat} (L R : Object n) :
+    reconObjectSize R < reconObjectSize (.coprod L R) := by
+  simp [reconObjectSize]; try omega
+
 /-! ## Reconstruction phase (lex component) -/
 
 inductive ReconPhase where
@@ -421,7 +429,16 @@ def WitnessDepsOk {n : Nat} (σ : ReachState n) (i : Nat) : Witness → List Nat
   | .fstType p, ps | .sndType p, ps => ps = RuleDeps.typeProj p
   | .app _argHyp arg, ps => ps = RuleDeps.hypApp arg
   | .appTy fn arg, ps => ps = RuleDeps.typeApp fn arg
-  | .inl p, ps | .inr p, ps => ps = RuleDeps.coprodIntro p
+  | .inl p, ps =>
+      match σ.typeAt i with
+      | some (.coprod L _R) =>
+          ps = RuleDeps.coprodIntro p ∧ σ.typeAt p = some L
+      | _ => False
+  | .inr p, ps =>
+      match σ.typeAt i with
+      | some (.coprod _L R) =>
+          ps = RuleDeps.coprodIntro p ∧ σ.typeAt p = some R
+      | _ => False
   | .unit, ps => ps = RuleDeps.unit
   | .eta, ps =>
       match σ.typeAt i with
@@ -473,11 +490,21 @@ theorem WitnessDepsOk.app {n : Nat} (σ : ReachState n) (i fnHyp arg : Nat) :
 theorem WitnessDepsOk.appTy {n : Nat} (σ : ReachState n) (i fn arg : Nat) :
     WitnessDepsOk σ i (.appTy fn arg) (RuleDeps.typeApp fn arg) := rfl
 
-theorem WitnessDepsOk.inl {n : Nat} (σ : ReachState n) (i p : Nat) :
-    WitnessDepsOk σ i (.inl p) (RuleDeps.coprodIntro p) := rfl
+theorem WitnessDepsOk.inl {n : Nat} {σ : ReachState n} {i p : Nat}
+    {L R : Object n}
+    (hty : σ.typeAt i = some (.coprod L R))
+    (hL : σ.typeAt p = some L) :
+    WitnessDepsOk σ i (.inl p) (RuleDeps.coprodIntro p) := by
+  dsimp [WitnessDepsOk]
+  simp [hty, hL]
 
-theorem WitnessDepsOk.inr {n : Nat} (σ : ReachState n) (i p : Nat) :
-    WitnessDepsOk σ i (.inr p) (RuleDeps.coprodIntro p) := rfl
+theorem WitnessDepsOk.inr {n : Nat} {σ : ReachState n} {i p : Nat}
+    {L R : Object n}
+    (hty : σ.typeAt i = some (.coprod L R))
+    (hR : σ.typeAt p = some R) :
+    WitnessDepsOk σ i (.inr p) (RuleDeps.coprodIntro p) := by
+  dsimp [WitnessDepsOk]
+  simp [hty, hR]
 
 theorem WitnessDepsOk.eta_prod {n : Nat} {σ : ReachState n} {i lIdx rIdx : Nat}
     {L R : Object n}
@@ -502,7 +529,31 @@ theorem WitnessDepsOk.of_types_eq {n : Nat} {σ τ : ReachState n}
     (h : WitnessDepsOk σ i w ps) : WitnessDepsOk τ i w ps := by
   cases w with
   | ctxVar _ | fstHyp _ | sndHyp _ | fstType _ | sndType _ | app _ _ | appTy _ _
-    | inl _ | inr _ | unit => exact h
+    | unit => exact h
+  | inl p =>
+      dsimp [WitnessDepsOk] at h ⊢
+      rw [ht i]
+      cases hty : σ.typeAt i with
+      | none => simp [hty] at h
+      | some A =>
+          simp only [hty] at h ⊢
+          cases A with
+          | coprod L R =>
+              obtain ⟨hps, hL⟩ := h
+              exact ⟨hps, (ht p).trans hL⟩
+          | _ => exact h
+  | inr p =>
+      dsimp [WitnessDepsOk] at h ⊢
+      rw [ht i]
+      cases hty : σ.typeAt i with
+      | none => simp [hty] at h
+      | some A =>
+          simp only [hty] at h ⊢
+          cases A with
+          | coprod L R =>
+              obtain ⟨hps, hR⟩ := h
+              exact ⟨hps, (ht p).trans hR⟩
+          | _ => exact h
   | eta =>
       dsimp [WitnessDepsOk] at h ⊢
       rw [ht i]
@@ -627,15 +678,23 @@ theorem ReachRankCert.deps_of_eta_exp {n : Nat} {σ : ReachState n}
 
 theorem ReachRankCert.deps_of_inl {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) {i : Nat} {b : SlotNew} {p : Nat}
-    (hw : (σ.getCell i).slotWitness b = some (.inl p)) :
-    cert.deps i b = RuleDeps.coprodIntro p :=
-  cert.deps_sound i b (.inl p) hw
+    {L R : Object n}
+    (hw : (σ.getCell i).slotWitness b = some (.inl p))
+    (hty : σ.typeAt i = some (.coprod L R)) :
+    cert.deps i b = RuleDeps.coprodIntro p ∧ σ.typeAt p = some L := by
+  have h := cert.deps_sound i b (.inl p) hw
+  dsimp [WitnessDepsOk] at h
+  simpa [hty] using h
 
 theorem ReachRankCert.deps_of_inr {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) {i : Nat} {b : SlotNew} {p : Nat}
-    (hw : (σ.getCell i).slotWitness b = some (.inr p)) :
-    cert.deps i b = RuleDeps.coprodIntro p :=
-  cert.deps_sound i b (.inr p) hw
+    {L R : Object n}
+    (hw : (σ.getCell i).slotWitness b = some (.inr p))
+    (hty : σ.typeAt i = some (.coprod L R)) :
+    cert.deps i b = RuleDeps.coprodIntro p ∧ σ.typeAt p = some R := by
+  have h := cert.deps_sound i b (.inr p) hw
+  dsimp [WitnessDepsOk] at h
+  simpa [hty] using h
 
 theorem ReachRankCert.ranked_parents_of_eta_prod {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) {i : Nat} {b : SlotNew} {r : Nat} {L R : Object n}
@@ -671,27 +730,33 @@ theorem ReachRankCert.ranked_parents_of_eta_exp {n : Nat} {σ : ReachState n}
 
 theorem ReachRankCert.ranked_parent_of_inl {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) {i : Nat} {b : SlotNew} {r p : Nat}
+    {L R : Object n}
     (hw : (σ.getCell i).slotWitness b = some (.inl p))
+    (hty : σ.typeAt i = some (.coprod L R))
     (hr : cert.rank i b = some r) :
     ∃ (bP : SlotNew) (rP : Nat),
       cert.deps i b = RuleDeps.coprodIntro p ∧
-        cert.rank p bP = some rP ∧ rP < r := by
-  have hdeps := cert.deps_of_inl hw
+        σ.typeAt p = some L ∧
+          cert.rank p bP = some rP ∧ rP < r := by
+  obtain ⟨hdeps, hL⟩ := cert.deps_of_inl hw hty
   have hmem : p ∈ cert.deps i b := by simp [hdeps, RuleDeps.coprodIntro]
   obtain ⟨bP, rP, hrP, hlt⟩ := cert.parents_lt i b r hr p hmem
-  exact ⟨bP, rP, hdeps, hrP, hlt⟩
+  exact ⟨bP, rP, hdeps, hL, hrP, hlt⟩
 
 theorem ReachRankCert.ranked_parent_of_inr {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) {i : Nat} {b : SlotNew} {r p : Nat}
+    {L R : Object n}
     (hw : (σ.getCell i).slotWitness b = some (.inr p))
+    (hty : σ.typeAt i = some (.coprod L R))
     (hr : cert.rank i b = some r) :
     ∃ (bP : SlotNew) (rP : Nat),
       cert.deps i b = RuleDeps.coprodIntro p ∧
-        cert.rank p bP = some rP ∧ rP < r := by
-  have hdeps := cert.deps_of_inr hw
+        σ.typeAt p = some R ∧
+          cert.rank p bP = some rP ∧ rP < r := by
+  obtain ⟨hdeps, hR⟩ := cert.deps_of_inr hw hty
   have hmem : p ∈ cert.deps i b := by simp [hdeps, RuleDeps.coprodIntro]
   obtain ⟨bP, rP, hrP, hlt⟩ := cert.parents_lt i b r hr p hmem
-  exact ⟨bP, rP, hdeps, hrP, hlt⟩
+  exact ⟨bP, rP, hdeps, hR, hrP, hlt⟩
 
 /-! ## Certified reachability result -/
 
@@ -2486,90 +2551,99 @@ theorem certifiedExpAppRule_project {n : Nat} (σ : ReachState n)
           (fun hfire => NeutralParentPremise_of_expApp_fire ti aIdx hfire)
           (WitnessDepsOk.appTy σ rIdx ti aIdx)
 
-def certifiedCoprodTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
-    (ti : Nat) (L R : Object n) : CertifiedReachResult n :=
+private def certifiedCoprodTypeRule.go {n : Nat}
+    (σ : ReachState n) (cert : ReachRankCert σ) (ti : Nat)
+    (L R : Object n) (hti : σ.typeAt ti = some (.coprod L R))
+    (lIdx rIdx : Nat)
+    (hLty : σ.typeAt lIdx = some L) (hRty : σ.typeAt rIdx = some R) :
+    CertifiedReachResult n :=
   if (σ.getCell ti).simplyDeducible then ⟨σ, cert⟩
+  else if hL : (σ.getCell lIdx).simplyDeducible = true then
+    certifiedDiscoverDual σ cert ti
+      (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+      (.inl lIdx) (RuleDeps.coprodIntro lIdx)
+      (fun _ => RankedParents.singleton_of_simplyDeducible cert lIdx hL)
+      (fun _ => True.intro)
+      (WitnessDepsOk.inl hti hLty)
+  else if hR : (σ.getCell rIdx).simplyDeducible = true then
+    certifiedDiscoverDual σ cert ti
+      (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
+      (.inr rIdx) (RuleDeps.coprodIntro rIdx)
+      (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hR)
+      (fun _ => True.intro)
+      (WitnessDepsOk.inr hti hRty)
   else
-    match σ.findTypeIdx L, σ.findTypeIdx R with
-    | some lIdx, some rIdx =>
-        if hL : (σ.getCell lIdx).simplyDeducible = true then
-          certifiedDiscoverDual σ cert ti
-            (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
-            (.inl lIdx) (RuleDeps.coprodIntro lIdx)
-            (fun _ => RankedParents.singleton_of_simplyDeducible cert lIdx hL)
-            (fun _ => True.intro) (WitnessDepsOk.inl σ ti lIdx)
-        else if hR : (σ.getCell rIdx).simplyDeducible = true then
-          certifiedDiscoverDual σ cert ti
+    ⟨σ, cert⟩
+
+def certifiedCoprodTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (L R : Object n) (hti : σ.typeAt ti = some (.coprod L R)) :
+    CertifiedReachResult n :=
+  match hl : σ.findTypeIdx L, hr : σ.findTypeIdx R with
+  | some lIdx, some rIdx =>
+      certifiedCoprodTypeRule.go σ cert ti L R hti lIdx rIdx
+        (ReachState.typeAt_of_findTypeIdx hl)
+        (ReachState.typeAt_of_findTypeIdx hr)
+  | _, _ => ⟨σ, cert⟩
+
+private theorem certifiedCoprodTypeRule.go_project {n : Nat}
+    (σ : ReachState n) (cert : ReachRankCert σ) (ti : Nat)
+    (L R : Object n) (hti : σ.typeAt ti = some (.coprod L R))
+    (lIdx rIdx : Nat)
+    (hLty : σ.typeAt lIdx = some L) (hRty : σ.typeAt rIdx = some R) :
+    (certifiedCoprodTypeRule.go σ cert ti L R hti lIdx rIdx hLty hRty).project =
+      (if (σ.getCell ti).simplyDeducible then σ
+       else if (σ.getCell lIdx).simplyDeducible then
+         σ.discoverDual ti (σ.getCell lIdx).oldDeducible
+           (σ.getCell lIdx).usesNew (.inl lIdx)
+       else if (σ.getCell rIdx).simplyDeducible then
+         σ.discoverDual ti (σ.getCell rIdx).oldDeducible
+           (σ.getCell rIdx).usesNew (.inr rIdx)
+       else σ) := by
+  dsimp only [certifiedCoprodTypeRule.go]
+  split
+  · rfl
+  · split
+    · next hL =>
+        exact certifiedDiscoverDual_project σ cert ti
+          (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
+          (.inl lIdx) (RuleDeps.coprodIntro lIdx) _ _ _
+    · split
+      · next hR =>
+          exact certifiedDiscoverDual_project σ cert ti
             (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
-            (.inr rIdx) (RuleDeps.coprodIntro rIdx)
-            (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hR)
-            (fun _ => True.intro) (WitnessDepsOk.inr σ ti rIdx)
-        else
-          ⟨σ, cert⟩
-    | _, _ => ⟨σ, cert⟩
+            (.inr rIdx) (RuleDeps.coprodIntro rIdx) _ _ _
+      · rfl
 
 theorem certifiedCoprodTypeRule_project {n : Nat} (σ : ReachState n)
-    (cert : ReachRankCert σ) (ti : Nat) (L R : Object n) :
-    (certifiedCoprodTypeRule σ cert ti L R).project = coprodTypeRule σ ti L R := by
-  simp only [certifiedCoprodTypeRule, coprodTypeRule]
-  cases (σ.getCell ti).simplyDeducible with
-  | true => simp [CertifiedReachResult.project]
-  | false =>
-      simp only [Bool.not_false, ↓reduceIte]
-      cases hl : σ.findTypeIdx L with
-      | none => simp [hl, CertifiedReachResult.project]
-      | some lIdx =>
-        cases hr : σ.findTypeIdx R with
-        | none => simp [hl, hr, CertifiedReachResult.project]
-        | some rIdx =>
-            simp only [hl, hr]
-            refine Eq.trans
-              (CertifiedReachResult.project_dite_bool
-                (σ.getCell lIdx).simplyDeducible
-                (fun hL =>
-                  certifiedDiscoverDual σ cert ti
-                    (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
-                    (.inl lIdx) (RuleDeps.coprodIntro lIdx)
-                    (fun _ => RankedParents.singleton_of_simplyDeducible cert lIdx hL)
-                    (fun _ => True.intro) (WitnessDepsOk.inl σ ti lIdx))
-                (if hR : (σ.getCell rIdx).simplyDeducible = true then
-                  certifiedDiscoverDual σ cert ti
-                    (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
-                    (.inr rIdx) (RuleDeps.coprodIntro rIdx)
-                    (fun _ => RankedParents.singleton_of_simplyDeducible cert rIdx hR)
-                    (fun _ => True.intro) (WitnessDepsOk.inr σ ti rIdx)
-                 else ⟨σ, cert⟩)
-                (σ.discoverDual ti (σ.getCell lIdx).oldDeducible
-                  (σ.getCell lIdx).usesNew (.inl lIdx))
-                (if (σ.getCell rIdx).simplyDeducible then
-                  σ.discoverDual ti (σ.getCell rIdx).oldDeducible
-                    (σ.getCell rIdx).usesNew (.inr rIdx)
-                 else σ)
-                (fun hL =>
-                  certifiedDiscoverDual_project σ cert ti
-                    (σ.getCell lIdx).oldDeducible (σ.getCell lIdx).usesNew
-                    (.inl lIdx) (RuleDeps.coprodIntro lIdx) _
-                    (fun _ => True.intro) (WitnessDepsOk.inl σ ti lIdx))
-                (CertifiedReachResult.project_dite_bool
-                  (σ.getCell rIdx).simplyDeducible
-                  (fun hR =>
-                    certifiedDiscoverDual σ cert ti
-                      (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
-                      (.inr rIdx) (RuleDeps.coprodIntro rIdx)
-                      (fun _ =>
-                        RankedParents.singleton_of_simplyDeducible cert rIdx hR)
-                      (fun _ => True.intro) (WitnessDepsOk.inr σ ti rIdx))
-                  ⟨σ, cert⟩
-                  (σ.discoverDual ti (σ.getCell rIdx).oldDeducible
-                    (σ.getCell rIdx).usesNew (.inr rIdx))
-                  σ
-                  (fun hR =>
-                    certifiedDiscoverDual_project σ cert ti
-                      (σ.getCell rIdx).oldDeducible (σ.getCell rIdx).usesNew
-                      (.inr rIdx) (RuleDeps.coprodIntro rIdx) _
-                      (fun _ => True.intro) (WitnessDepsOk.inr σ ti rIdx))
-                  rfl))
-              rfl
+    (cert : ReachRankCert σ) (ti : Nat) (L R : Object n)
+    (hti : σ.typeAt ti = some (.coprod L R)) :
+    (certifiedCoprodTypeRule σ cert ti L R hti).project =
+      coprodTypeRule σ ti L R := by
+  dsimp only [certifiedCoprodTypeRule]
+  split
+  · next lIdx rIdx hl hr =>
+      rw [certifiedCoprodTypeRule.go_project σ cert ti L R hti lIdx rIdx
+        (ReachState.typeAt_of_findTypeIdx hl)
+        (ReachState.typeAt_of_findTypeIdx hr)]
+      -- Align with computational `coprodTypeRule`.
+      unfold coprodTypeRule
+      cases hsd : (σ.getCell ti).simplyDeducible with
+      | true => simp [hsd]
+      | false =>
+          simp [hsd, hl, hr]
+  · rename_i hnomatch
+    dsimp only [CertifiedReachResult.project]
+    unfold coprodTypeRule
+    cases (σ.getCell ti).simplyDeducible with
+    | true => rfl
+    | false =>
+        cases hL : σ.findTypeIdx L with
+        | none => rfl
+        | some lIdx =>
+          cases hR : σ.findTypeIdx R with
+          | none => rfl
+          | some rIdx =>
+              exact (hnomatch lIdx rIdx hL hR).elim
 
 /-- Computational counterpart of `certifiedTypeRule.ofType`. -/
 def typeRule.ofType {n : Nat} (σ : ReachState n) (ti : Nat) (o : Option (Object n)) :
@@ -2600,7 +2674,7 @@ def certifiedTypeRule.ofType {n : Nat} (σ : ReachState n) (cert : ReachRankCert
         (fun _ => ⟨σ, cert⟩)
         (fun _ => ⟨σ, cert⟩)
         (fun L R hti => certifiedProdTypeRule σ cert ti L R hti)
-        (fun L R _hti => certifiedCoprodTypeRule σ cert ti L R)
+        (fun L R hti => certifiedCoprodTypeRule σ cert ti L R hti)
         (fun Arg Ret hti =>
           let c₁ := certifiedExpEtaRule σ cert ti Arg Ret hti
           certifiedExpAppRule c₁.state c₁.cert ti Arg Ret)
@@ -2627,7 +2701,7 @@ theorem certifiedTypeRule_project {n : Nat} (σ : ReachState n)
         | prod L R =>
             exact certifiedProdTypeRule_project σ cert ti L R h
         | coprod L R =>
-            exact certifiedCoprodTypeRule_project σ cert ti L R
+            exact certifiedCoprodTypeRule_project σ cert ti L R h
         | exp Arg Ret =>
             change (certifiedExpAppRule
               (certifiedExpEtaRule σ cert ti Arg Ret h).state

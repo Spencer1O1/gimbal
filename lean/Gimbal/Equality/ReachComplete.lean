@@ -57,7 +57,7 @@ theorem mem_of_getElem? {α : Type} {a : Array α} {i : Nat} {x : α}
 
 theorem lt_types_of_typeAt {σ : ReachState n} {i : Nat} {A : Object n}
     (h : σ.typeAt i = some A) : i < σ.types.size :=
-  lt_size_of_getElem? h
+  ReachState.lt_types_of_typeAt h
 
 theorem exists_findTypeIdx {σ : ReachState n} {A : Object n} (h : A ∈ σ.types) :
     ∃ i, σ.findTypeIdx A = some i :=
@@ -75,25 +75,13 @@ theorem index_deducible {σ : ReachState n} {A : Object n} {i : Nat}
 
 /-! ### Size invariant
 
-`cells` and `types` are allocated together and only ever updated in place, so
-every reachable state indexes cells by subformula-table index.
+`ReachState.Sized` / `Sized.mono` / `lt_cells_of_typeAt` live in `ReachSound`
+(needed for the soundness invariant). Re-export the cell-index lemma here.
 -/
 
-/-- One cell per subformula-table entry. -/
-def ReachState.Sized (σ : ReachState n) : Prop :=
-  σ.cells.size = σ.types.size
-
-theorem ReachState.Sized.mono {σ τ : ReachState n} (h : ReachState.Le σ τ)
-    (hs : ReachState.Sized σ) : ReachState.Sized τ := by
-  unfold ReachState.Sized at hs ⊢
-  rw [← h.size, ← h.types]
-  exact hs
-
 theorem lt_cells_of_typeAt {σ : ReachState n} {i : Nat} {A : Object n}
-    (hsz : ReachState.Sized σ) (h : σ.typeAt i = some A) : i < σ.cells.size := by
-  rw [ReachState.Sized] at hsz
-  rw [hsz]
-  exact lt_types_of_typeAt h
+    (hsz : ReachState.Sized σ) (h : σ.typeAt i = some A) : i < σ.cells.size :=
+  ReachState.lt_cells_of_typeAt hsz h
 
 /-! ### Reading a stable update backwards -/
 
