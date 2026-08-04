@@ -18,6 +18,7 @@
 import Gimbal.Equality.Abstract
 import Gimbal.Equality.ICCCode
 import Gimbal.Equality.ICCOrigin
+import Gimbal.Equality.ICCRetain
 import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.Preserve
 import Gimbal.Equality.TmEq
@@ -190,6 +191,134 @@ theorem entryReady_encode_some {hyps : Array (Object sig.nBases)}
     ∃ c, encodeICC (OriginEnv.ofHyps hyps) t = some c :=
   encode_of_encodeReady (OriginEnv.ofHyps hyps) (EncodeIx.entry (sig := sig) hyps).ws
     rfl (by simpa [EntryReady, InvCert, EncodeIx.entry] using h)
+
+/-! ### Generic retained coproduct-observation producer rule
+
+Builds `.foc (.letPos n (.case (.var .here) tL tR))` with an `InvCert` at `s`
+from branch certificates at `splitL` / `splitR` of `bindObs s`. Requires an
+empty parent worklist so the retained obs is the unique positive head
+(`focCert_letPos` / `pushPos []`).
+-/
+
+/-- Observation entry introduced by `bindObs` at counter `s.obsNext`. -/
+def obsEntryOf (s : EncodeIx (sig := sig) Γ) (P : Object sig.nBases) :
+    PosEntry sig :=
+  ⟨.obs (sig := sig) s.obsNext, P⟩
+
+theorem bindObs_ws_of_nil {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
+    (P : Object sig.nBases) (hws : s.ws = [])
+    (hpos : objectPolarity P = .pos) :
+    (s.bindObs P).ws = [obsEntryOf s P] := by
+  simp only [EncodeIx.bindObs, obsEntryOf, hws, pushPos, hpos, BEq.rfl, ↓reduceIte]
+  exact List.mergeSort_singleton _
+
+theorem bindObs_env_here {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
+    (P : Object sig.nBases) :
+    (s.bindObs P).env (Var.here : Var (sig := sig) (Γ ▻ P) P) =
+      (.obs (sig := sig) s.obsNext : Origin sig) := by
+  simp [EncodeIx.bindObs, OriginEnv.weaken, OriginEnv.snoc]
+
+theorem forcedRule_leftCoprod_obsEntry {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
+    (L R X : Object sig.nBases) :
+    forcedRule (sig := sig) [obsEntryOf s (.coprod L R)] X =
+      .leftCoprod (obsEntryOf s (.coprod L R)) L R := by
+  simp [forcedRule, obsEntryOf]
+
+/--
+Retained coproduct observation: term and certificate constructed together.
+Branch `Produced` values live at the split states of `bindObs s`; no fixture
+transport and no result-shape search.
+
+Requires `s.ws = []` so the retained observation is the unique positive head
+(matches `focCert_letPos`). Non-empty parent worklists are a state-index
+mismatch for this rule and are not patched by syntax-equality transport.
+-/
+def retainedCoprodObsCertified {Γ : Ctx sig} {L R X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (n : NegNeu Γ (.coprod L R))
+    (hws : s.ws = [])
+    (hfr : forcedRule (sig := sig) s.ws X = .focus)
+    (left : Produced
+      ((s.bindObs (.coprod L R)).splitL (obsEntryOf s (.coprod L R)) L) X)
+    (right : Produced
+      ((s.bindObs (.coprod L R)).splitR (obsEntryOf s (.coprod L R)) R) X) :
+    Produced s X where
+  term :=
+    .foc (.letPos n
+      (.case (.var .here) left.term right.term))
+  cert := by
+    let P : Object sig.nBases := .coprod L R
+    let e : PosEntry sig := obsEntryOf s P
+    let sObs : EncodeIx (sig := sig) (Γ ▻ P) := s.bindObs P
+    let body : InvTm (Γ ▻ P) X := .case (.var .here) left.term right.term
+    have hposP : objectPolarity P = .pos := by
+      simp [P, objectPolarity_coprod]
+    have hwsObs : sObs.ws = [e] :=
+      bindObs_ws_of_nil s P hws hposP
+    have htail : sObs.ws.tail = ([] : List (PosEntry sig)) := by
+      rw [hwsObs]; rfl
+    have hpeel :
+        peelCaseOuter (sig := sig) sObs.env e.origin body =
+          some ⟨L, R, .var .here, left.term, right.term⟩ := by
+      simpa [body, e, obsEntryOf] using
+        (peelCaseOuter_case_var_hit (sig := sig) sObs.env
+          (.obs (sig := sig) s.obsNext)
+          (Var.here : Var (sig := sig) (Γ ▻ P) P)
+          left.term right.term (bindObs_env_here s P))
+    have hL : EncodeReady (sig := sig)
+        (pushPos ([] : List (PosEntry sig)) (.split e.origin false) L)
+        (OriginEnv.weaken (A := L) sObs.env (.split e.origin false))
+        sObs.domNext sObs.obsNext left.term := by
+      have htail' : (s.bindObs (.coprod L R)).ws.tail = [] := by
+        simpa [sObs, P] using htail
+      simpa [EncodeIx.splitL, InvCert, htail', e, sObs, P, obsEntryOf] using
+        left.cert
+    have hR : EncodeReady (sig := sig)
+        (pushPos ([] : List (PosEntry sig)) (.split e.origin true) R)
+        (OriginEnv.weaken (A := R) sObs.env (.split e.origin true))
+        sObs.domNext sObs.obsNext right.term := by
+      have htail' : (s.bindObs (.coprod L R)).ws.tail = [] := by
+        simpa [sObs, P] using htail
+      simpa [EncodeIx.splitR, InvCert, htail', e, sObs, P, obsEntryOf] using
+        right.cert
+    have hbody : InvCert sObs body := by
+      change EncodeReady sObs.ws sObs.env sObs.domNext sObs.obsNext body
+      rw [hwsObs]
+      exact
+        (invCert_leftCoprod_peel (sig := sig) (ws := []) e
+          (.var (Var.here : Var (sig := sig) (Γ ▻ P) P))
+          left.term right.term body
+          (by simpa [e, P] using forcedRule_leftCoprod_obsEntry s L R X)
+          hpeel hL hR)
+    have ht : EncodeReady (sig := sig)
+        (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) s.obsNext) P)
+        (OriginEnv.weaken (A := P) s.env (.obs (sig := sig) s.obsNext))
+        s.domNext (s.obsNext + 1) body := by
+      simpa [InvCert, sObs, EncodeIx.bindObs, hws] using hbody
+    have hterm : InvCert s (.foc (.letPos n body)) := by
+      refine invCert_focus s (.letPos n body) hfr ?_
+      rw [hws]
+      exact focCert_letPos (sig := sig) n body ht
+    simpa [body] using hterm
+
+/-- Retained producer term erases like the contracted `.case` when branches are
+`Rename.skip1` of the contracted arms (generic erasure bridge). -/
+theorem retainedCoprodObsCertified_erase {Γ : Ctx sig} {L R X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (n : NegNeu Γ (.coprod L R))
+    (uL : InvTm (Γ ▻ L) X) (uR : InvTm (Γ ▻ R) X)
+    (hws : s.ws = [])
+    (hfr : forcedRule (sig := sig) s.ws X = .focus)
+    (left : Produced
+      ((s.bindObs (.coprod L R)).splitL (obsEntryOf s (.coprod L R)) L) X)
+    (right : Produced
+      ((s.bindObs (.coprod L R)).splitR (obsEntryOf s (.coprod L R)) R) X)
+    (hL : left.term = InvTm.rename (Rename.skip1 (B := .coprod L R)) uL)
+    (hR : right.term = InvTm.rename (Rename.skip1 (B := .coprod L R)) uR) :
+    (retainedCoprodObsCertified s n hws hfr left right).term.erase =
+      (InvTm.case n uL uR).erase := by
+  simp only [retainedCoprodObsCertified, hL, hR, InvTm.erase, FocTm.erase]
+  exact erase_retained_coprod_obs n uL uR
 
 /-! ## Vertical slice: `λ d. let z = f d in case z of …`
 

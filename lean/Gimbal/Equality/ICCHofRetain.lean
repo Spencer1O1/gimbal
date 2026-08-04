@@ -242,41 +242,11 @@ theorem hofRetained_erase_eq_contracted :
 
 /-! ## Parallel certified retained producer (Hof schedule fragment)
 
-Independent production for the generator and η-compose inputs. The public
-`applyObsNeu` is not used. Observation binders are retained via the same
-abstr+η+`Rename.skip1` recipe as the evaluator’s empty-rest coprod path, then
-certified at `EncodeIx` states (not by returning `hofRetained` as the term).
+Independent production for the generator and η-compose inputs via the generic
+`retainedCoprodObsCertified` rule. Certificates are built compositionally from
+branch `Produced` values — no beq/fixture transport into `InvCert`.
 `hofRetained` / `retainedCode_hof` remain expected-result fixtures only.
 -/
-
-/--
-Empty-rest retained coproduct observation when the continuation is the
-observed neu itself (identity-on-sum fragment used by Hof).
-Generic term constructor — no certificate yet.
--/
-def retainedCoprodIdObs {Γ : Ctx HofSumSig}
-    (n : NegNeu Γ SumN) : InvTm Γ SumN :=
-  let cont : InvTm Γ SumN := .foc (.pos (.done (.neu n)))
-  let body : InvTm (Γ ▻ SumN) SumN :=
-    InvTm.abstr (P := SumN) .here (NegNeu.weaken (B := SumN) n)
-      (InvTm.weaken (B := SumN) cont)
-  let uL := hsubstInv (InvTm.rename (Rename.skip1 (A := SumN) (B := NumberH)) body)
-    (InvTm.etaInl (Γ := Γ) NumberH NumberH)
-  let uR := hsubstInv (InvTm.rename (Rename.skip1 (A := SumN) (B := NumberH)) body)
-    (InvTm.etaInr (Γ := Γ) NumberH NumberH)
-  .foc (.letPos n (.case (.var .here)
-    (InvTm.rename (Rename.skip1 (A := NumberH) (B := SumN)) uL)
-    (InvTm.rename (Rename.skip1 (A := NumberH) (B := SumN)) uR)))
-
-/-- Extract the coproduct observation from a Hof-focused term (neu or case). -/
-def hofObsFromFocus (t : InvTm hofΓ SumN) : Option (NegNeu hofΓ SumN) :=
-  match t with
-  | .foc (.pos (.done (.neu n))) => some n
-  | .case (A := L) (B := R) n _ _ =>
-      if h : L = NumberH ∧ R = NumberH then
-        some (NegNeu.cast (by simp [SumN, NumberH, h.1, h.2]) n)
-      else none
-  | _ => none
 
 /-- Focus translate under the Hof generator context. -/
 def hofFocusOf (f : IntrinsicMorphism HofSumSig .unit SumN) : InvTm hofΓ SumN :=
@@ -291,137 +261,137 @@ def hofEta : IntrinsicMorphism HofSumSig .unit SumN :=
       (IntrinsicMorphism.left (sig := HofSumSig) NumberH NumberH)
       (IntrinsicMorphism.right (sig := HofSumSig) NumberH NumberH))
 
-/-- Producer output term for one Hof input (fails only if focus shape is unexpected). -/
-def hofProduceTerm (f : IntrinsicMorphism HofSumSig .unit SumN) : Option (InvTm hofΓ SumN) :=
-  match hofObsFromFocus (hofFocusOf f) with
-  | some n => some (retainedCoprodIdObs n)
-  | none => none
+/-- Extract the coproduct observation from a Hof-focused term (neu or case).
+Fixture-specific focus adapter — not used to infer child EncodeIx states. -/
+def hofObsFromFocus (t : InvTm hofΓ SumN) : Option (NegNeu hofΓ SumN) :=
+  match t with
+  | .foc (.pos (.done (.neu n))) => some n
+  | .case (A := L) (B := R) n _ _ =>
+      if h : L = NumberH ∧ R = NumberH then
+        some (NegNeu.cast (by simp [SumN, NumberH, h.1, h.2]) n)
+      else none
+  | _ => none
 
-/-- Lift a successful `beq` evaluation on an optional term to propositional equality. -/
-theorem optionInvTm_eq_of_beq
-    (o : Option (InvTm hofΓ SumN)) (u : InvTm hofΓ SumN)
-    (h : (match o with | some t => t.beq u | none => false) = true) :
-    o = some u := by
-  match ho : o with
-  | none => simp at h
-  | some t =>
-    have heq := InvTm.eq_of_beq t u (by simpa [ho] using h)
-    rw [heq]
+theorem hofObsEntry_eq_obsEntryOf :
+    hofObsEntry = obsEntryOf hofEntry SumN := by
+  simp only [hofObsEntry, obsEntryOf, hofEntry, EncodeIx.entry]
 
-/-- Lift a successful `beq` evaluation on an optional neu to propositional equality. -/
-theorem optionNegNeu_eq_of_beq
-    (o : Option (NegNeu hofΓ SumN)) (u : NegNeu hofΓ SumN)
-    (h : (match o with | some n => n.beq u | none => false) = true) :
-    o = some u := by
-  match ho : o with
-  | none => simp at h
-  | some n =>
-    obtain ⟨hty, hnm⟩ := NegNeu.eq_of_beq n u (by simpa [ho] using h)
-    cases hty
-    cases eq_of_heq hnm
-    rfl
+theorem hof_splitL_state_eq :
+    hofAfterObs.splitL hofObsEntry NumberH =
+      (hofEntry.bindObs SumN).splitL (obsEntryOf hofEntry SumN) NumberH := by
+  simp only [hofAfterObs, hofObsEntry, obsEntryOf, hofEntry, EncodeIx.entry]
 
-theorem hofProduceTerm_gen_eq_fixture :
-    hofProduceTerm hofGen = some hofRetained :=
-  optionInvTm_eq_of_beq _ _ (by native_decide)
+theorem hof_splitR_state_eq :
+    hofAfterObs.splitR hofObsEntry NumberH =
+      (hofEntry.bindObs SumN).splitR (obsEntryOf hofEntry SumN) NumberH := by
+  simp only [hofAfterObs, hofObsEntry, obsEntryOf, hofEntry, EncodeIx.entry]
 
-theorem hofProduceTerm_eta_eq_fixture :
-    hofProduceTerm hofEta = some hofRetained :=
-  optionInvTm_eq_of_beq _ _ (by native_decide)
+/-- Cast a `Produced` package along an EncodeIx state equality. -/
+def Produced.castState {Γ : Ctx HofSumSig} {s s' : EncodeIx (sig := HofSumSig) Γ}
+    {A : Object HofSumSig.nBases} (h : s = s') (p : Produced s A) : Produced s' A :=
+  h ▸ p
 
-theorem invCert_of_eq {Γ : Ctx HofSumSig} {A : Object HofSumSig.nBases}
-    (s : EncodeIx (sig := HofSumSig) Γ) {t u : InvTm Γ A}
-    (h : t = u) (c : InvCert s t) : InvCert s u :=
-  h ▸ c
+/-- Left identity-on-sum branch at the splitL state of `bindObs hofEntry`. -/
+def hofBranchL_produced : Produced
+    ((hofEntry.bindObs SumN).splitL (obsEntryOf hofEntry SumN) NumberH) SumN :=
+  Produced.castState hof_splitL_state_eq
+    ⟨InvTm.rename (Rename.skip1 (B := SumN)) hofBranchL, hof_branchL_cert⟩
 
-/--
-Certified production package: independently produced term + InvCert + code.
--/
+/-- Right identity-on-sum branch at the splitR state of `bindObs hofEntry`. -/
+def hofBranchR_produced : Produced
+    ((hofEntry.bindObs SumN).splitR (obsEntryOf hofEntry SumN) NumberH) SumN :=
+  Produced.castState hof_splitR_state_eq
+    ⟨InvTm.rename (Rename.skip1 (B := SumN)) hofBranchR, hof_branchR_cert⟩
+
+/-- Compositional retained production at phase entry for a given observation. -/
+def hofProduceCertified (n : NegNeu hofΓ SumN) : Produced hofEntry SumN :=
+  retainedCoprodObsCertified (sig := HofSumSig) hofEntry n
+    hofEntry_ws_nil hof_forcedRule_entry
+    hofBranchL_produced hofBranchR_produced
+
+theorem hofProduceCertified_erase (n : NegNeu hofΓ SumN) :
+    (hofProduceCertified n).term.erase =
+      (InvTm.case n hofBranchL hofBranchR).erase :=
+  retainedCoprodObsCertified_erase (sig := HofSumSig) hofEntry n
+    hofBranchL hofBranchR hofEntry_ws_nil hof_forcedRule_entry
+    hofBranchL_produced hofBranchR_produced rfl rfl
+
+/-- Certified production package: source, observation, Produced, and ordered code. -/
 structure CertifiedHofProduction where
   source : IntrinsicMorphism HofSumSig .unit SumN
-  focus : InvTm hofΓ SumN
   obs : NegNeu hofΓ SumN
-  term : InvTm hofΓ SumN
-  cert : InvCert hofEntry term
+  produced : Produced hofEntry SumN
   code : ICCCode hofΓ SumN
   encode_eq :
-    encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) term = some code
+    encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) produced.term = some code
 
-/--
-Package production when the produced retained term matches the fixture.
-`hofRetained` is used only as the expected-result equality target for cert
-transport and code comparison — not as the returned `term`.
--/
-noncomputable def certifyHofProduction
+noncomputable def packageHofProduction
     (f : IntrinsicMorphism HofSumSig .unit SumN)
     (n : NegNeu hofΓ SumN)
-    (hterm : retainedCoprodIdObs n = hofRetained) :
-    CertifiedHofProduction :=
-  let term := retainedCoprodIdObs n
-  let cert := invCert_of_eq hofEntry hterm.symm hofRetained_entryReady
-  let hex := entryReady_encode_some cert
+    (p : Produced hofEntry SumN) : CertifiedHofProduction :=
+  let hex := entryReady_encode_some (by
+    simpa [EntryReady, InvCert, hofEntry, EncodeIx.entry, hofΓ] using p.cert)
   { source := f
-    focus := hofFocusOf f
     obs := n
-    term := term
-    cert := cert
+    produced := p
     code := Classical.choose hex
     encode_eq := Classical.choose_spec hex }
 
-theorem hofObsFromFocus_gen :
-    hofObsFromFocus (hofFocusOf hofGen) = some hofObs :=
-  optionNegNeu_eq_of_beq _ _ (by native_decide)
-
-theorem hofObsFromFocus_gen_produce :
-    retainedCoprodIdObs hofObs = hofRetained := by
-  have hprod := hofProduceTerm_gen_eq_fixture
-  simp only [hofProduceTerm, hofObsFromFocus_gen] at hprod
-  exact Option.some.inj hprod
-
-theorem hofObsFromFocus_eta :
-    ∃ n, hofObsFromFocus (hofFocusOf hofEta) = some n ∧
-      retainedCoprodIdObs n = hofRetained := by
-  have hprod := hofProduceTerm_eta_eq_fixture
-  simp only [hofProduceTerm] at hprod
-  match hofObsFromFocus (hofFocusOf hofEta), hprod with
-  | none, hprod => simp at hprod
-  | some n, hprod =>
-    exact ⟨n, rfl, Option.some.inj hprod⟩
-
 /-- Independent certified production for the generator input. -/
 noncomputable def certifiedHofGen : CertifiedHofProduction :=
-  certifyHofProduction hofGen hofObs hofObsFromFocus_gen_produce
+  packageHofProduction hofGen hofObs (hofProduceCertified hofObs)
+
+theorem hofObsFromFocus_eta_isSome :
+    (hofObsFromFocus (hofFocusOf hofEta)).isSome = true := by
+  native_decide
+
+/-- Observation extracted independently from the η-compose focus. -/
+def hofObsEta : NegNeu hofΓ SumN :=
+  (hofObsFromFocus (hofFocusOf hofEta)).get hofObsFromFocus_eta_isSome
 
 /-- Independent certified production for the η-compose input. -/
 noncomputable def certifiedHofEta : CertifiedHofProduction :=
-  let n := Classical.choose hofObsFromFocus_eta
-  let h := Classical.choose_spec hofObsFromFocus_eta
-  certifyHofProduction hofEta n h.2
+  packageHofProduction hofEta hofObsEta (hofProduceCertified hofObsEta)
+
+/-- Generator production matches the fixture term definitionally. -/
+theorem certifiedHofGen_term_eq_fixture :
+    certifiedHofGen.produced.term = hofRetained :=
+  rfl
 
 theorem certifiedHofGen_code_eq_fixture :
     some certifiedHofGen.code = retainedCode_hof := by
   have he := certifiedHofGen.encode_eq
-  have ht : certifiedHofGen.term = hofRetained := by
-    simp only [certifiedHofGen, certifyHofProduction, hofObsFromFocus_gen_produce]
-  simp only [retainedCode_hof, encodeICCHyps]
-  calc some certifiedHofGen.code
-      = encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps)
-          certifiedHofGen.term := he.symm
-    _ = encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) hofRetained := by
-        rw [ht]
+  simp only [retainedCode_hof, encodeICCHyps, certifiedHofGen_term_eq_fixture] at he ⊢
+  exact he.symm
+
+/-- η encode agrees with the fixture computationally (avoids `noncomputable`
+blocking `native_decide` on `certifiedHofEta`). -/
+private def hofEta_encode_beq_fixture : Bool :=
+  match encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps)
+      (hofProduceCertified hofObsEta).term,
+    encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) hofRetained with
+  | some c, some d => ICCCode.beq c d
+  | _, _ => false
+
+theorem hofEta_encode_beq_fixture_true : hofEta_encode_beq_fixture = true := by
+  native_decide
 
 theorem certifiedHofEta_code_eq_fixture :
     some certifiedHofEta.code = retainedCode_hof := by
   have he := certifiedHofEta.encode_eq
-  have ht : certifiedHofEta.term = hofRetained := by
-    simp only [certifiedHofEta, certifyHofProduction]
-    exact (Classical.choose_spec hofObsFromFocus_eta).2
-  simp only [retainedCode_hof, encodeICCHyps]
-  calc some certifiedHofEta.code
-      = encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps)
-          certifiedHofEta.term := he.symm
-    _ = encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) hofRetained := by
-        rw [ht]
+  have hb := hofEta_encode_beq_fixture_true
+  simp only [hofEta_encode_beq_fixture] at hb
+  have hterm : certifiedHofEta.produced.term =
+      (hofProduceCertified hofObsEta).term := rfl
+  rw [hterm] at he
+  revert hb
+  simp only [he, retainedCode_hof, encodeICCHyps]
+  intro hb
+  match hret : encodeICC (OriginEnv.ofHyps (sig := HofSumSig) hofHyps) hofRetained with
+  | none => simp [hret] at hb
+  | some d =>
+      simp only [hret] at hb
+      exact congrArg some (ICCCode.eq_of_beq _ _ hb)
 
 theorem certifiedHof_codes_agree :
     certifiedHofGen.code = certifiedHofEta.code := by
@@ -430,26 +400,29 @@ theorem certifiedHof_codes_agree :
   injection (hG.trans hE.symm)
 
 /-!
-### Producer-integration stop report
+### Producer-constructor stop report
 
-**Succeeded:** `hofGen` (neu focus) and `hofEta` (case focus) each extract an
-observation, run `retainedCoprodIdObs` (abstr+η+skip1 retain), obtain an
-`InvCert` (via transport once the produced term equals the fixture), and yield
-an independently chosen ordered code equal to `retainedCode_hof`.
+**Succeeded:** generic `retainedCoprodObsCertified` builds term+`InvCert` from
+`letPos` / `leftCoprod_peel` / branch `Produced` values. Hof gen and η paths
+call it directly; certificates are compositional (no fixture transport).
 
-**Generic enough for a full certified producer**
-* `retainedCoprodIdObs` — empty-rest identity-on-sum retain recipe
-* `focus` / `letPos` / `leftCoprod_peel` / `moveStable` / `pos` packaging
-* `invCert_encodeGo_some` / `entryReady_encode_some`
-* erase bridge `erase_retained_coprod_obs`
+**State-index constraints (reported, not patched by term transport):**
+* Constructor requires `s.ws = []` so `bindObs` yields a singleton obs head
+  matching `focCert_letPos`. Non-empty parent worklists are out of scope.
+* Hof branch `Produced` values are cast along
+  `hofAfterObs.splitL hofObsEntry = (hofEntry.bindObs).splitL (obsEntryOf …)`
+  (`hofEntry` name vs unfolded `EncodeIx.entry` structure); this is state
+  alignment, not fixture-term certificate transport.
+
+**Generic**
+* `retainedCoprodObsCertified`, `obsEntryOf`, `bindObs_ws_of_nil`
+* `retainedCoprodObsCertified_erase` → `erase_retained_coprod_obs`
+* focus / letPos / leftCoprod_peel / moveStable / pos branch packaging
 
 **Still fixture-specific**
-* `hofObsFromFocus` — only neu and `case` with `Number+Number` scrutinee
-* identity-on-sum continuation (`cont := foc.pos.neu n`), not arbitrary `cont`
-* empty-rest only (no schedule remainder)
-* cert transport via `native_decide` equality to `hofRetained` (not a
-  compositional cert built on the produced term’s own syntax)
-* Hof signature / translate context wiring
+* `hofObsFromFocus` (neu | Number+Number case)
+* identity-on-sum branch terms (`hofBranchL` / `hofBranchR`)
+* empty-rest schedule only; Hof sig / translate wiring
 
 Public evaluator, RawReference, totality, and comparator remain untouched.
 -/
