@@ -5,12 +5,10 @@
   Exact observation entries and remainder maps live in the actual EncodeIx
   context so `.obs` / `.split` origins are preserved by construction.
 
-  **Coproduct clause restriction:** `certifiedScheduleIx_exactCoprod` drains each
-  summand via `certifiedForcedInvert_moveStableOnly` (worklists that are
-  `WorklistMoveStableOnly` — stable/atomic positives, no nested `coprod`/`never`
-  heads). Nested-coproduct summands use `certifiedForcedInvert_unit_eta?` /
-  `certifiedForcedInvert_unit?` (forced-inversion recursion, separate from
-  schedule recursion).
+  **Coproduct clause:** `certifiedScheduleIx_exactCoprod` drains each summand via
+  peel-based `certifiedForcedInvert` (nested `leftCoprod` / `moveStable` /
+  `leftNever`). `certifiedScheduleIx_exactCoprod_of_moveStableSummands` keeps the
+  `WorklistMoveStableOnly` specialization (stable/atomic summand heads only).
 
   Does **not** replace legacy `PairEntry`, delete `CertifiedSchedule`, or
   change `applyObsNeu` / comparator. Consistency witnesses deferred.
@@ -244,9 +242,9 @@ Separate from schedule recursion: mirrors `forcedRule`, decreases
   when a general leaf transports).
 
 **Non-unit `leftCoprod` leaf transport:** measure decreases on
-`splitL`/`splitR` (`worklistWeight`). `EncodeIxEmbedding` + full
-`encodeReady_of_embedding` land in `ICCEncodeEmbed` (λ / `letPos` / peel
-vertical-slice exercise). Empty-worklist unused-binder branch embeddings use
+`splitL`/`splitR` (`worklistWeight`). Full `produced_of_embedding` via
+`encodeIxEmbedding_emptyWs_splitL/R` + `invCert_leftCoprod_peel` is packaged in
+`certifiedForcedInvert`. Empty-worklist unused-binder branch embeddings use
 `WellFormed.emptyWs` + `fresh_split`.
 -/
 
@@ -379,6 +377,65 @@ def produced_emptyWs_splitR_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
   produced_of_embedding_noPeel
     (encodeIxEmbedding_emptyWs_splitR s e tail R hws hwf) p h
 
+/-- Full leaf transport into a left split empty-worklist state (peel-capable). -/
+def produced_emptyWs_splitL {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail)
+    (hwf : EncodeIx.WellFormed s)
+    (p : Produced (emptyWsEncode s) A) :
+    Produced (emptyWsEncode (splitEncodeL s e tail L hws)) A :=
+  produced_of_embedding
+    (encodeIxEmbedding_emptyWs_splitL s e tail L hws hwf) p
+
+def produced_emptyWs_splitR {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail)
+    (hwf : EncodeIx.WellFormed s)
+    (p : Produced (emptyWsEncode s) A) :
+    Produced (emptyWsEncode (splitEncodeR s e tail R hws)) A :=
+  produced_of_embedding
+    (encodeIxEmbedding_emptyWs_splitR s e tail R hws hwf) p
+
+theorem splitEncodeL_eq_splitL {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    splitEncodeL s e tail L hws = s.splitL e L := by
+  cases s with
+  | mk ws env d o =>
+    change ws = e :: tail at hws
+    subst hws
+    rfl
+
+theorem splitEncodeR_eq_splitR {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    splitEncodeR s e tail R hws = s.splitR e R := by
+  cases s with
+  | mk ws env d o =>
+    change ws = e :: tail at hws
+    subst hws
+    rfl
+
+theorem WellFormed_splitEncodeL {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail) (hwf : EncodeIx.WellFormed s) :
+    EncodeIx.WellFormed (splitEncodeL s e tail L hws) := by
+  simpa [splitEncodeL_eq_splitL s e tail L hws] using
+    EncodeIx.WellFormed.splitL hwf e tail L hws
+
+theorem WellFormed_splitEncodeR {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail) (hwf : EncodeIx.WellFormed s) :
+    EncodeIx.WellFormed (splitEncodeR s e tail R hws) := by
+  simpa [splitEncodeR_eq_splitR s e tail R hws] using
+    EncodeIx.WellFormed.splitR hwf e tail R hws
+
 theorem forcedInvertMeasure_pop_lt {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig) (tail : List (PosEntry sig))
     (hws : s.ws = e :: tail) :
@@ -436,6 +493,111 @@ def produced_unit_emptyWs {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ) :
   cert := by
     simpa [emptyWsEncode, InvCert] using
       encodeReady_unit_nil (sig := sig) s.env s.domNext s.obsNext
+
+/--
+Goal-polymorphic forced inversion mirroring `forcedRule`.
+
+* `[]` — cast the boundary leaf via `emptyWsEncode_eq_of_boundary`
+* `moveStable` — IH on `pop`, lift with `produced_moveStable`
+* `leftNever` — canonical `.abort` when `find?` resolves a never binder
+* `leftCoprod` — transport leaf via full `produced_emptyWs_splitL/R`, IH on both
+  splits, reassemble with `invCert_leftCoprod_peel` / `find?` +
+  `peelCaseOuter_case_var_hit`
+
+Returns `none` when a forced origin cannot be resolved via `find?` (or the
+recovered type mismatches the forced connective). Requires
+`EncodeIx.WellFormed` for unused-binder embeddings / Fresh.
+-/
+def certifiedForcedInvert {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hwf : EncodeIx.WellFormed s)
+    (leaf : Produced (emptyWsEncode s) A) :
+    Option (Produced s A) :=
+  match hws : s.ws with
+  | [] =>
+      some (emptyWsEncode_eq_of_boundary s (by simp [AtSaturationBoundary, hws]) ▸ leaf)
+  | e :: tail =>
+      match hty : e.ty with
+      | .never =>
+          match hfind : OriginEnv.find? s.env e.origin with
+          | some ⟨P, x⟩ =>
+              if hP : P = (.never : Object sig.nBases) then
+                some ⟨.abort (NegNeu.cast hP (.var x)), by
+                  change EncodeReady s.ws s.env s.domNext s.obsNext _
+                  rw [hws]
+                  exact encodeReady_abort_leftNever s.env e tail s.domNext s.obsNext
+                    (NegNeu.cast hP (.var x)) hty⟩
+              else
+                none
+          | none => none
+      | .coprod L R =>
+          let sL := splitEncodeL s e tail L (by simp [hws])
+          let sR := splitEncodeR s e tail R (by simp [hws])
+          let hwfL : EncodeIx.WellFormed sL :=
+            WellFormed_splitEncodeL s e tail L (by simp [hws]) hwf
+          let hwfR : EncodeIx.WellFormed sR :=
+            WellFormed_splitEncodeR s e tail R (by simp [hws]) hwf
+          let leafL :=
+            produced_emptyWs_splitL s e tail L (by simp [hws]) hwf leaf
+          let leafR :=
+            produced_emptyWs_splitR s e tail R (by simp [hws]) hwf leaf
+          match certifiedForcedInvert sL hwfL leafL,
+                certifiedForcedInvert sR hwfR leafR with
+          | some pL, some pR =>
+              match hfind : OriginEnv.find? s.env e.origin with
+              | some ⟨P, x⟩ =>
+                  if hP : P = .coprod L R then
+                    let x' : Var Γ (.coprod L R) := hP ▸ x
+                    have heq : s.env x' = e.origin :=
+                      OriginEnv.find?_eq_some_eq s.env e.origin x' (by
+                        subst hP; exact hfind)
+                    let body : InvTm Γ A := .case (.var x') pL.term pR.term
+                    have hfr : forcedRule (sig := sig) (e :: tail) A =
+                        .leftCoprod e L R := by
+                      simp [forcedRule, hty]
+                    have hpeel :
+                        peelCaseOuter s.env e.origin body =
+                          some ⟨L, R, .var x', pL.term, pR.term⟩ :=
+                      peelCaseOuter_case_var_hit s.env e.origin x' pL.term pR.term heq
+                    some ⟨body, by
+                      change EncodeReady s.ws s.env s.domNext s.obsNext body
+                      rw [hws]
+                      exact
+                        (invCert_leftCoprod_peel (sig := sig) (ws := tail) e
+                          (.var x') pL.term pR.term body hfr hpeel
+                          (by simpa [splitEncodeL, sL, InvCert] using pL.cert)
+                          (by simpa [splitEncodeR, sR, InvCert] using pR.cert))⟩
+                  else
+                    none
+              | none => none
+          | _, _ => none
+      | .base _ | .unit | .prod _ _ | .exp _ _ =>
+          have hfr : forcedRule (sig := sig) (e :: tail) A = .moveStable e := by
+            simp only [forcedRule, hty]
+          let hleaf : Produced (emptyWsEncode s.pop) A := by
+            simpa [emptyWsEncode_pop] using leaf
+          match certifiedForcedInvert s.pop (EncodeIx.WellFormed.pop hwf) hleaf with
+          | some cont =>
+              some (produced_moveStable s e tail (by simp [hws])
+                (by simpa [hws] using hfr) cont)
+          | none => none
+termination_by forcedInvertMeasure s
+decreasing_by
+  · exact forcedInvertMeasure_splitL_lt s e tail L R (by simp [hws]) hty
+  · exact forcedInvertMeasure_splitR_lt s e tail L R (by simp [hws]) hty
+  · exact forcedInvertMeasure_pop_lt s e tail (by simp [hws])
+  · exact forcedInvertMeasure_pop_lt s e tail (by simp [hws])
+  · exact forcedInvertMeasure_pop_lt s e tail (by simp [hws])
+  · exact forcedInvertMeasure_pop_lt s e tail (by simp [hws])
+
+/-- Convenience: forced invert when `find?` / peel succeed. -/
+def certifiedForcedInvert_get {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hwf : EncodeIx.WellFormed s)
+    (leaf : Produced (emptyWsEncode s) A)
+    (h : (certifiedForcedInvert s hwf leaf).isSome = true) :
+    Produced s A :=
+  (certifiedForcedInvert s hwf leaf).get h
 
 /-- No coproduct heads on the worklist (all discharged by `moveStable` / empty). -/
 def WorklistMoveStableOnly (ws : List (PosEntry sig)) : Prop :=
@@ -611,15 +773,14 @@ theorem emptyWsEncode_eq_afterIxCoprodR {Γ : Ctx sig} {L R : Object sig.nBases}
   simp only [emptyWsEncode, afterIxCoprodR, EncodeIx.pop, hws, List.tail_cons]
 
 /--
-Exact coproduct clause: map remainder into both retained split contexts, take
-recursive `CertifiedScheduleIx` at `afterIxCoprodL/R` (= `split.pop` = empty
-worklist / saturation boundary after draining), lift each summand through
+Exact coproduct clause (moveStable-summand specialization): map remainder into
+both retained split contexts, take recursive `CertifiedScheduleIx` at
+`afterIxCoprodL/R`, lift each summand through
 `certifiedForcedInvert_moveStableOnly`, package with `retainedCoprodObsCertified`.
 
 **Restriction:** `hstableL` / `hstableR` require each summand worklist to be
-`WorklistMoveStableOnly` (heads discharged by `moveStable` — stable/atomic
-positives). Nested-coproduct summands use `certifiedForcedInvert_unit_eta?` /
-`certifiedForcedInvert_unit?` instead (separate forced-inversion recursion).
+`WorklistMoveStableOnly`. Prefer `certifiedScheduleIx_exactCoprod` when summands
+may carry nested coproducts.
 -/
 def certifiedScheduleIx_exactCoprod_of_moveStableSummands
     {Γ : Ctx sig} {L R A : Object sig.nBases}
@@ -647,7 +808,14 @@ def certifiedScheduleIx_exactCoprod_of_moveStableSummands
   let right := certifiedForcedInvert_moveStableOnly (retainedSplitRIx L R s) leafR hstableR
   ⟨hb, retainedCoprodObsCertified s nSum hb hfr left right⟩
 
-/-- Alias documenting the moveStable-summand restriction. -/
+/--
+Exact coproduct clause: drain each retained summand via peel-based
+`certifiedForcedInvert` (supports nested `leftCoprod`), then package with
+`retainedCoprodObsCertified`.
+
+`hinvL` / `hinvR` witness that forced invert succeeds (`find?` resolves forced
+origins). Failure modes of `certifiedForcedInvert` are documented there.
+-/
 def certifiedScheduleIx_exactCoprod
     {Γ : Ctx sig} {L R A : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ)
@@ -658,15 +826,29 @@ def certifiedScheduleIx_exactCoprod
       [{ origin := .split (obsEntryOf s (.coprod L R)).origin false, ty := L }])
     (hwsR : (retainedSplitRIx L R s).ws =
       [{ origin := .split (obsEntryOf s (.coprod L R)).origin true, ty := R }])
-    (hstableL : WorklistMoveStableOnly (retainedSplitLIx L R s).ws)
-    (hstableR : WorklistMoveStableOnly (retainedSplitRIx L R s).ws)
+    (hwfL : EncodeIx.WellFormed (retainedSplitLIx L R s))
+    (hwfR : EncodeIx.WellFormed (retainedSplitRIx L R s))
     (recL : CertifiedScheduleIx (afterIxCoprodL L R s)
       (mapIxRestCoprodL L R nSum rest) A)
     (recR : CertifiedScheduleIx (afterIxCoprodR L R s)
-      (mapIxRestCoprodR L R nSum rest) A) :
+      (mapIxRestCoprodR L R nSum rest) A)
+    (hinvL :
+      (certifiedForcedInvert (retainedSplitLIx L R s) hwfL
+        (Produced.castState (emptyWsEncode_eq_afterIxCoprodL s hwsL).symm
+          recL.produced)).isSome = true)
+    (hinvR :
+      (certifiedForcedInvert (retainedSplitRIx L R s) hwfR
+        (Produced.castState (emptyWsEncode_eq_afterIxCoprodR s hwsR).symm
+          recR.produced)).isSome = true) :
     CertifiedScheduleIx s (⟨.coprod L R, nSum⟩ :: rest) A :=
-  certifiedScheduleIx_exactCoprod_of_moveStableSummands s hfr nSum rest
-    hwsL hwsR hstableL hstableR recL recR
+  let hb : AtSaturationBoundary s := atSaturationBoundary_of_forcedRule_focus s hfr
+  let leafL : Produced (emptyWsEncode (retainedSplitLIx L R s)) A :=
+    Produced.castState (emptyWsEncode_eq_afterIxCoprodL s hwsL).symm recL.produced
+  let leafR : Produced (emptyWsEncode (retainedSplitRIx L R s)) A :=
+    Produced.castState (emptyWsEncode_eq_afterIxCoprodR s hwsR).symm recR.produced
+  let left := certifiedForcedInvert_get (retainedSplitLIx L R s) hwfL leafL hinvL
+  let right := certifiedForcedInvert_get (retainedSplitRIx L R s) hwfR leafR hinvR
+  ⟨hb, retainedCoprodObsCertified s nSum hb hfr left right⟩
 
 def TwoObsIxSig : Signature where
   nBases := 1
@@ -836,7 +1018,8 @@ def twoObsIxInner :
     CertifiedScheduleIx (sig := TwoObsIxSig) twoObsIxAfterAtom
       twoObsIxRestMapped SumIx :=
   twoObsIxRestMapped_eq ▸
-    certifiedScheduleIx_exactCoprod (sig := TwoObsIxSig) twoObsIxAfterAtom
+    certifiedScheduleIx_exactCoprod_of_moveStableSummands (sig := TwoObsIxSig)
+      twoObsIxAfterAtom
       twoObsIxAfterAtom_forcedRule twoObsIxSum []
       twoObsIx_splitL_ws twoObsIx_splitR_ws
       twoObsIx_splitL_moveStableOnly twoObsIx_splitR_moveStableOnly
@@ -868,8 +1051,8 @@ theorem twoObsIxCode_hyps_isSome : twoObsIxCode_hyps.isSome = true := by
 /-! ## Nested coproduct fixture: `P = (A + B) + C`
 
 Forced-inversion only (empty schedule). Every positive head is drained by
-`certifiedForcedInvert_unit_eta?` mirroring `forcedRule`; no nesting-depth
-constructors. Goal `.unit` so branch leaves need no unused-binder transport.
+`certifiedForcedInvert` / `certifiedForcedInvert_unit?` mirroring `forcedRule`;
+no nesting-depth constructors.
 -/
 
 def NestedIxSig : Signature where
@@ -882,27 +1065,53 @@ private abbrev NestedC : Object NestedIxSig.nBases := .base ⟨2, by decide⟩
 private abbrev NestedInner : Object NestedIxSig.nBases := .coprod NestedA NestedB
 private abbrev NestedP : Object NestedIxSig.nBases := .coprod NestedInner NestedC
 
-/-- Boundary state that has just retained observation `P = (A+B)+C`. -/
-def nestedIxAfterObs : EncodeIx (sig := NestedIxSig) (Ctx.empty ▻ NestedP) where
-  ws := [⟨.obs (sig := NestedIxSig) 0, NestedP⟩]
-  env := OriginEnv.weaken (A := NestedP) OriginEnv.empty (.obs (sig := NestedIxSig) 0)
+/-- Empty well-formed seed used to build the retained-obs nested state. -/
+def nestedIxEmpty : EncodeIx (sig := NestedIxSig) Ctx.empty where
+  ws := []
+  env := OriginEnv.empty
   domNext := 0
-  obsNext := 1
+  obsNext := 0
+
+theorem nestedIxEmpty_wf : EncodeIx.WellFormed nestedIxEmpty where
+  env_wf := OriginEnv.WellFormed.empty
+  env_bounded := fun x => nomatch x
+  ws_bounded := fun he => by cases he
+  ws_in_env := fun he => by cases he
+  ws_nodup := List.nodup_nil
+  ws_split_fresh := fun he _ => by cases he
+  split_parent_live := fun x _ _ _ => nomatch x
+
+/-- Boundary state that has just retained observation `P = (A+B)+C`. -/
+def nestedIxAfterObs : EncodeIx (sig := NestedIxSig) (Ctx.empty ▻ NestedP) :=
+  nestedIxEmpty.bindObs NestedP
+
+theorem nestedIxAfterObs_eq :
+    nestedIxAfterObs =
+      ⟨[⟨.obs (sig := NestedIxSig) 0, NestedP⟩],
+        OriginEnv.weaken (A := NestedP) OriginEnv.empty (.obs (sig := NestedIxSig) 0),
+        0, 1⟩ := by
+  simp [nestedIxAfterObs, nestedIxEmpty, EncodeIx.bindObs, pushPos, NestedP,
+    objectPolarity_coprod, List.mergeSort_singleton]
+
+theorem nestedIxAfterObs_wf : EncodeIx.WellFormed nestedIxAfterObs :=
+  EncodeIx.WellFormed.bindObs nestedIxEmpty_wf NestedP
 
 theorem nestedIxAfterObs_forcedRule :
     forcedRule (sig := NestedIxSig) nestedIxAfterObs.ws (.unit : Object NestedIxSig.nBases) =
       .leftCoprod ⟨.obs (sig := NestedIxSig) 0, NestedP⟩ NestedInner NestedC := by
-  simp [forcedRule, nestedIxAfterObs, NestedP, NestedInner]
+  simp [forcedRule, nestedIxAfterObs_eq, NestedP, NestedInner]
 
 /-- Left summand state after the outer leftCoprod step: head is nested `A+B`. -/
 def nestedIxSplitInner : EncodeIx (sig := NestedIxSig)
     (Ctx.empty ▻ NestedP ▻ NestedInner) :=
-  splitEncodeL nestedIxAfterObs ⟨.obs (sig := NestedIxSig) 0, NestedP⟩ [] NestedInner rfl
+  splitEncodeL nestedIxAfterObs ⟨.obs (sig := NestedIxSig) 0, NestedP⟩ [] NestedInner
+    (by simp [nestedIxAfterObs_eq])
 
 /-- Right summand state after the outer leftCoprod step: head is atomic `C`. -/
 def nestedIxSplitC : EncodeIx (sig := NestedIxSig)
     (Ctx.empty ▻ NestedP ▻ NestedC) :=
-  splitEncodeR nestedIxAfterObs ⟨.obs (sig := NestedIxSig) 0, NestedP⟩ [] NestedC rfl
+  splitEncodeR nestedIxAfterObs ⟨.obs (sig := NestedIxSig) 0, NestedP⟩ [] NestedC
+    (by simp [nestedIxAfterObs_eq])
 
 theorem nestedIxSplitInner_ws :
     nestedIxSplitInner.ws =
@@ -972,23 +1181,238 @@ theorem nestedIx_branches_reach_boundary :
     AtSaturationBoundary nestedIxSplitC.pop :=
   ⟨nestedIxLeafA_boundary, nestedIxLeafB_boundary, nestedIxSplitC_pop_boundary⟩
 
+/-! ### Non-unit nested invert: goal `NestedA` via unused atom binder -/
+
+/-- Unused atom binder; NestedA is available as `.here` for the non-unit leaf. -/
+def nestedIxAtomBase : EncodeIx (sig := NestedIxSig) (Ctx.empty ▻ NestedA) where
+  ws := []
+  env := OriginEnv.weaken (A := NestedA) OriginEnv.empty (.hyp (sig := NestedIxSig) 0)
+  domNext := 0
+  obsNext := 0
+
+theorem nestedIxAtomBase_wf : EncodeIx.WellFormed nestedIxAtomBase :=
+  EncodeIx.WellFormed.weaken_unused (B := NestedA) nestedIxEmpty_wf
+    (.hyp (sig := NestedIxSig) 0)
+    (OriginEnv.Fresh.empty _)
+    (Origin.counterBounded_hyp (sig := NestedIxSig) 0 0 0)
+    (fun _ => OriginEnv.Fresh.empty _)
+    (fun _ _ heq => by cases heq)
+    (fun he => by cases he)
+
+/-- Retained obs `P` over an unused NestedA binder (non-unit goal carrier). -/
+def nestedIxNonUnitAfterObs : EncodeIx (sig := NestedIxSig)
+    (Ctx.empty ▻ NestedA ▻ NestedP) :=
+  nestedIxAtomBase.bindObs NestedP
+
+theorem nestedIxNonUnitAfterObs_wf :
+    EncodeIx.WellFormed nestedIxNonUnitAfterObs :=
+  EncodeIx.WellFormed.bindObs nestedIxAtomBase_wf NestedP
+
+theorem nestedIxNonUnitAfterObs_ws :
+    nestedIxNonUnitAfterObs.ws =
+      [⟨.obs (sig := NestedIxSig) 0, NestedP⟩] := by
+  simp [nestedIxNonUnitAfterObs, nestedIxAtomBase, EncodeIx.bindObs, pushPos,
+    NestedP, objectPolarity_coprod, List.mergeSort_singleton]
+
+/-- Boundary leaf: focus on the unused NestedA binder (non-unit base goal). -/
+def nestedIxNonUnitLeafTerm :
+    InvTm (sig := NestedIxSig) (Ctx.empty ▻ NestedA ▻ NestedP) NestedA :=
+  .foc (.pos (.done (.neu (.var (.there .here)))))
+
+def nestedIxNonUnitLeaf :
+    Produced (emptyWsEncode nestedIxNonUnitAfterObs) NestedA where
+  term := nestedIxNonUnitLeafTerm
+  cert := by
+    change EncodeReady [] (emptyWsEncode nestedIxNonUnitAfterObs).env
+      (emptyWsEncode nestedIxNonUnitAfterObs).domNext
+      (emptyWsEncode nestedIxNonUnitAfterObs).obsNext nestedIxNonUnitLeafTerm
+    exact EncodeReady.focus (by simp [forcedRule])
+      (.pos (p := .neu (.var (.there .here))))
+
+theorem nestedIx_nonUnit_forcedInvert_isSome :
+    (certifiedForcedInvert nestedIxNonUnitAfterObs nestedIxNonUnitAfterObs_wf
+      nestedIxNonUnitLeaf).isSome = true := by
+  native_decide
+
+def nestedIxNonUnitProduced : Produced nestedIxNonUnitAfterObs NestedA :=
+  certifiedForcedInvert_get nestedIxNonUnitAfterObs nestedIxNonUnitAfterObs_wf
+    nestedIxNonUnitLeaf nestedIx_nonUnit_forcedInvert_isSome
+
+/-! ### Nested-summand schedule: observe `(A+B)+C`, drain nested left via peel invert -/
+
+def nestedSchedHyps : Array (Object NestedIxSig.nBases) :=
+  #[.exp .unit NestedP]
+
+def nestedSchedΓ : Ctx NestedIxSig := Ctx.ofHyps (sig := NestedIxSig) nestedSchedHyps
+
+def nestedSchedEntry : EncodeIx (sig := NestedIxSig) nestedSchedΓ :=
+  EncodeIx.entry (sig := NestedIxSig) nestedSchedHyps
+
+theorem nestedSchedEntry_wf : EncodeIx.WellFormed nestedSchedEntry :=
+  EncodeIx.entry_wellFormed (sig := NestedIxSig) nestedSchedHyps
+
+theorem nestedSchedEntry_boundary : AtSaturationBoundary nestedSchedEntry := by
+  simp only [AtSaturationBoundary, nestedSchedEntry, EncodeIx.entry, nestedSchedHyps,
+    OriginEnv.posWorklist, OriginEnv.posCollect]
+  native_decide
+
+theorem nestedSched_forcedRule_entry :
+    forcedRule (sig := NestedIxSig) nestedSchedEntry.ws NestedP = .focus := by
+  simp only [nestedSchedEntry_boundary, forcedRule]
+
+def nestedSchedSum : NegNeu nestedSchedΓ NestedP :=
+  .app (.var .here) .unit
+
+/-- Left branch at `Γ ▻ P ▻ (A+B)`: inject the nested summand. -/
+def nestedSchedBranchL :
+    InvTm (nestedSchedΓ ▻ NestedP ▻ NestedInner) NestedP :=
+  .foc (.pos (.done (.inl (.neu (.var .here)))))
+
+def nestedSchedBranchR :
+    InvTm (nestedSchedΓ ▻ NestedP ▻ NestedC) NestedP :=
+  .foc (.pos (.done (.inr (.neu (.var .here)))))
+
+def nestedSchedAfterL : EncodeIx (sig := NestedIxSig)
+    (nestedSchedΓ ▻ NestedP ▻ NestedInner) :=
+  afterIxCoprodL (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry
+
+def nestedSchedAfterR : EncodeIx (sig := NestedIxSig)
+    (nestedSchedΓ ▻ NestedP ▻ NestedC) :=
+  afterIxCoprodR (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry
+
+theorem nestedSchedAfterL_boundary :
+    AtSaturationBoundary nestedSchedAfterL :=
+  afterIxCoprodL_boundary (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry
+    nestedSchedEntry_boundary
+
+theorem nestedSchedAfterR_boundary :
+    AtSaturationBoundary nestedSchedAfterR :=
+  afterIxCoprodR_boundary (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry
+    nestedSchedEntry_boundary
+
+theorem nestedSched_branchL_cert :
+    InvCert nestedSchedAfterL nestedSchedBranchL := by
+  change EncodeReady nestedSchedAfterL.ws nestedSchedAfterL.env
+    nestedSchedAfterL.domNext nestedSchedAfterL.obsNext nestedSchedBranchL
+  have hb := nestedSchedAfterL_boundary
+  rw [show nestedSchedAfterL.ws = [] from hb]
+  exact EncodeReady.focus (by simp [forcedRule])
+    (.pos (p := .inl (.neu (.var .here))))
+
+theorem nestedSched_branchR_cert :
+    InvCert nestedSchedAfterR nestedSchedBranchR := by
+  change EncodeReady nestedSchedAfterR.ws nestedSchedAfterR.env
+    nestedSchedAfterR.domNext nestedSchedAfterR.obsNext nestedSchedBranchR
+  have hb := nestedSchedAfterR_boundary
+  rw [show nestedSchedAfterR.ws = [] from hb]
+  exact EncodeReady.focus (by simp [forcedRule])
+    (.pos (p := .inr (.neu (.var .here))))
+
+def nestedSchedRecL :
+    CertifiedScheduleIx (sig := NestedIxSig) nestedSchedAfterL
+      (mapIxRestCoprodL NestedInner NestedC nestedSchedSum []) NestedP :=
+  certifiedScheduleIx_nil nestedSchedAfterL nestedSchedAfterL_boundary
+    ⟨nestedSchedBranchL, nestedSched_branchL_cert⟩
+
+def nestedSchedRecR :
+    CertifiedScheduleIx (sig := NestedIxSig) nestedSchedAfterR
+      (mapIxRestCoprodR NestedInner NestedC nestedSchedSum []) NestedP :=
+  certifiedScheduleIx_nil nestedSchedAfterR nestedSchedAfterR_boundary
+    ⟨nestedSchedBranchR, nestedSched_branchR_cert⟩
+
+theorem nestedSched_splitL_ws :
+    (retainedSplitLIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry).ws =
+      [{ origin := .split (obsEntryOf nestedSchedEntry NestedP).origin false,
+         ty := NestedInner }] := by
+  rw [retainedSplitLIx_ws_of_boundary (sig := NestedIxSig) NestedInner NestedC
+    nestedSchedEntry nestedSchedEntry_boundary]
+  simp [pushPos, NestedInner, objectPolarity, List.mergeSort_singleton]
+
+theorem nestedSched_splitR_ws :
+    (retainedSplitRIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry).ws =
+      [{ origin := .split (obsEntryOf nestedSchedEntry NestedP).origin true,
+         ty := NestedC }] := by
+  rw [retainedSplitRIx_ws_of_boundary (sig := NestedIxSig) NestedInner NestedC
+    nestedSchedEntry nestedSchedEntry_boundary]
+  simp [pushPos, NestedC, objectPolarity, List.mergeSort_singleton]
+
+theorem nestedSched_splitL_wf :
+    EncodeIx.WellFormed
+      (retainedSplitLIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry) := by
+  have hws := nestedSched_splitL_ws
+  have hbind := EncodeIx.WellFormed.bindObs nestedSchedEntry_wf NestedP
+  have hpos : objectPolarity (NestedP : Object NestedIxSig.nBases) = .pos := by
+    simp [NestedP, objectPolarity_coprod]
+  have hwsObs :
+      (nestedSchedEntry.bindObs NestedP).ws =
+        [obsEntryOf nestedSchedEntry NestedP] :=
+    bindObs_ws_of_boundary nestedSchedEntry NestedP nestedSchedEntry_boundary hpos
+  simpa [retainedSplitLIx, EncodeIx.splitL, hwsObs] using
+    EncodeIx.WellFormed.splitL hbind (obsEntryOf nestedSchedEntry NestedP) [] NestedInner
+      (by simp [hwsObs])
+
+theorem nestedSched_splitR_wf :
+    EncodeIx.WellFormed
+      (retainedSplitRIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry) := by
+  have hbind := EncodeIx.WellFormed.bindObs nestedSchedEntry_wf NestedP
+  have hpos : objectPolarity (NestedP : Object NestedIxSig.nBases) = .pos := by
+    simp [NestedP, objectPolarity_coprod]
+  have hwsObs :
+      (nestedSchedEntry.bindObs NestedP).ws =
+        [obsEntryOf nestedSchedEntry NestedP] :=
+    bindObs_ws_of_boundary nestedSchedEntry NestedP nestedSchedEntry_boundary hpos
+  simpa [retainedSplitRIx, EncodeIx.splitR, hwsObs] using
+    EncodeIx.WellFormed.splitR hbind (obsEntryOf nestedSchedEntry NestedP) [] NestedC
+      (by simp [hwsObs])
+
+theorem nestedSched_invL_isSome :
+    (certifiedForcedInvert
+      (retainedSplitLIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry)
+      nestedSched_splitL_wf
+      (Produced.castState
+        (emptyWsEncode_eq_afterIxCoprodL nestedSchedEntry nestedSched_splitL_ws).symm
+        nestedSchedRecL.produced)).isSome = true := by
+  native_decide
+
+theorem nestedSched_invR_isSome :
+    (certifiedForcedInvert
+      (retainedSplitRIx (sig := NestedIxSig) NestedInner NestedC nestedSchedEntry)
+      nestedSched_splitR_wf
+      (Produced.castState
+        (emptyWsEncode_eq_afterIxCoprodR nestedSchedEntry nestedSched_splitR_ws).symm
+        nestedSchedRecR.produced)).isSome = true := by
+  native_decide
+
+/-- Exact coproduct schedule whose left summand is the nested `(A+B)`. -/
+def nestedSchedIx :
+    CertifiedScheduleIx (sig := NestedIxSig) nestedSchedEntry
+      [⟨NestedP, nestedSchedSum⟩] NestedP :=
+  certifiedScheduleIx_exactCoprod (sig := NestedIxSig) nestedSchedEntry
+    nestedSched_forcedRule_entry nestedSchedSum []
+    nestedSched_splitL_ws nestedSched_splitR_ws
+    nestedSched_splitL_wf nestedSched_splitR_wf
+    nestedSchedRecL nestedSchedRecR
+    nestedSched_invL_isSome nestedSched_invR_isSome
+
+def nestedSchedProduced : Produced nestedSchedEntry NestedP :=
+  nestedSchedIx.produced
+
 /-!
-### Stop report — forced inversion + nested fixture
+### Status — forced inversion + nested fixtures
 
 **Landed:**
-* `certifiedForcedInvert_moveStableOnly` — drains `WorklistMoveStableOnly` worklists
-* `certifiedForcedInvert_unit_eta?` / `certifiedForcedInvert_unit?` — mirrors
-  `forcedRule` including nested `leftCoprod` (unit-η) and `leftNever` (abort)
-* `certifiedScheduleIx_exactCoprod` invokes moveStable-only invert per summand
-* Nested fixture `P = (A+B)+C`: outer/inner leftCoprod + atomic `moveStable`;
-  every atomic branch pop is `AtSaturationBoundary`; full invert isSome
+* `certifiedForcedInvert` — peel-based, goal-polymorphic (`moveStable` /
+  `leftNever` / `leftCoprod` via `produced_emptyWs_split*` +
+  `invCert_leftCoprod_peel`)
+* `produced_emptyWs_splitL/R` — full `produced_of_embedding` transport
+* `certifiedScheduleIx_exactCoprod` drains summands via `certifiedForcedInvert`
+* `certifiedScheduleIx_exactCoprod_of_moveStableSummands` kept (TwoObs regression)
+* Nested unit fixture + non-unit `NestedA` invert (`nestedIxNonUnitProduced`)
+* Nested-summand schedule (`nestedSchedIx`) observing `(A+B)+C`
 
-**STOP (non-unit leftCoprod leaf transport):** measure decreases on
-`splitEncodeL/R`. `EncodeIxEmbedding` + peel-free transport land (`ICCEncodeEmbed`;
-λ/`letPos` exercises; `letPos` not blocked). Remaining: `peelCaseOuter`/`find?`
-rename naturality to lift to full `EncodeReady`. No fuel; no nesting-depth cases.
-
-Legacy `CertifiedSchedule` kept. Consistency / public evaluator deferred.
+**Remaining before Cleanup A:** consistency / public evaluator deferred; legacy
+`CertifiedSchedule` / `ICCReadyCert` still imported at root; EncodeIx still pulls
+`ICCTotal` for helpers such as `encodeReady_abort_leftNever`.
 -/
 
 end Equality
