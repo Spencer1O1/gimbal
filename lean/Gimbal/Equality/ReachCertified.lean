@@ -252,26 +252,7 @@ def CertifiedReachResult.soundFor (c : CertifiedReachResult n)
     (Γ : ReachCtx n) (goal : Object n) : Prop :=
   c.state = runReachability Γ goal
 
-/-! ## Certificate extension — intended API (unproved in this checkpoint)
-
-Next sticky obligation (no `sorry` placeholder):
-
-```
-ParentsCertified cert w  :=
-  ∀ p ∈ w.cellParents, ∃ bP rP, cert.rank p bP = some rP
-
-ReachRankCert.extend :
-  occupied slot → cert unchanged (state also unchanged by assign-once);
-  fresh neutral slot → pick r > every parent rank, extend cert.
-
-certifiedMarkHyp / certifiedDiscover / certifiedDiscoverDual
-  project definitionally to markHyp / discover / discoverDual.
-```
-
-Individual reachability rules should delegate to `certifiedDiscover`, not
-re-prove parent lookup per rule. Stop if a rule inserts a witness whose parents
-are not already certified — that is an operational dependency bug.
--/
+/-! ## Certificate extension -/
 
 /-- Every cell parent of `w` already carries a ranked neutral in `cert`. -/
 def ParentsCertified {n : Nat} {σ : ReachState n}
@@ -285,16 +266,483 @@ theorem ParentsCertified_ctxVar {n : Nat} {σ : ReachState n}
   intro p hp
   simp [Witness.cellParents] at hp
 
-/-- Strict upper bound for a fresh rank given certified parents. -/
+/-- Strict upper bound: max of `(slotRank + 1)` over both slots of every parent. -/
 def ParentsCertified.freshRank {n : Nat} {σ : ReachState n}
     {cert : ReachRankCert σ} {w : Witness}
     (_h : ParentsCertified cert w) : Nat :=
   (Witness.cellParents w).foldl
     (fun acc p =>
-      match cert.rankOfPreferred p with
-      | some r => Nat.max acc (r + 1)
-      | none => acc)
+      Nat.max acc
+        (Nat.max
+          (match cert.rank p false with | some r => r + 1 | none => 0)
+          (match cert.rank p true with | some r => r + 1 | none => 0)))
     0
+
+private def slotBound {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (p : Nat) : Nat :=
+  Nat.max
+    (match cert.rank p false with | some r => r + 1 | none => 0)
+    (match cert.rank p true with | some r => r + 1 | none => 0)
+
+theorem ParentsCertified.lt_freshRank {n : Nat} {σ : ReachState n}
+    {cert : ReachRankCert σ} {w : Witness}
+    (h : ParentsCertified cert w) :
+    ∀ p ∈ Witness.cellParents w, ∀ (b : SlotNew) (rP : Nat),
+      cert.rank p b = some rP → rP < h.freshRank := by
+  intro p hp b rP hr
+  have hbound : rP + 1 ≤ slotBound cert p := by
+    cases b <;> simp [slotBound, hr]
+  have hfold_ge :
+      ∀ (ps : List Nat) (acc : Nat),
+        acc ≤ ps.foldl (fun a q => Nat.max a (slotBound cert q)) acc := by
+    intro ps; induction ps with
+    | nil => intro acc; simp
+    | cons q qs ih =>
+        intro acc
+        simp [List.foldl]
+        exact le_trans (Nat.le_max_left acc _) (ih _)
+  have go :
+      ∀ (ps : List Nat) (acc : Nat), p ∈ ps →
+        rP + 1 ≤
+          ps.foldl (fun a q => Nat.max a (slotBound cert q)) acc := by
+    intro ps; induction ps with
+    | nil => intro _ hmem; cases hmem
+    | cons q qs ih =>
+        intro acc hmem
+        cases hmem with
+        | head =>
+            simp [List.foldl]
+            exact le_trans (le_trans hbound (Nat.le_max_right _ _))
+              (hfold_ge qs _)
+        | tail _ hmem' =>
+            simp [List.foldl]
+            exact ih (Nat.max acc (slotBound cert q)) hmem'
+  have := go (Witness.cellParents w) 0 hp
+  simp only [ParentsCertified.freshRank, slotBound] at this ⊢
+  exact Nat.lt_of_lt_of_le (Nat.lt_succ_self rP) this
+
+/-! ### Record / setCell helpers -/
+
+theorem ReachCell.record_eq_of_slot_isSome (c : ReachCell) (b : SlotNew) (w : Witness)
+    (h : (c.slotWitness b).isSome = true) :
+    c.record b w = c := by
+  cases b <;> cases ho : c.oldWitness <;> cases hn : c.newWitness <;>
+    simp [ReachCell.slotWitness, ReachCell.record, ho, hn] at h ⊢
+
+theorem ReachState.setCell_same {σ : ReachState n} {i : Nat}
+    (h : i < σ.cells.size) :
+    σ.setCell i (σ.getCell i) = σ := by
+  apply ReachState.ext
+  · simp
+  · simp only [ReachState.setCell, dif_pos h, ReachState.getCell,
+      Array.getElem?_eq_getElem h]
+    exact Array.set_getElem_self h
+  · simp [ReachState.setCell, dif_pos h]
+
+theorem ReachCell.slotWitness_record_fresh (c : ReachCell) (b : SlotNew) (w : Witness)
+    (h : c.slotWitness b = none) :
+    (c.record b w).slotWitness b = some w := by
+  cases b
+  · have ho : c.oldWitness = none := by simpa [ReachCell.slotWitness] using h
+    simp [ReachCell.slotWitness, ReachCell.record, ho]
+  · have hn : c.newWitness = none := by simpa [ReachCell.slotWitness] using h
+    simp [ReachCell.slotWitness, ReachCell.record, hn]
+
+theorem ReachCell.slotWitness_record_other (c : ReachCell) (b b' : SlotNew) (w : Witness)
+    (hne : b' ≠ b) (h : c.slotWitness b = none) :
+    (c.record b w).slotWitness b' = c.slotWitness b' := by
+  cases b <;> cases b' <;> simp_all [ReachCell.slotWitness, ReachCell.record]
+
+theorem ReachCell.slotWitness_recordHyp (c : ReachCell) (b : SlotNew) (w : Witness)
+    (b' : SlotNew) :
+    (c.recordHyp b w).slotWitness b' = (c.record b w).slotWitness b' := by
+  cases b' <;> simp [ReachCell.recordHyp, ReachCell.slotWitness]
+
+def ReachRankCert.castState {n : Nat} {σ τ : ReachState n}
+    (h : σ = τ) (cert : ReachRankCert σ) : ReachRankCert τ :=
+  h ▸ cert
+
+/-- Occupied slot: assign-once no-op; cast certificate along state equality. -/
+def ReachRankCert.extendOccupied {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hocc : (σ.getCell i).slotWitness b ≠ none)
+    (hi : i < σ.cells.size) :
+    ReachRankCert (σ.setCell i ((σ.getCell i).record b w)) :=
+  have hsome : ((σ.getCell i).slotWitness b).isSome = true := by
+    cases h : (σ.getCell i).slotWitness b
+    · exact (hocc h).elim
+    · rfl
+  have heq :
+      σ.setCell i ((σ.getCell i).record b w) = σ := by
+    rw [ReachCell.record_eq_of_slot_isSome _ b w hsome]
+    exact ReachState.setCell_same hi
+  cert.castState heq.symm
+
+/-- Fresh non-neutral (intro) slot: store witness, ranks unchanged. -/
+def ReachRankCert.extendFreshIntro {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hwNeu : Witness.isNeutral w = false)
+    (hfresh : (σ.getCell i).slotWitness b = none)
+    (hi : i < σ.cells.size) :
+    ReachRankCert (σ.setCell i ((σ.getCell i).record b w)) where
+  rank := cert.rank
+  rank_iff := by
+    intro j b'
+    by_cases hj : j = i
+    · have hji : i = j := hj.symm; subst hji
+      rw [ReachState.getCell_setCell_self hi]
+      by_cases hb : b' = b
+      · have hbb : b = b' := hb.symm; subst hbb
+        rw [ReachCell.slotWitness_record_fresh _ _ _ hfresh]
+        simp [hwNeu]
+        have := cert.rank_iff i b
+        simpa [hfresh] using this.symm
+      · rw [ReachCell.slotWitness_record_other _ b b' w hb hfresh]
+        exact cert.rank_iff i b'
+    · rw [ReachState.getCell_setCell_ne (Ne.symm hj)]
+      exact cert.rank_iff j b'
+  parents_lt := by
+    intro j b' w' r hw' hwNeu' hr p hp
+    have hslot : (σ.getCell j).slotWitness b' = some w' := by
+      by_cases hj : j = i
+      · have hji : i = j := hj.symm; subst hji
+        have hw'' := hw'
+        rw [ReachState.getCell_setCell_self hi] at hw''
+        by_cases hb : b' = b
+        · have hbb : b = b' := hb.symm; subst hbb
+          rw [ReachCell.slotWitness_record_fresh _ _ _ hfresh] at hw''
+          cases hw''
+          simp [hwNeu] at hwNeu'
+        · rwa [ReachCell.slotWitness_record_other _ b b' w hb hfresh] at hw''
+      · rwa [ReachState.getCell_setCell_ne (Ne.symm hj)] at hw'
+    exact cert.parents_lt j b' w' r hslot hwNeu' hr p hp
+
+/--
+Fresh neutral slot: assign `freshRank` strictly above every certified parent.
+Requires `ParentsCertified` — missing parents are an operational bug, not patched.
+-/
+def ReachRankCert.extendFreshNeutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hwNeu : Witness.isNeutral w = true)
+    (hfresh : (σ.getCell i).slotWitness b = none)
+    (hp : ParentsCertified cert w)
+    (hi : i < σ.cells.size) :
+    ReachRankCert (σ.setCell i ((σ.getCell i).record b w)) where
+  rank := fun j b' =>
+    if j = i ∧ b' = b then some hp.freshRank else cert.rank j b'
+  rank_iff := by
+    intro j b'
+    by_cases hj : j = i
+    · have hji : i = j := hj.symm; subst hji
+      by_cases hb : b' = b
+      · have hbb : b = b' := hb.symm; subst hbb
+        simp [ReachState.getCell_setCell_self hi,
+          ReachCell.slotWitness_record_fresh _ _ _ hfresh, hwNeu]
+      · have hne : ¬(i = i ∧ b' = b) := fun h => hb h.2
+        rw [if_neg hne]
+        rw [ReachState.getCell_setCell_self hi,
+          ReachCell.slotWitness_record_other _ b b' w hb hfresh]
+        exact cert.rank_iff i b'
+    · simp [hj]
+      rw [ReachState.getCell_setCell_ne (Ne.symm hj)]
+      exact cert.rank_iff j b'
+  parents_lt := by
+    intro j b' w' r hw' hwNeu' hr p hpMem
+    by_cases hnew : j = i ∧ b' = b
+    · obtain ⟨rfl, rfl⟩ := show i = j ∧ b = b' from ⟨hnew.1.symm, hnew.2.symm⟩
+      have : w' = w := by
+        have hw'' := hw'
+        rw [ReachState.getCell_setCell_self hi,
+          ReachCell.slotWitness_record_fresh _ _ _ hfresh] at hw''
+        injection hw'' with heq
+        exact heq.symm
+      subst this
+      have : r = hp.freshRank := by
+        simp at hr
+        exact hr.symm
+      subst this
+      obtain ⟨bP, rP, hrP⟩ := hp p hpMem
+      have hne : ¬(p = i ∧ bP = b) := by
+        intro h
+        obtain ⟨rfl, rfl⟩ := show i = p ∧ b = bP from ⟨h.1.symm, h.2.symm⟩
+        have hiff := cert.rank_iff i b
+        rw [hfresh, hrP] at hiff
+        cases hiff
+      refine ⟨bP, rP, ?_, ParentsCertified.lt_freshRank hp p hpMem bP rP hrP⟩
+      rw [if_neg hne]; exact hrP
+    · have hneIF : ¬(j = i ∧ b' = b) := hnew
+      rw [if_neg hneIF] at hr
+      have hslot : (σ.getCell j).slotWitness b' = some w' := by
+        by_cases hj : j = i
+        · have hji : i = j := hj.symm; subst hji
+          have hb : b' ≠ b := fun he => hnew ⟨rfl, he⟩
+          have hw'' := hw'
+          rw [ReachState.getCell_setCell_self hi,
+            ReachCell.slotWitness_record_other _ b b' w hb hfresh] at hw''
+          exact hw''
+        · rwa [ReachState.getCell_setCell_ne (Ne.symm hj)] at hw'
+      obtain ⟨bP, rP, hrP, hlt⟩ :=
+        cert.parents_lt j b' w' r hslot hwNeu' hr p hpMem
+      refine ⟨bP, rP, ?_, hlt⟩
+      have hne : ¬(p = i ∧ bP = b) := by
+        intro h
+        obtain ⟨rfl, rfl⟩ := show i = p ∧ b = bP from ⟨h.1.symm, h.2.symm⟩
+        have hiff := cert.rank_iff i b
+        rw [hfresh, hrP] at hiff
+        cases hiff
+      rw [if_neg hne]; exact hrP
+
+/-- Unified extend on `setCell ∘ record`. -/
+def ReachRankCert.extend {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hi : i < σ.cells.size)
+    (hpar : Witness.isNeutral w = true → ParentsCertified cert w) :
+    ReachRankCert (σ.setCell i ((σ.getCell i).record b w)) :=
+  match hslot : (σ.getCell i).slotWitness b with
+  | some _ =>
+      ReachRankCert.extendOccupied cert i b w (by simp [hslot]) hi
+  | none =>
+      if hw : Witness.isNeutral w = true then
+        ReachRankCert.extendFreshNeutral cert i b w hw hslot (hpar hw) hi
+      else
+        ReachRankCert.extendFreshIntro cert i b w
+          (by cases h : Witness.isNeutral w <;> simp_all) hslot hi
+
+/-- Lift certificate across `markInconsistentIf` (cells unchanged). -/
+def ReachRankCert.ofMarkInconsistentIf {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (A : Object n) :
+    ReachRankCert (σ.markInconsistentIf A) where
+  rank := cert.rank
+  rank_iff := by
+    intro i b
+    rw [ReachState.getCell_markInconsistentIf]
+    exact cert.rank_iff i b
+  parents_lt := by
+    intro i b w r hw hwNeu hr p hp
+    have hw' : (σ.getCell i).slotWitness b = some w := by
+      rwa [ReachState.getCell_markInconsistentIf] at hw
+    exact cert.parents_lt i b w r hw' hwNeu hr p hp
+
+/-- Certificate depends only on witness slots, not `retrievable`. -/
+def ReachRankCert.ofSameSlots {n : Nat} {σ τ : ReachState n}
+    (cert : ReachRankCert σ)
+    (h : ∀ i b, (τ.getCell i).slotWitness b = (σ.getCell i).slotWitness b) :
+    ReachRankCert τ where
+  rank := cert.rank
+  rank_iff := by
+    intro i b
+    rw [h i b]
+    exact cert.rank_iff i b
+  parents_lt := by
+    intro i b w r hw hwNeu hr p hp
+    have hw' : (σ.getCell i).slotWitness b = some w := by
+      simpa [h i b] using hw
+    exact cert.parents_lt i b w r hw' hwNeu hr p hp
+
+theorem ReachRankCert.castState_rank {n : Nat} {σ τ : ReachState n}
+    (h : σ = τ) (cert : ReachRankCert σ) :
+    (cert.castState h).rank = cert.rank := by
+  cases h; rfl
+
+theorem ReachRankCert.extend_preserves_rank {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hi : i < σ.cells.size)
+    (hpar : Witness.isNeutral w = true → ParentsCertified cert w)
+    {j : Nat} {b' : SlotNew} {r : Nat}
+    (hr : cert.rank j b' = some r) :
+    (ReachRankCert.extend cert i b w hi hpar).rank j b' = some r := by
+  unfold ReachRankCert.extend
+  split
+  · rename_i _ hslot
+    simp only [ReachRankCert.extendOccupied]
+    rw [ReachRankCert.castState_rank]
+    exact hr
+  · rename_i hfresh
+    split
+    · simp only [ReachRankCert.extendFreshNeutral]
+      have hne : ¬(j = i ∧ b' = b) := by
+        intro h
+        obtain ⟨rfl, rfl⟩ := show i = j ∧ b = b' from ⟨h.1.symm, h.2.symm⟩
+        have hiff := cert.rank_iff i b
+        rw [hfresh, hr] at hiff
+        cases hiff
+      rw [if_neg hne]; exact hr
+    · simp only [ReachRankCert.extendFreshIntro, hr]
+
+theorem ParentsCertified.of_extend {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (hi : i < σ.cells.size)
+    (hpar : Witness.isNeutral w = true → ParentsCertified cert w)
+    (w' : Witness) (hp : ParentsCertified cert w') :
+    ParentsCertified (ReachRankCert.extend cert i b w hi hpar) w' := by
+  intro p hpMem
+  obtain ⟨bP, rP, hrP⟩ := hp p hpMem
+  exact ⟨bP, rP, ReachRankCert.extend_preserves_rank cert i b w hi hpar hrP⟩
+
+theorem ParentsCertified.of_markInconsistentIf {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (A : Object n) (w : Witness)
+    (hp : ParentsCertified cert w) :
+    ParentsCertified (cert.ofMarkInconsistentIf A) w := by
+  intro p hpMem
+  obtain ⟨bP, rP, hrP⟩ := hp p hpMem
+  exact ⟨bP, rP, hrP⟩
+
+/-! ### Certified operations -/
+
+/-- Certified discover. Neutrals require `ParentsCertified` via `h`. -/
+def certifiedDiscover {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (i : Nat) (b : SlotNew) (w : Witness)
+    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    CertifiedReachResult n :=
+  match σ.typeAt i with
+  | none => ⟨σ, cert⟩
+  | some A =>
+      if hi : i < σ.cells.size then
+        let σ₁ := σ.setCell i ((σ.getCell i).record b w)
+        let c₁ := ReachRankCert.extend cert i b w hi h
+        ⟨σ₁.markInconsistentIf A, c₁.ofMarkInconsistentIf A⟩
+      else
+        ⟨σ.markInconsistentIf A, cert.ofMarkInconsistentIf A⟩
+
+theorem certifiedDiscover_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    (certifiedDiscover σ cert i b w h).project = σ.discover i b w := by
+  dsimp only [certifiedDiscover, ReachState.discover, CertifiedReachResult.project]
+  cases σ.typeAt i with
+  | none => rfl
+  | some A =>
+      by_cases hi : i < σ.cells.size
+      · simp [hi]
+      · simp [hi, ReachState.setCell]
+
+theorem ParentsCertified.of_certifiedDiscover {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
+    (h : Witness.isNeutral w = true → ParentsCertified cert w)
+    (w' : Witness) (hp : ParentsCertified cert w') :
+    ParentsCertified (certifiedDiscover σ cert i b w h).cert w' := by
+  simp only [certifiedDiscover]
+  cases σ.typeAt i with
+  | none => exact hp
+  | some A =>
+      change ParentsCertified
+        ((if hi : i < σ.cells.size then
+          ({ state := (σ.setCell i ((σ.getCell i).record b w)).markInconsistentIf A,
+             cert := (ReachRankCert.extend cert i b w hi h).ofMarkInconsistentIf A } :
+            CertifiedReachResult n)
+        else
+          ({ state := σ.markInconsistentIf A,
+             cert := cert.ofMarkInconsistentIf A } :
+            CertifiedReachResult n)).cert) w'
+      by_cases hi : i < σ.cells.size
+      · rw [dif_pos hi]
+        exact ParentsCertified.of_markInconsistentIf
+          (ReachRankCert.extend cert i b w hi h) A w'
+          (ParentsCertified.of_extend cert i b w hi h w' hp)
+      · rw [dif_neg hi]
+        exact ParentsCertified.of_markInconsistentIf cert A w' hp
+
+/-- Dual-fire composition. -/
+def certifiedDiscoverDual {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (i : Nat) (oldOk newOk : Bool) (w : Witness)
+    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    CertifiedReachResult n :=
+  match oldOk, newOk with
+  | true, true =>
+      let c₁ := certifiedDiscover σ cert i false w h
+      certifiedDiscover c₁.state c₁.cert i true w (fun hwNeu =>
+        ParentsCertified.of_certifiedDiscover σ cert i false w h w (h hwNeu))
+  | true, false =>
+      certifiedDiscover σ cert i false w h
+  | false, true =>
+      certifiedDiscover σ cert i true w h
+  | false, false =>
+      ⟨σ, cert⟩
+
+theorem certifiedDiscoverDual_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (oldOk newOk : Bool) (w : Witness)
+    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    (certifiedDiscoverDual σ cert i oldOk newOk w h).project =
+      σ.discoverDual i oldOk newOk w := by
+  cases oldOk <;> cases newOk
+  · rfl
+  · exact certifiedDiscover_project σ cert i true w h
+  · exact certifiedDiscover_project σ cert i false w h
+  · simp only [certifiedDiscoverDual, ReachState.discoverDual,
+      CertifiedReachResult.project]
+    have h₁ := certifiedDiscover_project σ cert i false w h
+    have h₂ := certifiedDiscover_project
+      (certifiedDiscover σ cert i false w h).state
+      (certifiedDiscover σ cert i false w h).cert i true w
+      (fun hwNeu =>
+        ParentsCertified.of_certifiedDiscover σ cert i false w h w (h hwNeu))
+    simp only [CertifiedReachResult.project] at h₁ h₂
+    rw [h₂, h₁]
+    simp
+
+/-- Certified markHyp via `record` ranks + `ofSameSlots` for `recordHyp`. -/
+def certifiedMarkHyp {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (hypIdx : Nat) :
+    CertifiedReachResult n :=
+  match hA : Γ.hyps[hypIdx]? with
+  | none => ⟨σ, cert⟩
+  | some A =>
+      match hiIdx : σ.findTypeIdx A with
+      | none => ⟨σ, cert⟩
+      | some i =>
+          if hi : i < σ.cells.size then
+            let b := Γ.isNew hypIdx
+            let w : Witness := .ctxVar hypIdx
+            let hpar : Witness.isNeutral w = true → ParentsCertified cert w :=
+              fun _ => ParentsCertified_ctxVar cert hypIdx
+            let σRec := σ.setCell i ((σ.getCell i).record b w)
+            let σHyp := σ.setCell i ((σ.getCell i).recordHyp b w)
+            let certRec := ReachRankCert.extend cert i b w hi hpar
+            have hslots :
+                ∀ j b', (σHyp.getCell j).slotWitness b' =
+                  (σRec.getCell j).slotWitness b' := by
+              intro j b'
+              by_cases hj : j = i
+              · subst hj
+                rw [ReachState.getCell_setCell_self hi,
+                  ReachState.getCell_setCell_self hi]
+                exact ReachCell.slotWitness_recordHyp _ b w b'
+              · rw [ReachState.getCell_setCell_ne (Ne.symm hj),
+                  ReachState.getCell_setCell_ne (Ne.symm hj)]
+            ⟨σHyp.markInconsistentIf A,
+              (certRec.ofSameSlots hslots).ofMarkInconsistentIf A⟩
+          else
+            ⟨σ.markInconsistentIf A, cert.ofMarkInconsistentIf A⟩
+
+theorem certifiedMarkHyp_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (hypIdx : Nat) :
+    (certifiedMarkHyp Γ σ cert hypIdx).project = σ.markHyp Γ hypIdx := by
+  dsimp only [certifiedMarkHyp, ReachState.markHyp, CertifiedReachResult.project]
+  split
+  · next hA => simp [hA]
+  · next A hA =>
+      split
+      · next hiIdx => simp [hA, hiIdx]
+      · next i hiIdx =>
+          split
+          · next hi => simp [hA, hiIdx]
+          · next hi =>
+              simp [hA, hiIdx, ReachState.setCell, dif_neg hi]
+
+/-! ## Status
+
+**Landed without `sorry`:** assign-once, parents, lex demos, `ParentsCertified` /
+`freshRank` / `lt_freshRank`, generic `extend` (occupied / fresh intro / fresh
+neutral), `ofSameSlots`, rank persistence + parent mono under extend,
+`certifiedDiscover` / `certifiedDiscoverDual` / `certifiedMarkHyp` with
+computational projections.
+
+**Open:** sweep fold → `certifiedRunReachability`; WF reconstruction →
+`ReconstructTotalityPackage`.
+
+**Stop condition:** never invent ranks for missing parents — require
+`ParentsCertified` before fresh neutral extend.
+-/
 
 /-! ## Totality scope (neutral only)
 
@@ -309,14 +757,7 @@ theorem Witness.not_neutral_eta : Witness.isNeutral .eta = false := rfl
 theorem Witness.not_neutral_inl (i : Nat) : Witness.isNeutral (.inl i) = false := rfl
 theorem Witness.not_neutral_inr (i : Nat) : Witness.isNeutral (.inr i) = false := rfl
 
-/-! ## Inconsistent completed state → reconstructible `.never`
-
-Soundness: `ReachSound` already ties `inconsistent` to a declarative deduction
-of `0`. The certificate must additionally ensure a **neutral** stored witness
-for `.never` (typically `.ctxVar` of a `never` hyp, or a neutral derivation).
-
-Scoped Prop (same as `InconsistentNeverTotal` in `ReconstructTotal`):
--/
+/-! ## Inconsistent completed state → reconstructible `.never` -/
 
 theorem InconsistentNeverTotal_of_ranked_package {sig : Signature}
     (h : ReconstructTotalityPackage sig) : InconsistentNeverTotal sig :=
@@ -330,33 +771,12 @@ theorem InconsistentNeverTotal_of_ranked_package {sig : Signature}
 | **B. Runtime `discoverGen` on `ReachCell`/`Witness`** | Local measure at each record site; easy WF | Must exclude gen from semantic equality, canonical scheduling, `PairEntry`/`Witness` identity; risks leaking into compare | Use **only if A is unmaintainable** |
 | **C. Structural derivation trees** | Intrinsic WF; no parallel rank map | Heavier than current parent-pointer witnesses; changes reconstruction API | Possible long-term; not needed if A works |
 
-**Spike recommendation:** pursue **A**. Assign-once makes rank stable. Parent
-relation is small and closed. Lex measure handles the `.fst`/`.snd` size
-increase. Next sticky work (not this spike): finish `extendFresh`, certify all
-rules, build `certifiedRunReachability` with `soundFor`, then prove
-`ReconstructTotalityPackage` by well-founded recursion on `reconMeasure`.
+**Recommendation:** pursue **A**. Assign-once makes rank stable. Parent relation
+is small and closed. Lex measure handles the `.fst`/`.snd` size increase.
 
 Dependency once A lands:
 `certified reachability → ranked witness graph → reconstruction totality →
 retained schedule adapter → certified producer → EncodeTotal`.
--/
-
-/-! ## Spike status
-
-**Landed (proved scaffolding, no `sorry`):**
-* assign-once theorems (`record_keeps_*` / `record_sets_*`)
-* `Witness.cellParents` for every constructor
-* `ReachRankCert` / `CertifiedReachResult` / `project`
-* `ParentsCertified` / `ParentsCertified_ctxVar` / `freshRank`
-* lex `reconMeasure` with `.fst` and `.appTy` / `invOf` decrease demos
-* neutral-only scope; intro forms excluded
-* migration comparison → prefer proof-only runner
-
-**Next (certificate extension, still before adapter/EncodeTotal):**
-* generic `ReachRankCert.extend` (occupied vs fresh)
-* `certifiedMarkHyp` / `certifiedDiscover` / dual-fire
-* sweep preservation + `certifiedRunReachability`
-* `ReconstructTotalityPackage` via WF on `reconMeasure`
 -/
 
 end Equality
