@@ -124,6 +124,11 @@ structure Produced {Γ : Ctx sig} (s : EncodeIx Γ) (A : Object sig.nBases) wher
   term : InvTm Γ A
   cert : InvCert s term
 
+/-- Cast a `Produced` package along an EncodeIx state equality. -/
+def Produced.castState {Γ : Ctx sig} {s s' : EncodeIx (sig := sig) Γ}
+    {A : Object sig.nBases} (h : s = s') (p : Produced s A) : Produced s' A :=
+  h ▸ p
+
 /-- Phase-entry specialization (may use `ofHyps`; intermediates must not). -/
 abbrev EntryReady {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t : InvTm (Ctx.ofHyps hyps) A) : Prop :=
@@ -192,25 +197,57 @@ theorem entryReady_encode_some {hyps : Array (Object sig.nBases)}
   encode_of_encodeReady (OriginEnv.ofHyps hyps) (EncodeIx.entry (sig := sig) hyps).ws
     rfl (by simpa [EntryReady, InvCert, EncodeIx.entry] using h)
 
-/-! ### Generic retained coproduct-observation producer rule
+/-! ### Saturation boundary and retained observation producers
 
-Builds `.foc (.letPos n (.case (.var .here) tL tR))` with an `InvCert` at `s`
-from branch certificates at `splitL` / `splitR` of `bindObs s`. Requires an
-empty parent worklist so the retained obs is the unique positive head
-(`focCert_letPos` / `pushPos []`).
+Saturation introduces an observation only after the current invertible worklist
+is exhausted (`forcedRule` is `focus` / right rule). `bindObs` then creates a
+singleton worklist, which inversion consumes before the next observation.
+`AtSaturationBoundary` names that empty-worklist invariant; we do **not**
+generalize `retainedCoprodObsCertified` to nonempty parents.
 -/
+
+/-- Empty invertible worklist: ready for a saturation observation. -/
+abbrev AtSaturationBoundary {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ) : Prop :=
+  s.ws = []
+
+/-- `focus` (and thus observation introduction via `EncodeReady.focus`) only
+fires on an empty worklist. -/
+theorem forcedRule_eq_focus_ws_nil {ws : List (PosEntry sig)}
+    {A : Object sig.nBases} (h : forcedRule (sig := sig) ws A = .focus) :
+    ws = [] := by
+  cases ws with
+  | nil => rfl
+  | cons e tail =>
+      simp only [forcedRule] at h
+      split at h <;> cases h
+
+theorem atSaturationBoundary_of_forcedRule_focus {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) {A : Object sig.nBases}
+    (h : forcedRule (sig := sig) s.ws A = .focus) :
+    AtSaturationBoundary s :=
+  forcedRule_eq_focus_ws_nil h
 
 /-- Observation entry introduced by `bindObs` at counter `s.obsNext`. -/
 def obsEntryOf (s : EncodeIx (sig := sig) Γ) (P : Object sig.nBases) :
     PosEntry sig :=
   ⟨.obs (sig := sig) s.obsNext, P⟩
 
-theorem bindObs_ws_of_nil {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
-    (P : Object sig.nBases) (hws : s.ws = [])
+theorem bindObs_ws_of_boundary {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
+    (P : Object sig.nBases) (hbound : AtSaturationBoundary s)
     (hpos : objectPolarity P = .pos) :
     (s.bindObs P).ws = [obsEntryOf s P] := by
-  simp only [EncodeIx.bindObs, obsEntryOf, hws, pushPos, hpos, BEq.rfl, ↓reduceIte]
+  simp only [EncodeIx.bindObs, obsEntryOf, AtSaturationBoundary] at hbound ⊢
+  simp only [hbound, pushPos, hpos, BEq.rfl, ↓reduceIte]
   exact List.mergeSort_singleton _
+
+/-- After retaining a positive observation at the boundary, `pop` restores the
+boundary (singleton obs worklist fully consumed). -/
+theorem bindObs_pop_boundary {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
+    (P : Object sig.nBases) (hbound : AtSaturationBoundary s)
+    (hpos : objectPolarity P = .pos) :
+    AtSaturationBoundary ((s.bindObs P).pop) := by
+  simp only [AtSaturationBoundary, EncodeIx.pop,
+    bindObs_ws_of_boundary s P hbound hpos, List.tail_cons]
 
 theorem bindObs_env_here {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
     (P : Object sig.nBases) :
@@ -224,19 +261,40 @@ theorem forcedRule_leftCoprod_obsEntry {Γ : Ctx sig} (s : EncodeIx (sig := sig)
       .leftCoprod (obsEntryOf s (.coprod L R)) L R := by
   simp [forcedRule, obsEntryOf]
 
+theorem forcedRule_moveStable_obsEntry_base {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (i : Fin sig.nBases) (X : Object sig.nBases) :
+    forcedRule (sig := sig) [obsEntryOf s (.base i)] X =
+      .moveStable (obsEntryOf s (.base i)) := by
+  simp [forcedRule, obsEntryOf]
+
+/-- Lift a continuation certified after `pop` through `moveStable` at a
+singleton worklist head. -/
+def produced_moveStable_singleton {Γ : Ctx sig} {X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (hws : s.ws = [e])
+    (hfr : forcedRule (sig := sig) [e] X = .moveStable e)
+    (cont : Produced s.pop X) : Produced s X where
+  term := cont.term
+  cert := by
+    have ht : EncodeReady (sig := sig) [] s.env s.domNext s.obsNext cont.term := by
+      simpa [EncodeIx.pop, InvCert, hws, List.tail_cons] using cont.cert
+    have hmove : EncodeReady (sig := sig) [e] s.env s.domNext s.obsNext cont.term :=
+      EncodeReady.moveStable hfr ht
+    change EncodeReady s.ws s.env s.domNext s.obsNext cont.term
+    rw [hws]
+    exact hmove
+
 /--
 Retained coproduct observation: term and certificate constructed together.
-Branch `Produced` values live at the split states of `bindObs s`; no fixture
-transport and no result-shape search.
+Branch `Produced` values live at the split states of `bindObs s`.
 
-Requires `s.ws = []` so the retained observation is the unique positive head
-(matches `focCert_letPos`). Non-empty parent worklists are a state-index
-mismatch for this rule and are not patched by syntax-equality transport.
+Consumes `AtSaturationBoundary` (empty parent worklist) — the phase invariant
+for saturation observation introduction. Not generalized to nonempty parents.
 -/
 def retainedCoprodObsCertified {Γ : Ctx sig} {L R X : Object sig.nBases}
     (s : EncodeIx (sig := sig) Γ)
     (n : NegNeu Γ (.coprod L R))
-    (hws : s.ws = [])
+    (hbound : AtSaturationBoundary s)
     (hfr : forcedRule (sig := sig) s.ws X = .focus)
     (left : Produced
       ((s.bindObs (.coprod L R)).splitL (obsEntryOf s (.coprod L R)) L) X)
@@ -254,7 +312,7 @@ def retainedCoprodObsCertified {Γ : Ctx sig} {L R X : Object sig.nBases}
     have hposP : objectPolarity P = .pos := by
       simp [P, objectPolarity_coprod]
     have hwsObs : sObs.ws = [e] :=
-      bindObs_ws_of_nil s P hws hposP
+      bindObs_ws_of_boundary s P hbound hposP
     have htail : sObs.ws.tail = ([] : List (PosEntry sig)) := by
       rw [hwsObs]; rfl
     have hpeel :
@@ -294,10 +352,11 @@ def retainedCoprodObsCertified {Γ : Ctx sig} {L R X : Object sig.nBases}
         (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) s.obsNext) P)
         (OriginEnv.weaken (A := P) s.env (.obs (sig := sig) s.obsNext))
         s.domNext (s.obsNext + 1) body := by
-      simpa [InvCert, sObs, EncodeIx.bindObs, hws] using hbody
+      simpa [InvCert, sObs, EncodeIx.bindObs, AtSaturationBoundary, hbound] using
+        hbody
     have hterm : InvCert s (.foc (.letPos n body)) := by
       refine invCert_focus s (.letPos n body) hfr ?_
-      rw [hws]
+      rw [show s.ws = [] from hbound]
       exact focCert_letPos (sig := sig) n body ht
     simpa [body] using hterm
 
@@ -307,7 +366,7 @@ theorem retainedCoprodObsCertified_erase {Γ : Ctx sig} {L R X : Object sig.nBas
     (s : EncodeIx (sig := sig) Γ)
     (n : NegNeu Γ (.coprod L R))
     (uL : InvTm (Γ ▻ L) X) (uR : InvTm (Γ ▻ R) X)
-    (hws : s.ws = [])
+    (hbound : AtSaturationBoundary s)
     (hfr : forcedRule (sig := sig) s.ws X = .focus)
     (left : Produced
       ((s.bindObs (.coprod L R)).splitL (obsEntryOf s (.coprod L R)) L) X)
@@ -315,10 +374,57 @@ theorem retainedCoprodObsCertified_erase {Γ : Ctx sig} {L R X : Object sig.nBas
       ((s.bindObs (.coprod L R)).splitR (obsEntryOf s (.coprod L R)) R) X)
     (hL : left.term = InvTm.rename (Rename.skip1 (B := .coprod L R)) uL)
     (hR : right.term = InvTm.rename (Rename.skip1 (B := .coprod L R)) uR) :
-    (retainedCoprodObsCertified s n hws hfr left right).term.erase =
+    (retainedCoprodObsCertified s n hbound hfr left right).term.erase =
       (InvTm.case n uL uR).erase := by
   simp only [retainedCoprodObsCertified, hL, hR, InvTm.erase, FocTm.erase]
   exact erase_retained_coprod_obs n uL uR
+
+/--
+Retained atomic observation at the saturation boundary: `letPos` then
+`moveStable` restores the boundary for a nested continuation.
+-/
+def retainedAtomObsCertified {Γ : Ctx sig} {i : Fin sig.nBases}
+    {X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (n : NegNeu Γ (.base i))
+    (hbound : AtSaturationBoundary s)
+    (hfr : forcedRule (sig := sig) s.ws X = .focus)
+    (cont : Produced (s.bindObs (.base i)).pop X) :
+    Produced s X where
+  term := .foc (.letPos n cont.term)
+  cert := by
+    let P : Object sig.nBases := .base i
+    let e : PosEntry sig := obsEntryOf s P
+    let sObs := s.bindObs P
+    have hposP : objectPolarity P = .pos := rfl
+    have hwsObs : sObs.ws = [e] := bindObs_ws_of_boundary s P hbound hposP
+    let pMove := produced_moveStable_singleton sObs e hwsObs
+      (by simpa [e, P] using forcedRule_moveStable_obsEntry_base s i X) cont
+    have ht : EncodeReady (sig := sig)
+        (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) s.obsNext) P)
+        (OriginEnv.weaken (A := P) s.env (.obs (sig := sig) s.obsNext))
+        s.domNext (s.obsNext + 1) cont.term := by
+      simpa [InvCert, sObs, EncodeIx.bindObs, AtSaturationBoundary, hbound,
+        pMove, produced_moveStable_singleton] using pMove.cert
+    refine invCert_focus s (.letPos n cont.term) hfr ?_
+    rw [show s.ws = [] from hbound]
+    exact focCert_letPos (sig := sig) n cont.term ht
+
+/-!
+### Schedule / encode observation-boundary audit
+
+`forcedRule_eq_focus_ws_nil`: every `forcedRule _ = .focus` path has `ws = []`.
+`encodeICCGo` enters `encodeFocGo` (hence `letPos` / observation push) only under
+`focus` or right-foc rules, which also require empty `ws`. So every encode-side
+observation introduction is at `AtSaturationBoundary`.
+
+`EncodeReadyFoc.letPos`’s inductive type allows a nonempty `ws` parameter, but no
+`forcedRule`-gated encode/cert entry point uses that case. Saturation’s
+`applyObsNeu` sequences schedule `rest` after binding; that list is not the
+EncodeIx worklist — invertible EncodeIx work is emptied before the next
+`bindObs`. **No real path found that introduces an EncodeIx observation with a
+nonempty parent worklist.** Constructor left on the boundary invariant.
+-/
 
 /-! ## Vertical slice: `λ d. let z = f d in case z of …`
 

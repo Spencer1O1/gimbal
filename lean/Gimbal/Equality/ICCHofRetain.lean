@@ -286,11 +286,6 @@ theorem hof_splitR_state_eq :
       (hofEntry.bindObs SumN).splitR (obsEntryOf hofEntry SumN) NumberH := by
   simp only [hofAfterObs, hofObsEntry, obsEntryOf, hofEntry, EncodeIx.entry]
 
-/-- Cast a `Produced` package along an EncodeIx state equality. -/
-def Produced.castState {Γ : Ctx HofSumSig} {s s' : EncodeIx (sig := HofSumSig) Γ}
-    {A : Object HofSumSig.nBases} (h : s = s') (p : Produced s A) : Produced s' A :=
-  h ▸ p
-
 /-- Left identity-on-sum branch at the splitL state of `bindObs hofEntry`. -/
 def hofBranchL_produced : Produced
     ((hofEntry.bindObs SumN).splitL (obsEntryOf hofEntry SumN) NumberH) SumN :=
