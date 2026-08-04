@@ -7,7 +7,10 @@
   audits every `reconstructGo` recursive edge, and records why well-founded
   recursion is blocked until a discovery-rank / parent-DAG package exists.
 
-  **Gate status: BLOCKED — missing provenance rank.**
+  **Gate status: BLOCKED — missing provenance rank (proof-only certificate).**
+  Design spike: `ReachCertified.lean` (prefer `ReachRankCert` around the runner;
+  do not add observable `discoverGen` to `ReachCell` unless the proof-only path
+  proves unmaintainable).
   Do not feed an `Option`-propagating reachability adapter into EncodeTotal
   until this gate closes.
 -/

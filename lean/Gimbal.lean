@@ -44,6 +44,7 @@ import Gimbal.Equality.SatSchedule
 import Gimbal.Equality.SatSymm
 import Gimbal.Equality.SatTotal
 import Gimbal.Equality.ReconstructTotal
+import Gimbal.Equality.ReachCertified
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon
