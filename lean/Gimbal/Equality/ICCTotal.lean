@@ -3486,6 +3486,14 @@ theorem InvTm.castCtx_foc_letPos {Γ Δ : Ctx sig} {P A : Object sig.nBases}
   cases h
   rfl
 
+theorem InvTm.castCtx_foc_letPos_foc_pos {Γ Δ : Ctx sig} {P A : Object sig.nBases}
+    (h : Γ = Δ) (n : NegNeu Γ P) (p : PosNeu (Γ ▻ P) A) :
+    InvTm.castCtx h (.foc (.letPos n (.foc (.pos (.done p))))) =
+      .foc (.letPos (h ▸ n) (.foc (.pos (.done
+        (congrArg (fun Γ => Γ ▻ P) h ▸ p))))) := by
+  cases h
+  rfl
+
 /-- Cast `ofHyps.push` unit onto the encode branch schedule (base-only). -/
 theorem encodeReady_unit_leftCoprodBranch_cast
     (hyps : Array (Object sig.nBases)) (L : Object sig.nBases)
@@ -4959,6 +4967,54 @@ theorem coprodPushContR_unit {hyps : Array (Object sig.nBases)}
 
 /-! ### Derived coprod branch shapes (non-unit beyond unit η) -/
 
+/-- Base-binder `letPos` around foc-pos under encode's left-coprod branch schedule. -/
+theorem encodeReady_foc_letPos_focPos_base_leftCoprodBranch
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    {bQ : Fin sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (n : NegNeu (Ctx.ofHyps hyps ▻ L) (.base bQ))
+    (p : PosNeu (Ctx.ofHyps hyps ▻ L ▻ .base bQ) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (.foc (.letPos n (.foc (.pos (.done p))))) := by
+  have hbody :
+      EncodeReady
+        (pushPos ([] : List (PosEntry sig)) (.obs (sig := sig) 0) (.base bQ))
+        (OriginEnv.weaken (A := .base bQ)
+          (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+          (.obs (sig := sig) 0))
+        0 1 (.foc (.pos (.done p))) :=
+    encodeReady_foc_pos_basesOnly _
+      (OriginEnv.weaken (A := .base bQ)
+        (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+        (.obs (sig := sig) 0))
+      0 1 p (worklistBasesOnly_pushPos_obs_base bQ) hfr
+  exact encodeReady_foc_letPos_basesOnly hbr hfr hbody
+
+/-- Cast `ofHyps.push` base-binder letPos-of-foc-pos onto the branch schedule. -/
+theorem encodeReady_foc_letPos_focPos_base_leftCoprodBranch_cast
+    (hyps : Array (Object sig.nBases)) {A L : Object sig.nBases}
+    {bQ : Fin sig.nBases}
+    (e : PosEntry sig) (ws : List (PosEntry sig)) (side : Bool)
+    (n : NegNeu (Ctx.ofHyps (hyps.push L)) (.base bQ))
+    (p : PosNeu (Ctx.ofHyps (hyps.push L) ▻ .base bQ) A)
+    (hbr : worklistBasesOnly (leftCoprodBranchWs ws e side L))
+    (hfr : forcedRule ([] : List (PosEntry sig)) A = .focus) :
+    EncodeReady (leftCoprodBranchWs ws e side L)
+      (OriginEnv.weaken (A := L) (OriginEnv.ofHyps hyps) (.split e.origin side))
+      0 0
+      (InvTm.castCtx (Ctx.ofHyps_push hyps L)
+        (.foc (.letPos n (.foc (.pos (.done p)))))) := by
+  rw [InvTm.castCtx_foc_letPos_foc_pos]
+  exact encodeReady_foc_letPos_focPos_base_leftCoprodBranch hyps e ws side
+    ((Ctx.ofHyps_push hyps L) ▸ n)
+    (congrArg (fun Γ => Γ ▻ (.base bQ : Object sig.nBases))
+      (Ctx.ofHyps_push hyps L) ▸ p)
+    hbr hfr
+
 /--
 Branch bodies under `ofHyps.push` from which left-coprod `EncodeReady` follows
 after cast onto `Γ ▻ Side` (parallel to `AtomDerivedContShape`).
@@ -4976,6 +5032,11 @@ def CoprodDerivedBranchShape {hyps : Array (Object sig.nBases)}
       forcedRule ([] : List (PosEntry sig)) A = .focus) ∨
   (∃ (s : Schedule sig.nBases) (p : PosNeu (Ctx.ofHyps (hyps.push Side)) A),
       body = .foc (.sat (.mk s (.foc (.pos (.done p))))) ∧
+      forcedRule ([] : List (PosEntry sig)) A = .focus) ∨
+  (∃ (bQ : Fin sig.nBases)
+      (n : NegNeu (Ctx.ofHyps (hyps.push Side)) (.base bQ))
+      (p : PosNeu (Ctx.ofHyps (hyps.push Side) ▻ .base bQ) A),
+      body = .foc (.letPos n (.foc (.pos (.done p)))) ∧
       forcedRule ([] : List (PosEntry sig)) A = .focus)
 
 /-- Cast branch body ready under encode's left-coprod schedule from shape. -/
@@ -5000,10 +5061,14 @@ theorem encodeReady_coprodBranch_cast_of_shape
   | .inr (.inr (.inl ⟨n, hn, hfr⟩)) =>
       cases hn
       exact encodeReady_foc_neg_leftCoprodBranch_cast hyps e ws side n hbr hfr
-  | .inr (.inr (.inr ⟨s, p, hp, hfr⟩)) =>
+  | .inr (.inr (.inr (.inl ⟨s, p, hp, hfr⟩))) =>
       cases hp
       exact encodeReady_foc_sat_focPos_leftCoprodBranch_cast hyps e ws side s p
         hbr hfr
+  | .inr (.inr (.inr (.inr ⟨bQ, n, p, hp, hfr⟩))) =>
+      cases hp
+      exact encodeReady_foc_letPos_focPos_base_leftCoprodBranch_cast hyps e ws side
+        n p hbr hfr
 
 /-! #### Parent cont → `coprodPushCont` branch shapes (base goal) -/
 
@@ -5034,6 +5099,19 @@ theorem InvTm.abstr_weaken_foc_sat {Γ : Ctx sig} {P A : Object sig.nBases}
   simp only [InvTm.weaken, InvTm.rename, FocTm.rename, SatTm.rename,
     InvTm.abstr, FocTm.abstr]
 
+theorem InvTm.abstr_weaken_foc_letPos {Γ : Ctx sig} {P Q A : Object sig.nBases}
+    (m : NegNeu Γ P) (n : NegNeu Γ Q) (t : InvTm (Γ ▻ Q) A) :
+    InvTm.abstr (.here : Var (Γ ▻ P) P) (NegNeu.weaken (B := P) m)
+      (InvTm.weaken (B := P) (.foc (.letPos n t))) =
+      .foc (.letPos
+        (NegNeu.abstr .here (NegNeu.weaken (B := P) m)
+          (NegNeu.rename (Rename.weaken (A := P)) n))
+        (InvTm.abstr (.there .here)
+          (NegNeu.weaken (B := Q) (NegNeu.weaken (B := P) m))
+          (InvTm.rename (Rename.ext (Rename.weaken (A := P))) t))) := by
+  simp only [InvTm.weaken, InvTm.rename, FocTm.rename,
+    InvTm.abstr, FocTm.abstr]
+
 theorem InvTm.rename_skip1_foc_pos {Γ : Ctx sig} {A B C : Object sig.nBases}
     (p : PosNeu (Γ ▻ A) C) :
     InvTm.rename (Rename.skip1 (B := B)) (.foc (.pos (.done p))) =
@@ -5051,6 +5129,13 @@ theorem InvTm.rename_skip1_foc_sat {Γ : Ctx sig} {A B C : Object sig.nBases}
     InvTm.rename (Rename.skip1 (B := B)) (.foc (.sat (.mk s t))) =
       .foc (.sat (.mk s (InvTm.rename (Rename.skip1 (B := B)) t))) := by
   simp only [InvTm.rename, FocTm.rename, SatTm.rename]
+
+theorem InvTm.rename_skip1_foc_letPos {Γ : Ctx sig} {A B P C : Object sig.nBases}
+    (n : NegNeu (Γ ▻ A) P) (t : InvTm (Γ ▻ A ▻ P) C) :
+    InvTm.rename (Rename.skip1 (B := B)) (.foc (.letPos n t)) =
+      .foc (.letPos (NegNeu.rename (Rename.skip1 (B := B)) n)
+        (InvTm.rename (Rename.ext (Rename.skip1 (B := B))) t)) := by
+  simp only [InvTm.rename, FocTm.rename]
 
 theorem hsubstInv_foc_pos_eq_hsubstPos {Γ : Ctx sig} {Cut A : Object sig.nBases}
     (p : PosNeu (Γ ▻ Cut) A) (v : InvTm Γ Cut) :
@@ -5084,25 +5169,57 @@ theorem hsubstNeu_coprod_of_ne {Γ : Ctx sig} {L R C : Object sig.nBases}
       refine ⟨.snd m', ?_⟩; simp only [hsubstNeu, hm']
 termination_by n.size
 
+theorem hsubstPos_neu_coprod_cut_base {Γ : Ctx sig} {L R : Object sig.nBases}
+    {b : Fin sig.nBases}
+    (n : NegNeu (Γ ▻ .coprod L R) (.base b))
+    (v : InvTm Γ (.coprod L R)) :
+    ∃ p' : PosNeu Γ (.base b),
+      hsubstPos (.neu n) v = .foc (.pos (.done p')) := by
+  have hne : (.coprod L R : Object sig.nBases) ≠ .base b := by intro h; cases h
+  obtain ⟨n', hn'⟩ := hsubstNeu_coprod_of_ne n v hne
+  refine ⟨.neu n', ?_⟩
+  simp only [hsubstPos, hn', NegNeu.eta]
+
 theorem hsubstPos_neu_etaInl_base {Γ : Ctx sig} {L R : Object sig.nBases}
     {b : Fin sig.nBases}
     (n : NegNeu (Γ ▻ L ▻ .coprod L R) (.base b)) :
     ∃ p' : PosNeu (Γ ▻ L) (.base b),
-      hsubstPos (.neu n) (InvTm.etaInl L R) = .foc (.pos (.done p')) := by
-  have hne : (.coprod L R : Object sig.nBases) ≠ .base b := by intro h; cases h
-  obtain ⟨n', hn'⟩ := hsubstNeu_coprod_of_ne n (InvTm.etaInl L R) hne
-  refine ⟨.neu n', ?_⟩
-  simp only [hsubstPos, hn', NegNeu.eta]
+      hsubstPos (.neu n) (InvTm.etaInl L R) = .foc (.pos (.done p')) :=
+  hsubstPos_neu_coprod_cut_base n (InvTm.etaInl L R)
 
 theorem hsubstPos_neu_etaInr_base {Γ : Ctx sig} {L R : Object sig.nBases}
     {b : Fin sig.nBases}
     (n : NegNeu (Γ ▻ R ▻ .coprod L R) (.base b)) :
     ∃ p' : PosNeu (Γ ▻ R) (.base b),
-      hsubstPos (.neu n) (InvTm.etaInr L R) = .foc (.pos (.done p')) := by
-  have hne : (.coprod L R : Object sig.nBases) ≠ .base b := by intro h; cases h
-  obtain ⟨n', hn'⟩ := hsubstNeu_coprod_of_ne n (InvTm.etaInr L R) hne
-  refine ⟨.neu n', ?_⟩
-  simp only [hsubstPos, hn', NegNeu.eta]
+      hsubstPos (.neu n) (InvTm.etaInr L R) = .foc (.pos (.done p')) :=
+  hsubstPos_neu_coprod_cut_base n (InvTm.etaInr L R)
+
+theorem hsubstInv_letPos_focPos_neu_coprod_base {Γ : Ctx sig}
+    {L R : Object sig.nBases} {bQ b : Fin sig.nBases}
+    (n : NegNeu (Γ ▻ .coprod L R) (.base bQ))
+    (m : NegNeu (Γ ▻ .coprod L R ▻ .base bQ) (.base b))
+    (v : InvTm Γ (.coprod L R)) :
+    ∃ (n' : NegNeu Γ (.base bQ))
+      (p' : PosNeu (Γ ▻ .base bQ) (.base b)),
+      hsubstInv (.foc (.letPos n (.foc (.pos (.done (.neu m)))))) v =
+        .foc (.letPos n' (.foc (.pos (.done p')))) := by
+  have hne : (.coprod L R : Object sig.nBases) ≠ .base bQ := by intro h; cases h
+  obtain ⟨nBind, hnBind⟩ := hsubstNeu_coprod_of_ne n v hne
+  simp only [hsubstInv, hnBind]
+  have hex :
+      InvTm.rename (Rename.exchange (A := .coprod L R) (B := .base bQ))
+          (.foc (.pos (.done (.neu m)))) =
+        .foc (.pos (.done (.neu
+          (NegNeu.rename (Rename.exchange (A := .coprod L R) (B := .base bQ))
+            m)))) := by
+    simp only [InvTm.rename, FocTm.rename, PosIntro.rename, PosNeu.rename]
+  rw [hex, hsubstInv_foc_pos_eq_hsubstPos]
+  obtain ⟨p', hp'⟩ :=
+    hsubstPos_neu_coprod_cut_base
+      (NegNeu.rename (Rename.exchange (A := .coprod L R) (B := .base bQ)) m)
+      (InvTm.weaken (B := .base bQ) v)
+  refine ⟨nBind, p', ?_⟩
+  rw [hp']
 
 /-- Base-goal foc-pos of a neu: left push body is foc-pos. -/
 theorem coprodPushContL_foc_pos_neu_base {hyps : Array (Object sig.nBases)}
@@ -5346,11 +5463,142 @@ theorem coprodPushContR_foc_sat_focPos_neu_base {hyps : Array (Object sig.nBases
   rw [hp'', InvTm.castCtx_foc_sat]
   simp only [InvTm.castCtx_cancel_symm]
 
+/-- Base-goal base-binder letPos-of-foc-pos-neu: left push body is letPos-of-foc-pos. -/
+theorem coprodPushContL_foc_letPos_focPos_neu_base {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases} {b bQ : Fin sig.nBases}
+    (nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (n : NegNeu (Ctx.ofHyps hyps) (.base bQ))
+    (m : NegNeu (Ctx.ofHyps hyps ▻ .base bQ) (.base b)) :
+    ∃ (n' : NegNeu (Ctx.ofHyps (hyps.push L)) (.base bQ))
+      (p' : PosNeu (Ctx.ofHyps (hyps.push L) ▻ .base bQ) (.base b)),
+      coprodPushContL nSum
+          (.foc (.letPos n (.foc (.pos (.done (.neu m)))))) =
+        .foc (.letPos n' (.foc (.pos (.done p')))) := by
+  let Γ := Ctx.ofHyps hyps
+  let n1 : NegNeu (Γ ▻ L ▻ .coprod L R) (.base bQ) :=
+    NegNeu.rename (Rename.skip1 (B := L))
+      (NegNeu.abstr .here (NegNeu.weaken nSum)
+        (NegNeu.rename (Rename.weaken (A := .coprod L R)) n))
+  let m1 : NegNeu (Γ ▻ L ▻ .coprod L R ▻ .base bQ) (.base b) :=
+    NegNeu.rename (Rename.ext (Rename.skip1 (B := L)))
+      (NegNeu.abstr (.there .here)
+        (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+        (NegNeu.rename (Rename.ext (Rename.weaken (A := .coprod L R))) m))
+  obtain ⟨nMid, pMid, hpMid⟩ :=
+    hsubstInv_letPos_focPos_neu_coprod_base n1 m1 (InvTm.etaInl L R)
+  refine ⟨(Ctx.ofHyps_push hyps L).symm ▸ nMid,
+    (congrArg (fun Γ => Γ ▻ (.base bQ : Object sig.nBases))
+      (Ctx.ofHyps_push hyps L).symm) ▸ pMid, ?_⟩
+  show InvTm.castCtx (Ctx.ofHyps_push hyps L).symm
+      (hsubstInv
+        (InvTm.rename (Rename.skip1 (B := L))
+          (InvTm.abstr .here (NegNeu.weaken nSum)
+            (InvTm.weaken (B := .coprod L R)
+              (.foc (.letPos n (.foc (.pos (.done (.neu m)))))))))
+        (InvTm.etaInl L R)) =
+    .foc (.letPos ((Ctx.ofHyps_push hyps L).symm ▸ nMid)
+      (.foc (.pos (.done
+        ((congrArg (fun Γ => Γ ▻ (.base bQ : Object sig.nBases))
+          (Ctx.ofHyps_push hyps L).symm) ▸ pMid)))))
+  rw [InvTm.abstr_weaken_foc_letPos, InvTm.rename_skip1_foc_letPos]
+  change InvTm.castCtx (Ctx.ofHyps_push hyps L).symm
+      (hsubstInv
+        (.foc (.letPos
+          (NegNeu.rename (Rename.skip1 (B := L))
+            (NegNeu.abstr .here (NegNeu.weaken nSum)
+              (NegNeu.rename (Rename.weaken (A := .coprod L R)) n)))
+          (InvTm.rename (Rename.ext (Rename.skip1 (B := L)))
+            (InvTm.abstr (.there .here)
+              (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+              (InvTm.rename (Rename.ext (Rename.weaken (A := .coprod L R)))
+                (.foc (.pos (.done (.neu m)))))))))
+        (InvTm.etaInl L R)) = _
+  have hn1 : NegNeu.rename (Rename.skip1 (B := L))
+      (NegNeu.abstr .here (NegNeu.weaken nSum)
+        (NegNeu.rename (Rename.weaken (A := .coprod L R)) n)) = n1 := rfl
+  have hm1 :
+      InvTm.rename (Rename.ext (Rename.skip1 (B := L)))
+          (InvTm.abstr (.there .here)
+            (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+            (InvTm.rename (Rename.ext (Rename.weaken (A := .coprod L R)))
+              (.foc (.pos (.done (.neu m)))))) =
+        .foc (.pos (.done (.neu m1))) := by
+    dsimp only [m1]
+    simp only [InvTm.rename, FocTm.rename, PosIntro.rename, PosNeu.rename,
+      InvTm.abstr, FocTm.abstr, PosNeu.abstr]
+  rw [hn1, hm1, hpMid]
+  exact InvTm.castCtx_foc_letPos_foc_pos (Ctx.ofHyps_push hyps L).symm nMid pMid
+
+theorem coprodPushContR_foc_letPos_focPos_neu_base {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases} {b bQ : Fin sig.nBases}
+    (nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (n : NegNeu (Ctx.ofHyps hyps) (.base bQ))
+    (m : NegNeu (Ctx.ofHyps hyps ▻ .base bQ) (.base b)) :
+    ∃ (n' : NegNeu (Ctx.ofHyps (hyps.push R)) (.base bQ))
+      (p' : PosNeu (Ctx.ofHyps (hyps.push R) ▻ .base bQ) (.base b)),
+      coprodPushContR nSum
+          (.foc (.letPos n (.foc (.pos (.done (.neu m)))))) =
+        .foc (.letPos n' (.foc (.pos (.done p')))) := by
+  let Γ := Ctx.ofHyps hyps
+  let n1 : NegNeu (Γ ▻ R ▻ .coprod L R) (.base bQ) :=
+    NegNeu.rename (Rename.skip1 (B := R))
+      (NegNeu.abstr .here (NegNeu.weaken nSum)
+        (NegNeu.rename (Rename.weaken (A := .coprod L R)) n))
+  let m1 : NegNeu (Γ ▻ R ▻ .coprod L R ▻ .base bQ) (.base b) :=
+    NegNeu.rename (Rename.ext (Rename.skip1 (B := R)))
+      (NegNeu.abstr (.there .here)
+        (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+        (NegNeu.rename (Rename.ext (Rename.weaken (A := .coprod L R))) m))
+  obtain ⟨nMid, pMid, hpMid⟩ :=
+    hsubstInv_letPos_focPos_neu_coprod_base n1 m1 (InvTm.etaInr L R)
+  refine ⟨(Ctx.ofHyps_push hyps R).symm ▸ nMid,
+    (congrArg (fun Γ => Γ ▻ (.base bQ : Object sig.nBases))
+      (Ctx.ofHyps_push hyps R).symm) ▸ pMid, ?_⟩
+  show InvTm.castCtx (Ctx.ofHyps_push hyps R).symm
+      (hsubstInv
+        (InvTm.rename (Rename.skip1 (B := R))
+          (InvTm.abstr .here (NegNeu.weaken nSum)
+            (InvTm.weaken (B := .coprod L R)
+              (.foc (.letPos n (.foc (.pos (.done (.neu m)))))))))
+        (InvTm.etaInr L R)) =
+    .foc (.letPos ((Ctx.ofHyps_push hyps R).symm ▸ nMid)
+      (.foc (.pos (.done
+        ((congrArg (fun Γ => Γ ▻ (.base bQ : Object sig.nBases))
+          (Ctx.ofHyps_push hyps R).symm) ▸ pMid)))))
+  rw [InvTm.abstr_weaken_foc_letPos, InvTm.rename_skip1_foc_letPos]
+  change InvTm.castCtx (Ctx.ofHyps_push hyps R).symm
+      (hsubstInv
+        (.foc (.letPos
+          (NegNeu.rename (Rename.skip1 (B := R))
+            (NegNeu.abstr .here (NegNeu.weaken nSum)
+              (NegNeu.rename (Rename.weaken (A := .coprod L R)) n)))
+          (InvTm.rename (Rename.ext (Rename.skip1 (B := R)))
+            (InvTm.abstr (.there .here)
+              (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+              (InvTm.rename (Rename.ext (Rename.weaken (A := .coprod L R)))
+                (.foc (.pos (.done (.neu m)))))))))
+        (InvTm.etaInr L R)) = _
+  have hn1 : NegNeu.rename (Rename.skip1 (B := R))
+      (NegNeu.abstr .here (NegNeu.weaken nSum)
+        (NegNeu.rename (Rename.weaken (A := .coprod L R)) n)) = n1 := rfl
+  have hm1 :
+      InvTm.rename (Rename.ext (Rename.skip1 (B := R)))
+          (InvTm.abstr (.there .here)
+            (NegNeu.weaken (B := .base bQ) (NegNeu.weaken nSum))
+            (InvTm.rename (Rename.ext (Rename.weaken (A := .coprod L R)))
+              (.foc (.pos (.done (.neu m)))))) =
+        .foc (.pos (.done (.neu m1))) := by
+    dsimp only [m1]
+    simp only [InvTm.rename, FocTm.rename, PosIntro.rename, PosNeu.rename,
+      InvTm.abstr, FocTm.abstr, PosNeu.abstr]
+  rw [hn1, hm1, hpMid]
+  exact InvTm.castCtx_foc_letPos_foc_pos (Ctx.ofHyps_push hyps R).symm nMid pMid
+
 /--
 Parent continuation shapes that determine both `coprodPushContL/R` branch
 bodies without an external branch-shape hyp: unit, or base-goal foc-done /
-sat-of-foc-pos-neu (parallel to `AtomDerivedContShape`; neu foc-pos for the
-coprod η/`hsubstInv` path).
+sat-of-foc-pos-neu / base-binder letPos-of-foc-pos-neu (parallel to
+`AtomDerivedContShape`; neu foc-pos for the coprod η/`hsubstInv` path).
 -/
 def CoprodDerivedContShape {hyps : Array (Object sig.nBases)}
     {A : Object sig.nBases} (cont : InvTm (Ctx.ofHyps hyps) A) : Prop :=
@@ -5369,6 +5617,13 @@ def CoprodDerivedContShape {hyps : Array (Object sig.nBases)}
   (∃ (b : Fin sig.nBases) (s : Schedule sig.nBases)
       (n : NegNeu (Ctx.ofHyps hyps) (.base b)) (hA : A = .base b),
       cont = hA ▸ (.foc (.sat (.mk s (.foc (.pos (.done (.neu n)))))) :
+        InvTm (Ctx.ofHyps hyps) (.base b)) ∧
+      forcedRule ([] : List (PosEntry sig)) (.base b) = .focus) ∨
+  (∃ (b bQ : Fin sig.nBases)
+      (n : NegNeu (Ctx.ofHyps hyps) (.base bQ))
+      (m : NegNeu (Ctx.ofHyps hyps ▻ .base bQ) (.base b))
+      (hA : A = .base b),
+      cont = hA ▸ (.foc (.letPos n (.foc (.pos (.done (.neu m))))) :
         InvTm (Ctx.ofHyps hyps) (.base b)) ∧
       forcedRule ([] : List (PosEntry sig)) (.base b) = .focus)
 
@@ -5406,10 +5661,15 @@ theorem CoprodDerivedBranchShape_of_coprodPushContL
       cases hA; cases hc
       obtain ⟨p', hp'⟩ := coprodPushContL_foc_neg_base nSum n
       exact .inr (.inl ⟨p', hp', hfr⟩)
-  | .inr (.inr (.inr ⟨b, s, n, hA, hc, hfr⟩)) =>
+  | .inr (.inr (.inr (.inl ⟨b, s, n, hA, hc, hfr⟩))) =>
       cases hA; cases hc
       obtain ⟨p', hp'⟩ := coprodPushContL_foc_sat_focPos_neu_base nSum s n
-      exact .inr (.inr (.inr ⟨s, p', hp', hfr⟩))
+      exact .inr (.inr (.inr (.inl ⟨s, p', hp', hfr⟩)))
+  | .inr (.inr (.inr (.inr ⟨b, bQ, n, m, hA, hc, hfr⟩))) =>
+      cases hA; cases hc
+      obtain ⟨n', p', hp'⟩ :=
+        coprodPushContL_foc_letPos_focPos_neu_base nSum n m
+      exact .inr (.inr (.inr (.inr ⟨bQ, n', p', hp', hfr⟩)))
 
 theorem CoprodDerivedBranchShape_of_coprodPushContR
     {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBases}
@@ -5429,10 +5689,15 @@ theorem CoprodDerivedBranchShape_of_coprodPushContR
       cases hA; cases hc
       obtain ⟨p', hp'⟩ := coprodPushContR_foc_neg_base nSum n
       exact .inr (.inl ⟨p', hp', hfr⟩)
-  | .inr (.inr (.inr ⟨b, s, n, hA, hc, hfr⟩)) =>
+  | .inr (.inr (.inr (.inl ⟨b, s, n, hA, hc, hfr⟩))) =>
       cases hA; cases hc
       obtain ⟨p', hp'⟩ := coprodPushContR_foc_sat_focPos_neu_base nSum s n
-      exact .inr (.inr (.inr ⟨s, p', hp', hfr⟩))
+      exact .inr (.inr (.inr (.inl ⟨s, p', hp', hfr⟩)))
+  | .inr (.inr (.inr (.inr ⟨b, bQ, n, m, hA, hc, hfr⟩))) =>
+      cases hA; cases hc
+      obtain ⟨n', p', hp'⟩ :=
+        coprodPushContR_foc_letPos_focPos_neu_base nSum n m
+      exact .inr (.inr (.inr (.inr ⟨bQ, n', p', hp', hfr⟩)))
 
 /--
 Coprod `applyObsNeu` with empty remainder: recover outer `.case` and both
@@ -6003,7 +6268,8 @@ Go readiness when atom/coprod push-body facts are **derived** from shapes
 rather than assumed: empty ∪ exact-never-only ∪ single exact base atom with
 `AtomDerivedContShape` ∪ single exact coprod-var with
 `CoprodDerivedContShape` on the parent continuation (unit / base foc-done /
-sat-of-foc-pos-neu; branch shapes via `coprodPushCont`).
+sat-of-foc-pos-neu / base-binder letPos-of-foc-pos-neu; branch shapes via
+`coprodPushCont`).
 -/
 theorem encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest
     {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
@@ -6093,15 +6359,14 @@ Until then `ValidEncodeFragment.ready` is a provisional stash and
   branch readiness **derived** for `AtomDerivedContShape` (foc-done /
   sat-of-foc-pos / base-binder letPos around foc-pos; `*_of_focDone`) and
   `CoprodDerivedContShape` on parent conts (unit / base foc-done /
-  sat-of-foc-pos-neu → `CoprodDerivedBranchShape` via `coprodPushCont`;
-  `*_of_contShape`) via
+  sat-of-foc-pos-neu / base-binder letPos-of-foc-pos-neu →
+  `CoprodDerivedBranchShape` via `coprodPushCont`; `*_of_contShape`) via
   `encodeReady_applyPairObsGo_emptyNeverOrDerivedNilRest`. Empty schedule:
   `WellInv` intro/focus shapes under bases-only discharge cont readiness
   (`phaseEncodeReady_of_wellInv_*`,
   `encodeReady_applyPairObs_emptyEntries_of_wellInv_intro`) — no ready stash.
-  See `EncodeReadyRawCase`. Coprod: parent `CoprodDerivedContShape` covers
-  unit + base foc-done/sat; residual base-letPos parent through push,
-  general PosNeu foc-pos, pair/lam / abort-never branches.
+  See `EncodeReadyRawCase`. Coprod residual: general PosNeu foc-pos (beyond
+  `.neu`), pair/lam / abort-never under `leftCoprodBranchWs`.
 * Restricted Raw→ready:
   `EncodeReadyOfRawGoal_emptyOrExactNever_holds`,
   `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds` (assumes push/branch
