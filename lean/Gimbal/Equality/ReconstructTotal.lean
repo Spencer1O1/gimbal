@@ -232,16 +232,16 @@ theorem ReachRankCert.selectNeutralLt_isSome_of_ranked_neutral {n : Nat}
           refine ⟨w, r, ?_⟩
           simpa [ReachRankCert.selectNeutralLt, hnew, htry]
 
-/-- From a stored projection/app witness + `NeutralParentLt` at its certified rank,
+/-- From a stored projection/app witness + certified `neutralParent_lt` at its rank,
 the selected neutral parent is available strictly below any ambient `≥` child rank. -/
 theorem ReachRankCert.selectNeutralLt_of_fstType {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) (i ambient : Nat) {b : SlotNew} {r : Nat} {p : Nat}
     (hw : (σ.getCell i).slotWitness b = some (.fstType p))
     (hr : cert.rank i b = some r)
-    (hnp : NeutralParentLt cert r (.fstType p))
     (hle : r ≤ ambient) :
     ∃ w' r', cert.selectNeutralLt p ambient = some (w', r') := by
-  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ := hnp
+  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ :=
+    cert.neutralParent_lt i b r (.fstType p) hr hw
   exact cert.selectNeutralLt_isSome_of_ranked_neutral p ambient hwP hne hrP
     (Nat.lt_of_lt_of_le hlt hle)
 
@@ -249,10 +249,10 @@ theorem ReachRankCert.selectNeutralLt_of_sndType {n : Nat} {σ : ReachState n}
     (cert : ReachRankCert σ) (i ambient : Nat) {b : SlotNew} {r : Nat} {p : Nat}
     (hw : (σ.getCell i).slotWitness b = some (.sndType p))
     (hr : cert.rank i b = some r)
-    (hnp : NeutralParentLt cert r (.sndType p))
     (hle : r ≤ ambient) :
     ∃ w' r', cert.selectNeutralLt p ambient = some (w', r') := by
-  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ := hnp
+  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ :=
+    cert.neutralParent_lt i b r (.sndType p) hr hw
   exact cert.selectNeutralLt_isSome_of_ranked_neutral p ambient hwP hne hrP
     (Nat.lt_of_lt_of_le hlt hle)
 
@@ -261,10 +261,10 @@ theorem ReachRankCert.selectNeutralLt_of_appTy {n : Nat} {σ : ReachState n}
     {fn arg : Nat}
     (hw : (σ.getCell i).slotWitness b = some (.appTy fn arg))
     (hr : cert.rank i b = some r)
-    (hnp : NeutralParentLt cert r (.appTy fn arg))
     (hle : r ≤ ambient) :
     ∃ w' r', cert.selectNeutralLt fn ambient = some (w', r') := by
-  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ := hnp
+  obtain ⟨bP, wP, rP, hwP, hne, hrP, hlt⟩ :=
+    cert.neutralParent_lt i b r (.appTy fn arg) hr hw
   exact cert.selectNeutralLt_isSome_of_ranked_neutral fn ambient hwP hne hrP
     (Nat.lt_of_lt_of_le hlt hle)
 
@@ -467,12 +467,12 @@ theorem invertibleArg_etaProd_inside_of_ranked {σ : ReachState sig.nBases}
   lemmas; boundary fixtures above.
 * Leaf + recursive case lemmas for `.fstType` / `.sndType` / `.app` / `.appTy`
   (recursive premises: bounded selection + IH on lower measure).
+* `ReachRankCert.neutralParent_lt` threads fire-time neutral parents; selectors
+  obtain `NeutralParentLt` from that field (not a free hypothesis).
 
 Remaining for `ReconstructTotalityPackage`:
-* install `NeutralParentLt` as `ReachRankCert.neutralParent_lt` (threaded through
-  certified discover) — `parents_lt` alone is insufficient (may yield η);
 * discharge recursive `selectNeutralLt` premises via
-  `selectNeutralLt_of_fstType` / `_sndType` / `_appTy`;
+  `selectNeutralLt_of_fstType` / `_sndType` / `_appTy` in the WF induction;
 * invertible / requested / consistency / inconsistent-never;
 * fueled migration and reachability cleanup remain blocked until the package lands.
 -/
