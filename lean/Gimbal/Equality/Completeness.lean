@@ -236,44 +236,24 @@ Blocked / WIP:
 2. ~~`OriginCollisionFree` API~~ **Done** (`Origin.dom` + `obsSlot`/`domNest`);
    formal injectivity theorem still open
 3. `EncodeTotal` — **provisional only** (`EncodeTotal_holds_provisional` projects
-   stashed `ValidEncodeFragment.ready`). Required bridge:
-   `RawReferenceProduced → PhaseEncodeReady` (equivalently raw →
-   `CertifiedReferenceProduced`). Do not switch `referenceCompare` or claim
-   characterization until the stash is eliminated. WIP: `encodeReady_applyPairObs`
-   (~~ofHyps_push~~ / ~~peel rekey~~ / ~~full `encodeReady_rekeyHypToObs`~~ /
-   ~~leftCoprod under letPos via push-body ready~~ /
-   ~~coprod obs outer `case` (var) packaging~~ /
-   ~~branch schedule algebra (`rekeyHypToSplit`,
-   `posWorklist_rekey_weaken_hyp_to_split`, `pushPos_cons_of_blt_head`,
-   `leftCoprod_branch_schedule_gap` → `e :: leftCoprodBranchWs`)~~ /
-   ~~branch EncodeReady unit/foc under `leftCoprodBranchWs`
-   (`encodeReady_unit_leftCoprodBranch`, `*_cast_unit`)~~ /
-   ~~base-only pair/lam/sat under branch schedule
-   (`encodeReady_pair/lam/foc_sat_leftCoprodBranch`)~~ /
-   ~~partial enlarged with bases-only unit cast arm~~ /
-   ~~narrow raw→ready slices (`encodeReady_of_rawReferenceProduced_unit_nil`,
-   `*_foc_pos_bases`)~~ /
-   ~~never-payload branch abort (`encodeReady_abort_leftCoprodBranch_never`)~~ /
-   ~~nested-coprod unit-η/peel under branch schedule
-   (`encodeReady_unit_leftCoprodBranch_nested`, `*_case_here_*`)~~ /
-   ~~`EncodeReadyRawCase` + `certifyReferenceProduced_of_EncodeReadyRawCase`~~ /
-   ~~exact-never / exactNeverOnly / atom-nil-rest Go steps~~ /
-   ~~restricted Raw→ready `EncodeReadyOfRawGoal_emptyOrExactNever_holds`~~ /
-   ~~atom+coprod nil-rest Go inversion (`*_nil_rest_ok_inv`, `*_of_go`)~~ /
-   ~~enlarged restricted Raw→ready
-   `EncodeReadyOfRawGoal_emptyNeverOrNilRestObs_holds`~~ /
-   ~~derived nil-rest push/branch readiness (foc-done / sat / base-letPos atom,
-   `CoprodDerivedContShape` → branch shapes via `coprodPushCont`, including
-   base-binder letPos parent)
-   `EncodeReadyOfRawGoal_emptyNeverOrDerivedNilRest_holds`~~ /
-   ~~empty-schedule WellInv intro→ready (no stash) + combined Raw fragment
-   `EncodeReadyOfRawGoal_emptyWellInvIntroOrDerived_holds`~~ /
-   ~~empty-schedule unit/foc-done shapes~~ landed; same-term
-   `encodeReady_ofHyps_push_to_leftCoprodBranch` blocked (keep parent left-coprod
-   head); still need full unrestricted `encodeReady_of_rawReferenceProduced`
-   (general PosNeu foc-pos beyond `.neu`; pair/lam / abort-never branches;
-   consistency / mixed multi-entry; general WellInv→ready / deeper letPos
-   bodies))
+   stashed `ValidEncodeFragment.ready`). Required bridge is no longer the
+   case-by-case Raw→EncodeReady enumeration (paused at green tip `192dae5`;
+   `ICCTotal` ~7.2k lines while unrestricted theorem stayed open).
+
+   **Induction boundary** (see `ICCReadyCert.lean` spike):
+   `RawReferenceProduced` retains evaluator results, not production history;
+   empty schedule returns `cont`, so `WellInv` + schedule success cannot invent
+   `EncodeReady cont`. Split into:
+   * **production** — `ContReadyCert` / `StageEncodeReady` for the
+     pre-saturation continuation (focusing / intro phase);
+   * **preservation** — proof-relevant `ApplyPairObsReadyCert` so schedule
+     application transports that certificate (mixed atom+coprod composes
+     without `*DerivedContShape`).
+
+   Do not switch `referenceCompare` or claim characterization until the stash
+   is eliminated via this split (or the direct-`ICCCode` production fallback).
+   Historical enumeration lemmas remain as a green checkpoint; do not add more
+   nil-rest / DerivedContShape / exact-schedule disjunctions.)
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;
