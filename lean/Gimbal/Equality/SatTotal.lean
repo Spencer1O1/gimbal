@@ -8,8 +8,15 @@
   That is what lets the reference comparator treat exhaustion as an operational
   failure rather than an answer.
 
-  `invariantFailure` is a different obligation (witness reconstruction and the
-  old-only check) and is not addressed here.
+  `invariantFailure` is a different obligation. Split by path:
+
+  * **Retained ordered-code / EncodeIx reference path blockers:**
+    `reconstructWitness = none`, reconstructed type mismatch, and inconsistent
+    `neuOfType … .never = none`. These are the 8D reconstruction-totality gate
+    (`ReconstructTotal.lean`); blocked on a missing discovery-rank field.
+  * **Deferred `compareSatRec` only:** `checkOldInvariant` / old-only exact
+    checks. These must not be treated as blockers for the retained ordered-code
+    path once reconstruction totality closes.
 -/
 
 import Gimbal.Equality.Reference

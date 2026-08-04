@@ -43,6 +43,7 @@ import Gimbal.Equality.ExactObs
 import Gimbal.Equality.SatSchedule
 import Gimbal.Equality.SatSymm
 import Gimbal.Equality.SatTotal
+import Gimbal.Equality.ReconstructTotal
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCSound
 import Gimbal.Equality.ICCCanon

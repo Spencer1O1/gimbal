@@ -926,15 +926,13 @@ theorem ixExactEntry_of_consistencyWitness_correct (fuel : Nat)
       · cases h
   · cases h
 
-/--
-8D obligation (open): reconstruction of a consistency witness always succeeds
-with the declared type. Not assumed by the retained schedule core.
+/-!
+8D reconstruction totality is **blocked** on a missing discovery-rank /
+parent-DAG package. See `ReconstructTotal.lean` for the scoped Props
+(`ReconstructWitnessTotal`, `ConsistencyWitnessTotal`, `InconsistentNeverTotal`)
+and failure accounting. The retained schedule core does not assume totality —
+consistency resolution stays `Option`-valued.
 -/
-def ReconstructWitnessTotal (sig : Signature) : Prop :=
-  ∀ (fuel : Nat) (σ : ReachState sig.nBases)
-    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases) (w : Witness),
-    ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) hyps) P),
-      reconstructWitness fuel σ hyps w = some ⟨P, n⟩
 
 /--
 Consistency → exact never: after successful witness reconstruction to `.never`,
@@ -1968,9 +1966,11 @@ def consistCoprodSched :
 * `certifiedScheduleIx_exactNever` / `certifiedScheduleIx_inconsistent`
 * Consistency resolution: `ixExactEntry_of_consistencyWitness` →
   `certifiedScheduleIx_consistency{Never,Atom,Coprod}` (delegates only)
-* Reconstruction totality left open as `ReconstructWitnessTotal` (8D)
+* Reconstruction totality: **gated** — see `ReconstructTotal.lean` (missing
+  discovery-rank / parent-DAG WF). Consistency resolution stays `Option`.
 
-**Deferred:** full reachability adapter / EncodeTotal / Cleanup B.
+**Deferred:** full reachability adapter / EncodeTotal / Cleanup B (after 8D
+reconstruction totality closes).
 -/
 
 end Equality
