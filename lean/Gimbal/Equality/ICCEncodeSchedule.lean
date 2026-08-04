@@ -2,10 +2,11 @@
   Certified schedule composition at `AtSaturationBoundary`.
 
   Proof-relevant schedule results + generic nil and exact-atom recursive clauses.
-  The atom→coproduct example instantiates the exact-atom clause.
+  Exact-coproduct clause scaffolding is present; packaging is blocked on a
+  skip1 / rekey InvCert commuting law (see STOP report in-file).
 
   Does **not** change `applyObsNeu`, RawReference, totality, or `referenceCompare`.
-  Coproduct / consistency schedule clauses are deferred.
+  Consistency schedule clauses are deferred.
 -/
 
 import Gimbal.Equality.Abstract
@@ -222,8 +223,155 @@ theorem certifiedSchedule_exactAtom_encodes
 Generic over `rest` and an arbitrary `CertifiedSchedule` recursive result for
 `mapRestExactAtom … rest`. Uses real `atomPushCont` / `mapRestAbstractAtom`.
 No continuation-shape specialization in the clause itself.
+-/
 
-Coproduct recursive clause and consistency entries: deferred.
+/-! ### Exact-coproduct clause — scaffolding + stop -/
+
+/-- Evaluator’s `mapRestAbstractSumInl` on a remaining schedule. -/
+def mapRestExactCoprodL
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases)
+    (nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (rest : List (PairEntry sig hyps)) :
+    List (PairEntry sig (hyps.push L)) :=
+  let hL := Ctx.ofHyps_push hyps L
+  let targetL := NegNeu.toRaw (NegNeu.weaken (B := L) nSum)
+  rest.map (mapRestAbstractSumInl fuel σ hyps L R hL targetL)
+
+/-- Evaluator’s `mapRestAbstractSumInr` on a remaining schedule. -/
+def mapRestExactCoprodR
+    (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases)
+    (nSum : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (rest : List (PairEntry sig hyps)) :
+    List (PairEntry sig (hyps.push R)) :=
+  let hR := Ctx.ofHyps_push hyps R
+  let targetR := NegNeu.toRaw (NegNeu.weaken (B := R) nSum)
+  rest.map (mapRestAbstractSumInr fuel σ hyps L R hR targetR)
+
+/-- Left η-substituted continuation from saturation’s `applyObsNeu` coprod arm. -/
+abbrev exactCoprodPushContL
+    {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (cont : InvTm (Ctx.ofHyps hyps) A) :
+    InvTm (Ctx.ofHyps (hyps.push L)) A :=
+  coprodPushContL n cont
+
+/-- Right η-substituted continuation from saturation’s `applyObsNeu` coprod arm. -/
+abbrev exactCoprodPushContR
+    {hyps : Array (Object sig.nBases)} {L R A : Object sig.nBases}
+    (n : NegNeu (Ctx.ofHyps hyps) (.coprod L R))
+    (cont : InvTm (Ctx.ofHyps hyps) A) :
+    InvTm (Ctx.ofHyps (hyps.push R)) A :=
+  coprodPushContR n cont
+
+/--
+Evaluator-aligned left branch state for a recursive `CertifiedSchedule`: empty
+worklist at `ofHyps (hyps.push L)`, counters stepped past the parent observation.
+This matches `mapRestExactCoprodL` / `PairEntry` indexing — **not** the retained
+encode `splitL` context `Γ ▻ .coprod L R ▻ L`.
+-/
+def afterExactCoprodL
+    {hyps : Array (Object sig.nBases)} (L _R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    EncodeIx (sig := sig) (Ctx.ofHyps (hyps.push L)) where
+  ws := []
+  env := OriginEnv.ofHyps (hyps.push L)
+  domNext := s.domNext
+  obsNext := s.obsNext + 1
+
+/-- Evaluator-aligned right branch state (symmetric to `afterExactCoprodL`). -/
+def afterExactCoprodR
+    {hyps : Array (Object sig.nBases)} (_L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    EncodeIx (sig := sig) (Ctx.ofHyps (hyps.push R)) where
+  ws := []
+  env := OriginEnv.ofHyps (hyps.push R)
+  domNext := s.domNext
+  obsNext := s.obsNext + 1
+
+theorem afterExactCoprodL_boundary
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    AtSaturationBoundary (afterExactCoprodL L R s) :=
+  rfl
+
+theorem afterExactCoprodR_boundary
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    AtSaturationBoundary (afterExactCoprodR L R s) :=
+  rfl
+
+/--
+Retained-encode left branch context after `bindObs` + `splitL`, reindexed to
+`ofHyps (hyps.push (.coprod L R) |>.push L)`.
+
+Same EncodeIx transition family as `retainedCoprodObsCertified`’s left arm —
+**different hyps array** from `mapRestExactCoprodL`’s `hyps.push L`.
+(Pop-to-boundary is not required to state the mismatch.)
+-/
+def afterExactCoprodL_retained
+    {hyps : Array (Object sig.nBases)} (L R : Object sig.nBases)
+    (s : EncodeIx (sig := sig) (Ctx.ofHyps hyps)) :
+    EncodeIx (sig := sig)
+      (Ctx.ofHyps (hyps.push (.coprod L R) |>.push L)) :=
+  let P : Object sig.nBases := .coprod L R
+  let e := obsEntryOf s P
+  let sSplit := (s.bindObs P).splitL e L
+  have hctx :
+      Ctx.ofHyps (hyps.push P |>.push L) =
+        Ctx.ofHyps hyps ▻ P ▻ L := by
+    calc
+      Ctx.ofHyps (hyps.push P |>.push L)
+          = Ctx.ofHyps (hyps.push P) ▻ L := Ctx.ofHyps_push (hyps.push P) L
+      _ = Ctx.ofHyps hyps ▻ P ▻ L := by
+            rw [Ctx.ofHyps_push hyps P]
+  EncodeIx.castCtx hctx.symm sSplit
+
+/-!
+### STOP — exact-coproduct schedule clause
+
+**Intended clause** (atom-parallel):
+
+```
+certifiedSchedule_exactCoprod s hfr nSum rest fuel σ
+  (recL : CertifiedSchedule (afterExactCoprodL L R s)
+            (mapRestExactCoprodL … rest) A)
+  (recR : CertifiedSchedule (afterExactCoprodR L R s)
+            (mapRestExactCoprodR … rest) A)
+  : CertifiedSchedule s (.exact (.coprod L R) nSum :: rest) A
+```
+
+packaging via `retainedCoprodObsCertified` with branch `Produced` at the
+**derived** `(bindObs).splitL/splitR` states (not recovered from term syntax),
+using real `mapRestAbstractSumInl/Inr` and `coprodPushContL/R` for the
+empty-rest / η-continuation specialization.
+
+**Blocked — context / rekey mismatch (not discharged by specializing branches):**
+
+1. **Evaluator schedule index** — `mapRestExactCoprodL` yields
+   `PairEntry sig (hyps.push L)` at `Ctx.ofHyps (hyps.push L)`.
+2. **Retained encode branch index** — `retainedCoprodObsCertified` requires
+   `Produced` at `(s.bindObs (.coprod L R)).splitL e L`, context
+   `Ctx.ofHyps hyps ▻ .coprod L R ▻ L`
+   (`≃ ofHyps (hyps.push (.coprod L R) |>.push L)` via `afterExactCoprodL_retained`).
+3. **Term bridge** is `Rename.skip1` after `InvTm.castCtx (ofHyps_push hyps L)`,
+   not a `castCtx` on equal contexts (unlike `afterExactAtom` ↔ `(bindObs).pop`).
+4. **Missing generic commuting law** — `InvCert` / `EncodeReady` transport along
+   that skip1 + env/worklist rekey from the evaluator branch state
+   (`afterExactCoprodL`, empty ws, `ofHyps (hyps.push L)` env) to the retained
+   `splitL` state. Schedule-algebra side is partially closed in `ICCTotal`
+   (`leftCoprod_branch_schedule_gap` /
+   `posWorklist_rekey_weaken_hyp_to_split`); **EncodeReady transport under
+   `rekeyHypToSplit` + retained Sum-binder extension remains open**. Dropping the
+   left-coprod / split head is not a valid readiness consume for this rule.
+
+Per instructions: do **not** resolve by equality to an expected finished term or
+by continuation-shape specialization. Consistency / never / public evaluator
+still deferred.
+
+`twoObsSchedule` keeps `CertifiedSchedule.ofProduced` for the inner coprod until
+this law exists.
 -/
 
 /-! ## Atom → coproduct example via `certifiedSchedule_exactAtom` -/
@@ -432,19 +580,20 @@ theorem twoObsCode_eq_hyps :
 /-!
 ### Stop report
 
-**Generic exact-atom clause:** `certifiedSchedule_nil`, `certifiedSchedule_exactAtom`
-with arbitrary `rest` and arbitrary recursive `CertifiedSchedule` for
-`mapRestExactAtom rest`. Erasure + encode theorems included.
-Uses real `atomPushCont` / `mapRestAbstractAtom`.
+**Exact-atom clause:** landed — `certifiedSchedule_nil` / `certifiedSchedule_exactAtom`
+with arbitrary `rest` and arbitrary recursive `CertifiedSchedule`.
 
-**Example:** `twoObsSchedule` instantiates exact-atom; inner coprod is
-`CertifiedSchedule.ofProduced` until the coprod clause exists.
+**Exact-coproduct clause:** STOPPED. Scaffolding
+(`mapRestExactCoprodL/R`, `exactCoprodPushContL/R`, `afterExactCoprodL/R`,
+`afterExactCoprodL_retained`) typechecks. Packaging with
+`retainedCoprodObsCertified` needs a missing generic `InvCert`/`EncodeReady`
+commuting law along skip1 + rekey from evaluator `ofHyps (hyps.push L)` to
+retained `splitL` (see in-file STOP). Not resolved by finished-term equality
+or branch-shape specialization.
 
-**Not blocked** on abstr/rekey naturality for this clause — readiness comes from
-the recursive `Produced`, not from transporting a parent continuation’s cert.
+**Example:** `twoObsSchedule` still uses `ofProduced` for the inner coprod.
 
-Public evaluator / comparator untouched. Next: coprod clause (rekey rest into
-both branches); consistency last.
+Public evaluator / comparator untouched. Consistency still deferred.
 -/
 
 end Equality
