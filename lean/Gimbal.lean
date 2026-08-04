@@ -55,6 +55,7 @@ import Gimbal.Equality.ICCFragment
 import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.ICCReadyCert
 import Gimbal.Equality.ICCEncodeIx
+import Gimbal.Equality.ICCRetain
 import Gimbal.Equality.ICCReflect
 import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.Compare
