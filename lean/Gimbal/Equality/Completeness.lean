@@ -228,6 +228,16 @@ def DefEqDecidableFromTotal : Prop :=
 Active path: collision-free `Origin` → worklist `forcedRule` → total `encodeICC`
 → code equality → total `referenceCompare` → `Decidable DefEq`.
 
+**`compareSatRec` (and `checkOldInvariant`) are deferred optimization**, not part of
+the mathematical specification of equality. Ordered ICCCode comparison is the
+specification. Future obligation: on valid inputs, prove the optimized
+comparator extensional with the code comparator. Adapting old/new-context
+bookkeeping for retained observation binders comes **after** code-based
+soundness, completeness, and decidability. Failure to adapt affects
+performance only — not decidability, correctness, or categorical functionality.
+Do not change `checkOldInvariant` / `compareSatRec` to accommodate retained
+binders until that post-characterization stage.
+
 Blocked / WIP:
 
 1. ~~Peel soundness (`peelCaseOuter_icc`)~~ **Done** (`ICCPeel`); peel digs under

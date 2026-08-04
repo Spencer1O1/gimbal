@@ -176,6 +176,21 @@ theorem invCert_leftCoprod_peel {Γ : Ctx sig} {A L R : Object sig.nBases}
     InvCert ⟨e :: ws, ε, d, o⟩ t :=
   .leftCoprod_peel hfr hpeel hL hR
 
+/-- Phase-indexed readiness implies a successful `encodeICCGo` at the state's counters. -/
+theorem invCert_encodeGo_some {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx Γ) (t : InvTm Γ A) (h : InvCert s t) :
+    ∃ c, encodeICCGo (encodeFuel s.ws t) s.ws s.env s.domNext s.obsNext t =
+      some c :=
+  encodeReady_go_some h
+
+/-- Entry readiness implies a concrete `encodeICC` code under `ofHyps`. -/
+theorem entryReady_encode_some {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) A}
+    (h : EntryReady (sig := sig) t) :
+    ∃ c, encodeICC (OriginEnv.ofHyps hyps) t = some c :=
+  encode_of_encodeReady (OriginEnv.ofHyps hyps) (EncodeIx.entry (sig := sig) hyps).ws
+    rfl (by simpa [EntryReady, InvCert, EncodeIx.entry] using h)
+
 /-! ## Vertical slice: `λ d. let z = f d in case z of …`
 
 Signature fragment: one hypothesis `f : D → Q + Q`, goal `D → Q`.
@@ -501,10 +516,11 @@ layout facts only. `pushPos` / `OriginEnv.weaken` reused; heavy
 `rekeyHypToObs` not required for this slice.
 
 ### Next (proposed, not started)
-Staged `applyObsNeu` migration: retain `.letPos` for coproduct observations
-(unify with atom path), then re-prove SatPreserve/SatWell, then wire
-`EncodeIx` producers. Fallback remains direct ordered `ICCCode` if later
-stages force raw-syntax state reconstruction.
+Staged `applyObsNeu` migration is **deferred** until ordered-code comparison is
+the public path (`compareSatRec` is optional optimization — see
+`Completeness.lean`). Parallel path: EncodeIx-certified retained Hof codes
+(`ICCHofRetain.lean`) → total encode → code equality → then atomic producer
+switch. Do not repair `checkOldInvariant` for retained binders now.
 -/
 
 end Equality
