@@ -12,7 +12,6 @@
 import Gimbal.Equality.ICCEncodeIx
 import Gimbal.Equality.ICCPeel
 import Gimbal.Equality.ICCRetain
-import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.Saturation
 import Gimbal.Equality.Translate
 import Gimbal.Fixtures

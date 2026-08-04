@@ -20,8 +20,8 @@
 import Gimbal.Equality.ICCCanon
 import Gimbal.Equality.ICCCode
 import Gimbal.Equality.ICCEncode
+import Gimbal.Equality.ICCEncodeReady
 import Gimbal.Equality.ICCFragment
-import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.ICCReflect
 import Gimbal.Equality.ICCIdem
 import Gimbal.Equality.ICCPeel
@@ -245,33 +245,13 @@ Blocked / WIP:
 2. ~~`OriginCollisionFree`~~ **Done** (`OriginEnv.WellFormed` /
    `ofHyps_wellFormed` / `originCollisionFree`); weaken steps require `Fresh`
 3. `EncodeTotal` — **provisional only** (`EncodeTotal_holds_provisional` projects
-   stashed `ValidEncodeFragment.ready`). Required bridge is no longer the
-   case-by-case Raw→EncodeReady enumeration (paused at green tip `192dae5`;
-   `ICCTotal` ~7.2k lines while unrestricted theorem stayed open).
-
-   **Induction boundary** (see `ICCReadyCert.lean` spike):
-   `RawReferenceProduced` retains evaluator results, not production history;
-   empty schedule returns `cont`, so `WellInv` + schedule success cannot invent
-   `EncodeReady cont`. Split into:
-   * **production** — `ContReadyCert` / `StageEncodeReady` for the
-     pre-saturation continuation (focusing / intro phase);
-   * **preservation** — proof-relevant `ApplyPairObsReadyCert` so schedule
-     application transports that certificate (mixed atom+coprod *wrap*
-     composes without `*DerivedContShape`).
-
-   **STOP (acceptance not met):** full `ContReadyCert → atomPushCont` transport
-   is blocked on EncodeReady naturality (`rightExp_lam` / `letPos` binder
-   `pushPos` worklists), not on missing schedule-shape cases. Coprod
-   `StageEncodeReady (.case …)` cannot hold under bases-only `ofHyps` worklists.
-   Only nil-schedule acceptance
-   (`stageEncodeReady_applyPairObsGo_nil`) has sole premise `ContReadyCert`.
-   Do not add `*DerivedContShape`; do not migrate totality / drop `ready` yet.
-   Fallback remains direct ordered `ICCCode` production if naturality stalls.
+   stashed `ValidEncodeFragment.ready`). Cleanup A deleted the paused Raw→Ready
+   enumeration / `ICCReadyCert` spike and legacy `ICCEncodeSchedule`; the
+   remaining bridge is EncodeIx / `CertifiedScheduleIx` (or direct `ICCCode`
+   production), not further `*DerivedContShape` / nil-rest disjunctions.
 
    Do not switch `referenceCompare` or claim characterization until the stash
-   is eliminated via this split (or the direct-`ICCCode` fallback).
-   Historical enumeration lemmas remain as a green checkpoint; do not add more
-   nil-rest / DerivedContShape / exact-schedule disjunctions.)
+   is eliminated. Do not revive Raw→Ready shape predicates.
 4. `EncodeIccInvariant` (`ICCEq` → `EncodeIccStep`) and
    `EncodeIccReflect` / rigidity (common code → `ICCEq`; peel-backed).
    Commute gens packaged under forced-head hyps; cong Go lifts landed;

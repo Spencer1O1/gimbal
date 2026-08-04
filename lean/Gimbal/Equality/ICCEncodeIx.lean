@@ -17,9 +17,9 @@
 
 import Gimbal.Equality.Abstract
 import Gimbal.Equality.ICCCode
+import Gimbal.Equality.ICCEncodeReady
 import Gimbal.Equality.ICCOrigin
 import Gimbal.Equality.ICCRetain
-import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.Preserve
 import Gimbal.Equality.TmEq
 

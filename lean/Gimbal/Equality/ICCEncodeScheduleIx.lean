@@ -1410,9 +1410,9 @@ def nestedSchedProduced : Produced nestedSchedEntry NestedP :=
 * Nested unit fixture + non-unit `NestedA` invert (`nestedIxNonUnitProduced`)
 * Nested-summand schedule (`nestedSchedIx`) observing `(A+B)+C`
 
-**Remaining before Cleanup A:** consistency / public evaluator deferred; legacy
-`CertifiedSchedule` / `ICCReadyCert` still imported at root; EncodeIx still pulls
-`ICCTotal` for helpers such as `encodeReady_abort_leftNever`.
+**Cleanup A:** legacy `CertifiedSchedule` / `ICCReadyCert` deleted; EncodeIx
+imports `ICCEncodeReady` (not `ICCTotal`) for helpers such as
+`encodeReady_abort_leftNever`. Consistency / public evaluator still deferred.
 -/
 
 end Equality

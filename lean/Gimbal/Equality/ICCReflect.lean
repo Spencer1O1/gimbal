@@ -12,7 +12,6 @@
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCEncode
 import Gimbal.Equality.ICCPeel
-import Gimbal.Equality.ICCTotal
 
 namespace Gimbal
 namespace Equality
