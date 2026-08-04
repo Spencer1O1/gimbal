@@ -18,13 +18,18 @@ namespace Equality
 
 /--
 First-discovery derivation for a reachable type.
-`hypIdx` indexes `ReachCtx.hyps`; `ofTypeIdx` / `argTypeIdx` / `fnTypeIdx`
-index the subformula table.
+`hypIdx` indexes `ReachCtx.hyps`; type indices index the subformula table.
+
+Product projections are split by derivation kind:
+* `fstHyp` / `sndHyp` — eliminate a product **hypothesis** (no cell parent);
+* `fstType` / `sndType` — project a **neutral** product cell (`cellParents = [typeIdx]`).
 -/
 inductive Witness where
   | ctxVar (hypIdx : Nat)
-  | fst (ofTypeIdx : Nat)
-  | snd (ofTypeIdx : Nat)
+  | fstHyp (hypIdx : Nat)
+  | sndHyp (hypIdx : Nat)
+  | fstType (typeIdx : Nat)
+  | sndType (typeIdx : Nat)
   | app (fnHypIdx : Nat) (argTypeIdx : Nat)
   | appTy (fnTypeIdx : Nat) (argTypeIdx : Nat)
   | unit
@@ -41,8 +46,20 @@ Witnesses that reconstruct to a negative neutral (schedulable observations).
 Introduction / η forms only justify invertible arguments.
 -/
 def Witness.isNeutral : Witness → Bool
-  | .ctxVar _ | .fst _ | .snd _ | .app _ _ | .appTy _ _ => true
+  | .ctxVar _ | .fstHyp _ | .sndHyp _ | .fstType _ | .sndType _
+  | .app _ _ | .appTy _ _ => true
   | .unit | .inl _ | .inr _ | .eta => false
+
+/-- Intro witnesses must inhabit the matching connective; neutrals fit any cell. -/
+def Witness.fits {n : Nat} : Witness → Object n → Bool
+  | .unit, .unit => true
+  | .eta, .prod _ _ => true
+  | .eta, .exp _ _ => true
+  | .inl _, .coprod _ _ => true
+  | .inr _, .coprod _ _ => true
+  | .unit, _ | .eta, _ | .inl _, _ | .inr _, _ => false
+  | .ctxVar _, _ | .fstHyp _, _ | .sndHyp _, _ | .fstType _, _ | .sndType _, _
+  | .app _ _, _ | .appTy _ _, _ => true
 
 /--
 Per-type reachability cell with a provenance lattice:
@@ -67,6 +84,18 @@ def ReachCell.usesNew (c : ReachCell) : Bool :=
 /-- Has a recorded old-only derivation (independent of the uses-new slot). -/
 def ReachCell.oldDeducible (c : ReachCell) : Bool :=
   c.oldWitness.isSome
+
+/-- Old provenance slot stores a **neutral** witness. -/
+def ReachCell.oldNeutral (c : ReachCell) : Bool :=
+  match c.oldWitness with
+  | some w => Witness.isNeutral w
+  | none => false
+
+/-- Uses-new provenance slot stores a **neutral** witness. -/
+def ReachCell.newNeutral (c : ReachCell) : Bool :=
+  match c.newWitness with
+  | some w => Witness.isNeutral w
+  | none => false
 
 /-- Preferred witness: uses-new if present, otherwise old-only. -/
 def ReachCell.witness (c : ReachCell) : Option Witness :=
@@ -360,8 +389,8 @@ def unitEtaRule (σ : ReachState n) : ReachState n :=
 def hypProdRule (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) (L R : Object n) :
     ReachState n :=
   match σ.findTypeIdx (.prod L R), σ.findTypeIdx L, σ.findTypeIdx R with
-  | some pIdx, some lIdx, some rIdx =>
-      (σ.discover lIdx (Γ.isNew i) (.fst pIdx)).discover rIdx (Γ.isNew i) (.snd pIdx)
+  | some _pIdx, some lIdx, some rIdx =>
+      (σ.discover lIdx (Γ.isNew i) (.fstHyp i)).discover rIdx (Γ.isNew i) (.sndHyp i)
   | _, _, _ => σ
 
 /-- Apply a function hypothesis once its argument type is deducible. -/
@@ -383,25 +412,32 @@ def hypRule (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) : ReachState n :=
   | some (.exp Arg Ret) => hypAppRule Γ σ i Arg Ret
   | _ => σ
 
-/-- Project a deducible product type, or make it η-available from its components. -/
+/--
+Project a product cell that stores a **neutral** witness (per provenance), or
+else η-introduce the product from its components when it is not yet deducible.
+
+An η-only product does **not** generate `fstType`/`sndType`: its components were
+already premises of η, and `neuOf` cannot reconstruct projections from `.eta`.
+Mixed old-neutral / new-η provenance projects only the neutral slot.
+-/
 def prodTypeRule (σ : ReachState n) (ti : Nat) (L R : Object n) : ReachState n :=
-  if (σ.getCell ti).simplyDeducible then
-    match σ.findTypeIdx L, σ.findTypeIdx R with
-    | some lIdx, some rIdx =>
-        (σ.discoverDual lIdx (σ.getCell ti).oldDeducible (σ.getCell ti).usesNew
-          (.fst ti)).discoverDual rIdx
-          (σ.getCell ti).oldDeducible (σ.getCell ti).usesNew (.snd ti)
-    | _, _ => σ
-  else
-    match σ.findTypeIdx L, σ.findTypeIdx R with
-    | some lIdx, some rIdx =>
-        if (σ.getCell lIdx).simplyDeducible && (σ.getCell rIdx).simplyDeducible then
-          σ.discoverDual ti
-            ((σ.getCell lIdx).oldDeducible && (σ.getCell rIdx).oldDeducible)
-            ((σ.getCell lIdx).usesNew || (σ.getCell rIdx).usesNew)
+  match σ.findTypeIdx L, σ.findTypeIdx R with
+  | some lIdx, some rIdx =>
+      let c := σ.getCell ti
+      let σ₁ :=
+        (σ.discoverDual lIdx c.oldNeutral c.newNeutral (.fstType ti)).discoverDual
+          rIdx c.oldNeutral c.newNeutral (.sndType ti)
+      if !c.simplyDeducible then
+        if (σ₁.getCell lIdx).simplyDeducible && (σ₁.getCell rIdx).simplyDeducible then
+          σ₁.discoverDual ti
+            ((σ₁.getCell lIdx).oldDeducible && (σ₁.getCell rIdx).oldDeducible)
+            ((σ₁.getCell lIdx).usesNew || (σ₁.getCell rIdx).usesNew)
             .eta
-        else σ
-    | _, _ => σ
+        else
+          σ₁
+      else
+        σ₁
+  | _, _ => σ
 
 /-- Function η / identity expansion: `Ret` deducible makes `Arg → Ret` available. -/
 def expEtaRule (σ : ReachState n) (ti : Nat) (Ret : Object n) : ReachState n :=
@@ -549,16 +585,23 @@ theorem hypRule_le (Γ : ReachCtx n) (σ : ReachState n) (i : Nat) :
 theorem prodTypeRule_le (σ : ReachState n) (ti : Nat) (L R : Object n) :
     ReachState.Le σ (prodTypeRule σ ti L R) := by
   unfold prodTypeRule
-  split
-  · split
-    · exact (ReachState.le_discoverDual _ _ _ _ _).trans
-        (ReachState.le_discoverDual _ _ _ _ _)
-    · exact ReachState.Le.refl _
-  · split
-    · split
-      · exact ReachState.le_discoverDual _ _ _ _ _
+  cases hl : σ.findTypeIdx L with
+  | none => simp only [hl]; exact ReachState.Le.refl _
+  | some lIdx =>
+    cases hr : σ.findTypeIdx R with
+    | none => simp only [hr]; exact ReachState.Le.refl _
+    | some rIdx =>
+      simp only [hr]
+      refine
+        (ReachState.le_discoverDual σ lIdx (σ.getCell ti).oldNeutral
+            (σ.getCell ti).newNeutral (.fstType ti)).trans
+          ((ReachState.le_discoverDual _ rIdx (σ.getCell ti).oldNeutral
+              (σ.getCell ti).newNeutral (.sndType ti)).trans ?_)
+      split
+      · split
+        · exact ReachState.le_discoverDual _ _ _ _ _
+        · exact ReachState.Le.refl _
       · exact ReachState.Le.refl _
-    · exact ReachState.Le.refl _
 
 theorem expEtaRule_le (σ : ReachState n) (ti : Nat) (Ret : Object n) :
     ReachState.Le σ (expEtaRule σ ti Ret) := by

@@ -110,7 +110,27 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
           match Ctx.varOldest hyps hypIdx with
           | some ⟨A, x⟩ => some (.wit hyps ⟨A, .var x⟩)
           | none => none
-        | .fst pIdx =>
+        | .fstHyp hypIdx =>
+          match hyps[hypIdx]? with
+          | some (.prod L _R) =>
+            match Ctx.varOldest hyps hypIdx with
+            | some ⟨P, x⟩ =>
+              if hP : P = .prod L _R then
+                some (.wit hyps ⟨L, .fst (NegNeu.cast hP (.var x))⟩)
+              else none
+            | none => none
+          | _ => none
+        | .sndHyp hypIdx =>
+          match hyps[hypIdx]? with
+          | some (.prod _L R) =>
+            match Ctx.varOldest hyps hypIdx with
+            | some ⟨P, x⟩ =>
+              if hP : P = .prod _L R then
+                some (.wit hyps ⟨R, .snd (NegNeu.cast hP (.var x))⟩)
+              else none
+            | none => none
+          | _ => none
+        | .fstType pIdx =>
           match σ.typeAt pIdx with
           | some (.prod L R) =>
             match reconstructGo fuel σ (.neuOf hyps (.prod L R)) with
@@ -122,7 +142,7 @@ def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
               else none
             | _ => none
           | _ => none
-        | .snd pIdx =>
+        | .sndType pIdx =>
           match σ.typeAt pIdx with
           | some (.prod L R) =>
             match reconstructGo fuel σ (.neuOf hyps (.prod L R)) with
@@ -362,24 +382,42 @@ private theorem well_reconstructGo : ∀ (fuel : Nat) (σ : ReachState sig.nBase
             | exact absurd h (by simp)
       · -- `.witness`: the parent pointer determines the spine head
         split at h
-        · split at h
+        · -- `.ctxVar`
+          split at h
           · cases h; exact .var
           · exact absurd h (by simp)
-        · repeat' (split at h)
+        · -- `.fstHyp`
+          repeat' (split at h)
+          all_goals
+            first
+            | (cases h; exact .fst (wellNeg_cast _ .var))
+            | cases h
+            | exact absurd h (by simp)
+        · -- `.sndHyp`
+          repeat' (split at h)
+          all_goals
+            first
+            | (cases h; exact .snd (wellNeg_cast _ .var))
+            | cases h
+            | exact absurd h (by simp)
+        · -- `.fstType`
+          repeat' (split at h)
           all_goals
             first
             | (cases h
                exact .fst (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption)))))
             | cases h
             | exact absurd h (by simp)
-        · repeat' (split at h)
+        · -- `.sndType`
+          repeat' (split at h)
           all_goals
             first
             | (cases h
                exact .snd (wellNeg_cast _ (wellNeg_castHyps _ (ihNeu _ (by assumption)))))
             | cases h
             | exact absurd h (by simp)
-        · repeat' (split at h)
+        · -- `.app`
+          repeat' (split at h)
           all_goals
             first
             | (cases h
@@ -387,7 +425,8 @@ private theorem well_reconstructGo : ∀ (fuel : Nat) (σ : ReachState sig.nBase
                  (wellInv_castTy _ (wellInv_castHyps _ (ihInv _ (by assumption)))))
             | cases h
             | exact absurd h (by simp)
-        · repeat' (split at h)
+        · -- `.appTy`
+          repeat' (split at h)
           all_goals
             first
             | (cases h

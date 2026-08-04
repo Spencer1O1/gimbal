@@ -333,6 +333,59 @@ theorem memRet (hf : ReachFixed Γ σ) {Arg Ret : Object n}
 
 end ReachFixed
 
+/-- Fixed `prodTypeRule` with a simply-deducible product reduces to the two
+neutral projections (the η arm is skipped). -/
+theorem prodTypeRule_projections_of_sd {σ : ReachState n}
+    {p l r : Nat} {L R : Object n}
+    (hl : σ.findTypeIdx L = some l) (hr : σ.findTypeIdx R = some r)
+    (hsd : (σ.getCell p).simplyDeducible = true)
+    (heq : prodTypeRule σ p L R = σ) :
+    (σ.discoverDual l (σ.getCell p).oldNeutral (σ.getCell p).newNeutral
+        (.fstType p)).discoverDual
+      r (σ.getCell p).oldNeutral (σ.getCell p).newNeutral (.sndType p) = σ := by
+  unfold prodTypeRule at heq
+  rw [hl, hr] at heq
+  simp only [hsd, Bool.not_true] at heq
+  exact heq
+
+/-- A non-simply-deducible cell cannot store a neutral witness. -/
+theorem not_simplyDeducible_not_neutral (c : ReachCell)
+    (h : c.simplyDeducible = false) :
+    c.oldNeutral = false ∧ c.newNeutral = false := by
+  constructor
+  · cases ho : c.oldWitness with
+    | none => simp [ReachCell.oldNeutral, ho]
+    | some w =>
+      have : c.oldWitness.isSome = true := by simp [ho]
+      unfold ReachCell.simplyDeducible at h
+      simp [this] at h
+  · cases hn : c.newWitness with
+    | none => simp [ReachCell.newNeutral, hn]
+    | some w =>
+      have : c.newWitness.isSome = true := by simp [hn]
+      unfold ReachCell.simplyDeducible at h
+      simp [this] at h
+
+/-- Fixed `prodTypeRule` on a non-SD product with SD components records η
+(projections are no-ops because the product cannot be neutral). -/
+theorem prodTypeRule_eta_of_components {σ : ReachState n}
+    {p l r : Nat} {L R : Object n}
+    (hl : σ.findTypeIdx L = some l) (hr : σ.findTypeIdx R = some r)
+    (hnsd : (σ.getCell p).simplyDeducible = false)
+    (hcomp : ((σ.getCell l).simplyDeducible && (σ.getCell r).simplyDeducible) = true)
+    (heq : prodTypeRule σ p L R = σ) :
+    σ.discoverDual p
+      ((σ.getCell l).oldDeducible && (σ.getCell r).oldDeducible)
+      ((σ.getCell l).usesNew || (σ.getCell r).usesNew) .eta = σ := by
+  have ⟨hneul, hneur⟩ := not_simplyDeducible_not_neutral _ hnsd
+  unfold prodTypeRule at heq
+  rw [hl, hr] at heq
+  have hnot : (!(σ.getCell p).simplyDeducible) = true := by simp [hnsd]
+  simp only [ReachState.discoverDual, hneul, hneur, Bool.false_eq_true, ↓reduceIte] at heq
+  simp only [hnot, ↓reduceIte] at heq
+  simp only [hcomp, ↓reduceIte] at heq
+  exact heq
+
 /-! ### Completeness -/
 
 /-- Every derivation stays inside the formula universe it is restricted to. -/
@@ -370,11 +423,11 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold hypProdRule at hrule
       rw [hp, hl, hr] at hrule
       dsimp only at hrule
-      have h2 := ReachState.le_discover (σ.discover l (Γ.isNew k) (.fst p)) r
-        (Γ.isNew k) (.snd p)
+      have h2 := ReachState.le_discover (σ.discover l (Γ.isNew k) (.fstHyp k)) r
+        (Γ.isNew k) (.sndHyp k)
       rw [hrule] at h2
       have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discover σ l (Γ.isNew k) (.fst p)) h2
+        (ReachState.le_discover σ l (Γ.isNew k) (.fstHyp k)) h2
       exact isSimplyDeducible_of_index hl
         (ReachState.simplyDeducible_of_discover_eq hf.sized
           (ReachState.typeAt_of_findTypeIdx hl) h1)
@@ -387,11 +440,11 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       unfold hypProdRule at hrule
       rw [hp, hl, hr] at hrule
       dsimp only at hrule
-      have h2 := ReachState.le_discover (σ.discover l (Γ.isNew k) (.fst p)) r
-        (Γ.isNew k) (.snd p)
+      have h2 := ReachState.le_discover (σ.discover l (Γ.isNew k) (.fstHyp k)) r
+        (Γ.isNew k) (.sndHyp k)
       rw [hrule] at h2
       have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discover σ l (Γ.isNew k) (.fst p)) h2
+        (ReachState.le_discover σ l (Γ.isNew k) (.fstHyp k)) h2
       rw [h1] at hrule
       exact isSimplyDeducible_of_index hr
         (ReachState.simplyDeducible_of_discover_eq hf.sized
@@ -402,56 +455,69 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       obtain ⟨l, hl⟩ := exists_findTypeIdx hu
       obtain ⟨r, hr⟩ := exists_findTypeIdx (hf.memR hprod)
       have hdec := index_deducible hp ih
-      have hrule := hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp)
-      unfold prodTypeRule at hrule
-      rw [if_pos hdec, hl, hr] at hrule
-      dsimp only at hrule
-      have hfire := hs.fires_of_simplyDeducible p _ (ReachState.typeAt_of_findTypeIdx hp) hdec
-      have h2 := ReachState.le_discoverDual
-        (σ.discoverDual l (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.fst p)) r
-        (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.snd p)
-      rw [hrule] at h2
-      have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discoverDual σ l (σ.getCell p).oldDeducible (σ.getCell p).usesNew
-          (.fst p)) h2
-      exact isSimplyDeducible_of_index hl
-        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hl) h1 hfire)
+      by_cases hNeu :
+          (σ.getCell p).oldNeutral = true ∨ (σ.getCell p).newNeutral = true
+      · have hfire := hNeu
+        have hproj := prodTypeRule_projections_of_sd hl hr hdec
+          (hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp))
+        have h2 := ReachState.le_discoverDual
+          (σ.discoverDual l (σ.getCell p).oldNeutral (σ.getCell p).newNeutral
+              (.fstType p))
+          r (σ.getCell p).oldNeutral (σ.getCell p).newNeutral (.sndType p)
+        rw [hproj] at h2
+        have h1 := ReachState.eq_of_sandwich
+          (ReachState.le_discoverDual σ l (σ.getCell p).oldNeutral
+              (σ.getCell p).newNeutral (.fstType p))
+          h2
+        exact isSimplyDeducible_of_index hl
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx hl) h1 hfire)
+      · have ⟨hL, _⟩ := hs.etaProd p L R (ReachState.typeAt_of_findTypeIdx hp)
+            (eta_of_nonneutral_prod hs (ReachState.typeAt_of_findTypeIdx hp) hdec hNeu)
+        exact hL
+
   | @snd L R hd hu ih =>
       have hprod := hd.univ
       obtain ⟨p, hp⟩ := exists_findTypeIdx hprod
       obtain ⟨l, hl⟩ := exists_findTypeIdx (hf.memL hprod)
       obtain ⟨r, hr⟩ := exists_findTypeIdx hu
       have hdec := index_deducible hp ih
-      have hrule := hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp)
-      unfold prodTypeRule at hrule
-      rw [if_pos hdec, hl, hr] at hrule
-      dsimp only at hrule
-      have hfire := hs.fires_of_simplyDeducible p _ (ReachState.typeAt_of_findTypeIdx hp) hdec
-      have h2 := ReachState.le_discoverDual
-        (σ.discoverDual l (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.fst p)) r
-        (σ.getCell p).oldDeducible (σ.getCell p).usesNew (.snd p)
-      rw [hrule] at h2
-      have h1 := ReachState.eq_of_sandwich
-        (ReachState.le_discoverDual σ l (σ.getCell p).oldDeducible (σ.getCell p).usesNew
-          (.fst p)) h2
-      rw [h1] at hrule
-      exact isSimplyDeducible_of_index hr
-        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
+      by_cases hNeu :
+          (σ.getCell p).oldNeutral = true ∨ (σ.getCell p).newNeutral = true
+      · have hfire := hNeu
+        have hproj := prodTypeRule_projections_of_sd hl hr hdec
+          (hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp))
+        have h2 := ReachState.le_discoverDual
+          (σ.discoverDual l (σ.getCell p).oldNeutral (σ.getCell p).newNeutral
+              (.fstType p))
+          r (σ.getCell p).oldNeutral (σ.getCell p).newNeutral (.sndType p)
+        rw [hproj] at h2
+        have hfst := ReachState.eq_of_sandwich
+          (ReachState.le_discoverDual σ l (σ.getCell p).oldNeutral
+              (σ.getCell p).newNeutral (.fstType p))
+          h2
+        have h1 : σ.discoverDual r (σ.getCell p).oldNeutral (σ.getCell p).newNeutral
+            (.sndType p) = σ := by
+          have this := hproj
+          rw [hfst] at this
+          exact this
+        exact isSimplyDeducible_of_index hr
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx hr) h1 hfire)
+      · have ⟨_, hR⟩ := hs.etaProd p L R (ReachState.typeAt_of_findTypeIdx hp)
+            (eta_of_nonneutral_prod hs (ReachState.typeAt_of_findTypeIdx hp) hdec hNeu)
+        exact hR
+
   | @pair L R hdl hdr hu ihl ihr =>
       obtain ⟨p, hp⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell p).simplyDeducible = true
       · exact isSimplyDeducible_of_index hp hdec
       · obtain ⟨l, hl⟩ := exists_findTypeIdx hdl.univ
         obtain ⟨r, hr⟩ := exists_findTypeIdx hdr.univ
-        have hrule := hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp)
-        unfold prodTypeRule at hrule
-        rw [if_neg hdec, hl, hr] at hrule
-        dsimp only at hrule
         have hb : ((σ.getCell l).simplyDeducible && (σ.getCell r).simplyDeducible) = true := by
           simp [index_deducible hl ihl, index_deducible hr ihr]
-        rw [if_pos hb] at hrule
+        have hrule := prodTypeRule_eta_of_components hl hr (by simp [hdec]) hb
+          (hf.prodTypeRule_eq (ReachState.typeAt_of_findTypeIdx hp))
         have hfire : ((σ.getCell l).oldDeducible && (σ.getCell r).oldDeducible) = true ∨
             ((σ.getCell l).usesNew || (σ.getCell r).usesNew) = true := by
           cases hul : (σ.getCell l).usesNew

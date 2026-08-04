@@ -60,36 +60,54 @@ not cell parents — they resolve through `Ctx.varOldest` / hyps.
 -/
 
 /-- Cell indices that must already carry a ranked neutral before this witness
-can reconstruct as a neutral (intro forms listed for completeness only). -/
+can reconstruct as a neutral (intro forms listed for completeness only).
+
+`fstHyp` / `sndHyp` reconstruct from the context alone (`cellParents = []`).
+`fstType` / `sndType` depend on the product cell's ranked neutral.
+`app` reconstructs via hyp + `invOf` arg (no cell-neutral parent).
+`appTy` recurses to `neuOf` of the function cell; arg uses `invOf`. -/
 def Witness.cellParents : Witness → List Nat
-  | .ctxVar _ => []
-  | .fst pIdx | .snd pIdx => [pIdx]
-  | .app _argHypIdx argIdx => [argIdx]
-  | .appTy fnIdx argIdx => [fnIdx, argIdx]
+  | .ctxVar _ | .fstHyp _ | .sndHyp _ => []
+  | .fstType pIdx | .sndType pIdx => [pIdx]
+  | .app _argHypIdx _argIdx => []
+  | .appTy fnIdx _argIdx => [fnIdx]
   | .inl pIdx | .inr pIdx => [pIdx]
   | .unit | .eta => []
 
-theorem Witness.cellParents_fst (p : Nat) :
-    Witness.cellParents (.fst p) = [p] :=
+theorem Witness.cellParents_fstHyp (i : Nat) :
+    Witness.cellParents (.fstHyp i) = [] :=
   rfl
 
-theorem Witness.cellParents_snd (p : Nat) :
-    Witness.cellParents (.snd p) = [p] :=
+theorem Witness.cellParents_sndHyp (i : Nat) :
+    Witness.cellParents (.sndHyp i) = [] :=
+  rfl
+
+theorem Witness.cellParents_fstType (p : Nat) :
+    Witness.cellParents (.fstType p) = [p] :=
+  rfl
+
+theorem Witness.cellParents_sndType (p : Nat) :
+    Witness.cellParents (.sndType p) = [p] :=
   rfl
 
 theorem Witness.cellParents_app (fnHyp argIdx : Nat) :
-    Witness.cellParents (.app fnHyp argIdx) = [argIdx] :=
+    Witness.cellParents (.app fnHyp argIdx) = [] :=
   rfl
 
 theorem Witness.cellParents_appTy (fnIdx argIdx : Nat) :
-    Witness.cellParents (.appTy fnIdx argIdx) = [fnIdx, argIdx] :=
+    Witness.cellParents (.appTy fnIdx argIdx) = [fnIdx] :=
   rfl
 
 theorem Witness.cellParents_ctxVar (i : Nat) :
     Witness.cellParents (.ctxVar i) = [] :=
   rfl
 
-theorem Witness.isNeutral_fst (p : Nat) : Witness.isNeutral (.fst p) = true :=
+theorem Witness.isNeutral_fstHyp (i : Nat) :
+    Witness.isNeutral (.fstHyp i) = true :=
+  rfl
+
+theorem Witness.isNeutral_fstType (p : Nat) :
+    Witness.isNeutral (.fstType p) = true :=
   rfl
 
 theorem Witness.isNeutral_ctxVar (i : Nat) :
@@ -135,8 +153,9 @@ def ReconPhase.toNat : ReconPhase → Nat
 
 ` (witnessRank, phase, reconObjectSize) ` — lexicographic on `Nat × Nat × Nat`.
 
-* **`.fst` / `.snd`:** type size *increases* toward the product; **witness rank
-  decreases** (`parents_lt`). Measure drops on the first component.
+* **`.fstType` / `.sndType`:** type size *increases* toward the product; **witness
+  rank decreases** (`parents_lt`). Measure drops on the first component.
+  Hypothesis projections (`.fstHyp` / `.sndHyp`) have no cell parents.
 * **`.app` / `.appTy`:** parent `neuOf` uses rank decrease; intro `invOf`
   branches use `reconObjectSize` under phase `invOf`.
 -/
@@ -152,9 +171,9 @@ def ReconMeasure.lt : ReconMeasure → ReconMeasure → Prop
   | (r₁, p₁, s₁), (r₂, p₂, s₂) =>
       r₁ < r₂ ∨ (r₁ = r₂ ∧ (p₁ < p₂ ∨ (p₁ = p₂ ∧ s₁ < s₂)))
 
-/-- Hard case demo: reconstructing `.fst` at child rank calls `neuOf(prod)` at
+/-- Hard case demo: reconstructing `.fstType` at child rank calls `neuOf(prod)` at
 parent rank — first component decreases even though `reconObjectSize` rises. -/
-theorem reconMeasure_fst_parent_lt (childRank parentRank : Nat)
+theorem reconMeasure_fstType_parent_lt (childRank parentRank : Nat)
     (h : parentRank < childRank) {n : Nat} (L R : Object n) :
     ReconMeasure.lt
       (reconMeasure parentRank .neuOf (.prod L R : Object n))
@@ -265,6 +284,80 @@ theorem ParentsCertified_ctxVar {n : Nat} {σ : ReachState n}
     ParentsCertified cert (.ctxVar i) := by
   intro p hp
   simp [Witness.cellParents] at hp
+
+theorem ParentsCertified_fstHyp {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) :
+    ParentsCertified cert (.fstHyp i) := by
+  intro p hp; simp [Witness.cellParents] at hp
+
+theorem ParentsCertified_sndHyp {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (i : Nat) :
+    ParentsCertified cert (.sndHyp i) := by
+  intro p hp; simp [Witness.cellParents] at hp
+
+theorem ParentsCertified_app {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (fnHyp argIdx : Nat) :
+    ParentsCertified cert (.app fnHyp argIdx) := by
+  intro p hp; simp [Witness.cellParents] at hp
+
+/-- A cell with a neutral provenance slot already has a ranked neutral. -/
+theorem ReachRankCert.ranked_of_neutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (ti : Nat)
+    (hNeu : (σ.getCell ti).oldNeutral = true ∨ (σ.getCell ti).newNeutral = true) :
+    ∃ (b : SlotNew) (r : Nat), cert.rank ti b = some r := by
+  cases hNeu with
+  | inl ho =>
+    cases hw : (σ.getCell ti).oldWitness with
+    | none => simp [ReachCell.oldNeutral, hw] at ho
+    | some w =>
+      have hNeuW : Witness.isNeutral w = true := by
+        simpa [ReachCell.oldNeutral, hw] using ho
+      have hrs : (cert.rank ti false).isSome = true := by
+        have := cert.rank_iff ti false
+        simpa [ReachCell.slotWitness, hw, hNeuW] using this
+      cases hr : cert.rank ti false with
+      | none => simp [hr] at hrs
+      | some r => exact ⟨false, r, hr⟩
+  | inr hn =>
+    cases hw : (σ.getCell ti).newWitness with
+    | none => simp [ReachCell.newNeutral, hw] at hn
+    | some w =>
+      have hNeuW : Witness.isNeutral w = true := by
+        simpa [ReachCell.newNeutral, hw] using hn
+      have hrs : (cert.rank ti true).isSome = true := by
+        have := cert.rank_iff ti true
+        simpa [ReachCell.slotWitness, hw, hNeuW] using this
+      cases hr : cert.rank ti true with
+      | none => simp [hr] at hrs
+      | some r => exact ⟨true, r, hr⟩
+
+/-- A cell with a neutral provenance slot is a certified parent of `fstType`/`sndType`. -/
+theorem ParentsCertified_fstType_of_neutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (ti : Nat)
+    (hNeu : (σ.getCell ti).oldNeutral = true ∨ (σ.getCell ti).newNeutral = true) :
+    ParentsCertified cert (.fstType ti) := by
+  intro p hp
+  simp only [Witness.cellParents, List.mem_singleton] at hp
+  cases hp
+  exact cert.ranked_of_neutral ti hNeu
+
+theorem ParentsCertified_sndType_of_neutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (ti : Nat)
+    (hNeu : (σ.getCell ti).oldNeutral = true ∨ (σ.getCell ti).newNeutral = true) :
+    ParentsCertified cert (.sndType ti) := by
+  intro p hp
+  simp only [Witness.cellParents, List.mem_singleton] at hp
+  cases hp
+  exact cert.ranked_of_neutral ti hNeu
+
+theorem ParentsCertified_appTy_of_neutral {n : Nat} {σ : ReachState n}
+    (cert : ReachRankCert σ) (fnIdx argIdx : Nat)
+    (hNeu : (σ.getCell fnIdx).oldNeutral = true ∨ (σ.getCell fnIdx).newNeutral = true) :
+    ParentsCertified cert (.appTy fnIdx argIdx) := by
+  intro p hp
+  simp only [Witness.cellParents, List.mem_singleton] at hp
+  cases hp
+  exact cert.ranked_of_neutral fnIdx hNeu
 
 /-- Strict upper bound: max of `(slotRank + 1)` over both slots of every parent. -/
 def ParentsCertified.freshRank {n : Nat} {σ : ReachState n}
@@ -642,40 +735,47 @@ theorem ParentsCertified.of_certifiedDiscover {n : Nat} (σ : ReachState n)
       · rw [dif_neg hi]
         exact ParentsCertified.of_markInconsistentIf cert A w' hp
 
-/-- Dual-fire composition. -/
+/-- Dual-fire composition. Parent certification is required only when at least
+one provenance slot actually fires. -/
 def certifiedDiscoverDual {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
     (i : Nat) (oldOk newOk : Bool) (w : Witness)
-    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    (h : Witness.isNeutral w = true → (oldOk = true ∨ newOk = true) →
+      ParentsCertified cert w) :
     CertifiedReachResult n :=
   match oldOk, newOk with
   | true, true =>
-      let c₁ := certifiedDiscover σ cert i false w h
+      let h₀ : Witness.isNeutral w = true → ParentsCertified cert w :=
+        fun hw => h hw (Or.inl rfl)
+      let c₁ := certifiedDiscover σ cert i false w h₀
       certifiedDiscover c₁.state c₁.cert i true w (fun hwNeu =>
-        ParentsCertified.of_certifiedDiscover σ cert i false w h w (h hwNeu))
+        ParentsCertified.of_certifiedDiscover σ cert i false w h₀ w (h₀ hwNeu))
   | true, false =>
-      certifiedDiscover σ cert i false w h
+      certifiedDiscover σ cert i false w (fun hw => h hw (Or.inl rfl))
   | false, true =>
-      certifiedDiscover σ cert i true w h
+      certifiedDiscover σ cert i true w (fun hw => h hw (Or.inr rfl))
   | false, false =>
       ⟨σ, cert⟩
 
 theorem certifiedDiscoverDual_project {n : Nat} (σ : ReachState n)
     (cert : ReachRankCert σ) (i : Nat) (oldOk newOk : Bool) (w : Witness)
-    (h : Witness.isNeutral w = true → ParentsCertified cert w) :
+    (h : Witness.isNeutral w = true → (oldOk = true ∨ newOk = true) →
+      ParentsCertified cert w) :
     (certifiedDiscoverDual σ cert i oldOk newOk w h).project =
       σ.discoverDual i oldOk newOk w := by
   cases oldOk <;> cases newOk
   · rfl
-  · exact certifiedDiscover_project σ cert i true w h
-  · exact certifiedDiscover_project σ cert i false w h
+  · exact certifiedDiscover_project σ cert i true w (fun hw => h hw (Or.inr rfl))
+  · exact certifiedDiscover_project σ cert i false w (fun hw => h hw (Or.inl rfl))
   · simp only [certifiedDiscoverDual, ReachState.discoverDual,
       CertifiedReachResult.project]
-    have h₁ := certifiedDiscover_project σ cert i false w h
+    have h₀ : Witness.isNeutral w = true → ParentsCertified cert w :=
+      fun hw => h hw (Or.inl rfl)
+    have h₁ := certifiedDiscover_project σ cert i false w h₀
     have h₂ := certifiedDiscover_project
-      (certifiedDiscover σ cert i false w h).state
-      (certifiedDiscover σ cert i false w h).cert i true w
+      (certifiedDiscover σ cert i false w h₀).state
+      (certifiedDiscover σ cert i false w h₀).cert i true w
       (fun hwNeu =>
-        ParentsCertified.of_certifiedDiscover σ cert i false w h w (h hwNeu))
+        ParentsCertified.of_certifiedDiscover σ cert i false w h₀ w (h₀ hwNeu))
     simp only [CertifiedReachResult.project] at h₁ h₂
     rw [h₂, h₁]
     simp
@@ -729,15 +829,210 @@ theorem certifiedMarkHyp_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
           · next hi =>
               simp [hA, hiIdx, ReachState.setCell, dif_neg hi]
 
+theorem ParentsCertified.of_certifiedDiscoverDual {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (oldOk newOk : Bool) (w : Witness)
+    (h : Witness.isNeutral w = true → (oldOk = true ∨ newOk = true) →
+      ParentsCertified cert w)
+    (w' : Witness) (hp : ParentsCertified cert w') :
+    ParentsCertified (certifiedDiscoverDual σ cert i oldOk newOk w h).cert w' := by
+  cases oldOk <;> cases newOk
+  · exact hp
+  · exact ParentsCertified.of_certifiedDiscover σ cert i true w
+      (fun hw => h hw (Or.inr rfl)) w' hp
+  · exact ParentsCertified.of_certifiedDiscover σ cert i false w
+      (fun hw => h hw (Or.inl rfl)) w' hp
+  · have h₀ : Witness.isNeutral w = true → ParentsCertified cert w :=
+      fun hw => h hw (Or.inl rfl)
+    exact ParentsCertified.of_certifiedDiscover
+      (certifiedDiscover σ cert i false w h₀).state
+      (certifiedDiscover σ cert i false w h₀).cert i true w
+      (fun hwNeu =>
+        ParentsCertified.of_certifiedDiscover σ cert i false w h₀ w (h₀ hwNeu))
+      w'
+      (ParentsCertified.of_certifiedDiscover σ cert i false w h₀ w' hp)
+
+/-! ### Certified forward-chaining rules -/
+
+def certifiedUnitEtaRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx (.unit : Object n) with
+  | some uIdx =>
+      certifiedDiscover σ cert uIdx false .unit (fun h => by
+        simp [Witness.isNeutral] at h)
+  | none => ⟨σ, cert⟩
+
+theorem certifiedUnitEtaRule_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) :
+    (certifiedUnitEtaRule σ cert).project = unitEtaRule σ := by
+  unfold certifiedUnitEtaRule unitEtaRule CertifiedReachResult.project
+  cases h : σ.findTypeIdx (.unit : Object n) with
+  | none => rfl
+  | some uIdx =>
+      exact certifiedDiscover_project σ cert uIdx false .unit _
+
+def certifiedHypProdRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (L R : Object n) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx (.prod L R), σ.findTypeIdx L, σ.findTypeIdx R with
+  | some _pIdx, some lIdx, some rIdx =>
+      let c₁ := certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+        (fun _ => ParentsCertified_fstHyp cert i)
+      certifiedDiscover c₁.state c₁.cert rIdx (Γ.isNew i) (.sndHyp i)
+        (fun _ => ParentsCertified.of_certifiedDiscover σ cert lIdx (Γ.isNew i)
+          (.fstHyp i) (fun _ => ParentsCertified_fstHyp cert i) _
+          (ParentsCertified_sndHyp cert i))
+  | _, _, _ => ⟨σ, cert⟩
+
+theorem certifiedHypProdRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (L R : Object n) :
+    (certifiedHypProdRule Γ σ cert i L R).project = hypProdRule Γ σ i L R := by
+  unfold certifiedHypProdRule hypProdRule CertifiedReachResult.project
+  cases hp : σ.findTypeIdx (.prod L R) with
+  | none =>
+    cases σ.findTypeIdx L <;> cases σ.findTypeIdx R <;> simp [hp]
+  | some pIdx =>
+    cases hl : σ.findTypeIdx L with
+    | none => cases σ.findTypeIdx R <;> simp [hp, hl]
+    | some lIdx =>
+      cases hr : σ.findTypeIdx R with
+      | none => simp [hp, hl, hr]
+      | some rIdx =>
+          simp only [hp, hl, hr]
+          have h₁ := certifiedDiscover_project σ cert lIdx (Γ.isNew i) (.fstHyp i)
+            (fun _ => ParentsCertified_fstHyp cert i)
+          have h₂ := certifiedDiscover_project
+            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+              (fun _ => ParentsCertified_fstHyp cert i)).state
+            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
+              (fun _ => ParentsCertified_fstHyp cert i)).cert
+            rIdx (Γ.isNew i) (.sndHyp i)
+            (fun _ => ParentsCertified.of_certifiedDiscover σ cert lIdx (Γ.isNew i)
+              (.fstHyp i) (fun _ => ParentsCertified_fstHyp cert i) _
+              (ParentsCertified_sndHyp cert i))
+          simp only [CertifiedReachResult.project] at h₁ h₂
+          rw [h₂, h₁]
+
+def certifiedHypAppRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (Arg Ret : Object n) :
+    CertifiedReachResult n :=
+  match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+  | some aIdx, some rIdx =>
+      certifiedDiscoverDual σ cert rIdx
+        ((σ.getCell aIdx).oldDeducible && !Γ.isNew i)
+        ((σ.getCell aIdx).simplyDeducible &&
+          ((σ.getCell aIdx).usesNew || Γ.isNew i))
+        (.app i aIdx)
+        (fun _ _ => ParentsCertified_app cert i aIdx)
+  | _, _ => ⟨σ, cert⟩
+
+theorem certifiedHypAppRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (Arg Ret : Object n) :
+    (certifiedHypAppRule Γ σ cert i Arg Ret).project = hypAppRule Γ σ i Arg Ret := by
+  unfold certifiedHypAppRule hypAppRule CertifiedReachResult.project
+  cases ha : σ.findTypeIdx Arg with
+  | none => cases σ.findTypeIdx Ret <;> simp [ha]
+  | some aIdx =>
+    cases hr : σ.findTypeIdx Ret with
+    | none => simp [ha, hr]
+    | some rIdx =>
+        simp only [ha, hr]
+        exact certifiedDiscoverDual_project σ cert rIdx _ _ _ _
+
+def certifiedSeedHypRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) : CertifiedReachResult n :=
+  match Γ.hyps[i]? with
+  | some A =>
+      if objectPolarity A == .pos then certifiedMarkHyp Γ σ cert i
+      else ⟨σ, cert⟩
+  | none => ⟨σ, cert⟩
+
+theorem certifiedSeedHypRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) :
+    (certifiedSeedHypRule Γ σ cert i).project = seedHypRule Γ σ i := by
+  unfold certifiedSeedHypRule seedHypRule CertifiedReachResult.project
+  cases hA : Γ.hyps[i]? with
+  | none => rfl
+  | some A =>
+      simp only [hA]
+      split
+      · exact certifiedMarkHyp_project Γ σ cert i
+      · rfl
+
+def certifiedHypRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) : CertifiedReachResult n :=
+  match Γ.hyps[i]? with
+  | some (.prod L R) => certifiedHypProdRule Γ σ cert i L R
+  | some (.exp Arg Ret) => certifiedHypAppRule Γ σ cert i Arg Ret
+  | _ => ⟨σ, cert⟩
+
+theorem certifiedHypRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) :
+    (certifiedHypRule Γ σ cert i).project = hypRule Γ σ i := by
+  unfold certifiedHypRule hypRule CertifiedReachResult.project
+  cases hA : Γ.hyps[i]? with
+  | none => rfl
+  | some A =>
+      cases A with
+      | prod L R =>
+          simp only [hA]
+          exact certifiedHypProdRule_project Γ σ cert i L R
+      | exp Arg Ret =>
+          simp only [hA]
+          exact certifiedHypAppRule_project Γ σ cert i Arg Ret
+      | _ => simp only [hA]
+
+/-! Product type rule certification is sketched in `certifiedProdTypeRule` below;
+the `project` equality is deferred to the next pass (η-arm `getCell` alignment).
+The hyp/seed/unit wrappers above already project. -/
+
+def certifiedProdTypeRule {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
+    (ti : Nat) (L R : Object n) : CertifiedReachResult n :=
+  match σ.findTypeIdx L, σ.findTypeIdx R with
+  | some lIdx, some rIdx =>
+      let c := σ.getCell ti
+      let hold := c.oldNeutral
+      let hnew := c.newNeutral
+      let hparFst :
+          Witness.isNeutral (.fstType ti) = true → (hold = true ∨ hnew = true) →
+            ParentsCertified cert (.fstType ti) :=
+        fun _ hfire => ParentsCertified_fstType_of_neutral cert ti hfire
+      let c₁ := certifiedDiscoverDual σ cert lIdx hold hnew (.fstType ti) hparFst
+      let hparSnd :
+          Witness.isNeutral (.sndType ti) = true → (hold = true ∨ hnew = true) →
+            ParentsCertified c₁.cert (.sndType ti) :=
+        fun _ hfire =>
+          ParentsCertified.of_certifiedDiscoverDual σ cert lIdx hold hnew
+            (.fstType ti) hparFst (.sndType ti)
+            (ParentsCertified_sndType_of_neutral cert ti hfire)
+      let c₂ := certifiedDiscoverDual c₁.state c₁.cert rIdx hold hnew (.sndType ti) hparSnd
+      if !c.simplyDeducible then
+        if (c₂.state.getCell lIdx).simplyDeducible &&
+            (c₂.state.getCell rIdx).simplyDeducible then
+          certifiedDiscoverDual c₂.state c₂.cert ti
+            ((c₂.state.getCell lIdx).oldDeducible &&
+              (c₂.state.getCell rIdx).oldDeducible)
+            ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
+            .eta
+            (fun hNeu => by simp [Witness.isNeutral] at hNeu)
+        else
+          c₂
+      else
+        c₂
+  | _, _ => ⟨σ, cert⟩
+
 /-! ## Status
 
 **Landed without `sorry`:** assign-once, parents, lex demos, `ParentsCertified` /
 `freshRank` / `lt_freshRank`, generic `extend` (occupied / fresh intro / fresh
 neutral), `ofSameSlots`, rank persistence + parent mono under extend,
-`certifiedDiscover` / `certifiedDiscoverDual` / `certifiedMarkHyp` with
-computational projections.
+`certifiedDiscover` / `certifiedDiscoverDual` / `certifiedMarkHyp`,
+`certifiedUnitEtaRule` / `certifiedSeedHypRule` / `certifiedHypProdRule` /
+`certifiedHypAppRule` / `certifiedHypRule` with computational projections,
+`ParentsCertified_fstType/sndType/appTy_of_neutral`, `cellParents` aligned to
+reconstruction (`app` → `[]`, `appTy` → `[fnIdx]`).
 
-**Open:** sweep fold → `certifiedRunReachability`; WF reconstruction →
+**Open:** `certifiedProdTypeRule_project` + remaining type rules →
+`certifiedReachStep` / `certifiedRunReachability`; WF reconstruction →
 `ReconstructTotalityPackage`.
 
 **Stop condition:** never invent ranks for missing parents — require

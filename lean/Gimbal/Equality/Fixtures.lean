@@ -271,6 +271,154 @@ example : isSimplyDeducible prodState (.base 0) = true := by
 example : isSimplyDeducible prodState (.base 1) = true := by
   native_decide
 
+private abbrev Sig2 : Signature := ⟨2, #[]⟩
+private abbrev Sig1 : Signature := ⟨1, #[]⟩
+
+/-! ### Split product projections (hyp vs type) and η tightening -/
+
+/-- Hyp-product elimination records `fstHyp` / `sndHyp` (no cell parent). -/
+def prodHypWitnessesAreHyp : Bool :=
+  match prodState.findTypeIdx (.base 0), prodState.findTypeIdx (.base 1) with
+  | some l, some r =>
+    (match (prodState.getCell l).witness with
+     | some (.fstHyp 0) => true
+     | _ => false) &&
+      (match (prodState.getCell r).witness with
+       | some (.sndHyp 0) => true
+       | _ => false)
+  | _, _ => false
+
+example : prodHypWitnessesAreHyp = true := by native_decide
+
+/-- Hyp projections reconstruct from the context variable alone. -/
+def prodHypReconstructOk : Bool :=
+  let hyps := prodCtx.hyps
+  match prodState.findTypeIdx (.base 0), prodState.findTypeIdx (.base 1) with
+  | some l, some r =>
+    (match (prodState.getCell l).witness with
+     | some w =>
+       match reconstructWitness (sig := Sig2) 64 prodState hyps w with
+       | some ⟨A, _⟩ => A == .base 0
+       | none => false
+     | none => false) &&
+      (match (prodState.getCell r).witness with
+       | some w =>
+         match reconstructWitness (sig := Sig2) 64 prodState hyps w with
+         | some ⟨A, _⟩ => A == .base 1
+         | none => false
+       | none => false)
+  | _, _ => false
+
+example : prodHypReconstructOk = true := by native_decide
+
+/-- Computed neutral product (`f : 1 → X × Y`) projects via `fstType` / `sndType`. -/
+def neuProdCtx : ReachCtx 2 where
+  hyps := #[.exp (.unit) (.prod (.base 0) (.base 1))]
+  newFrom := 0
+
+def neuProdState : ReachState 2 :=
+  runReachability neuProdCtx (.base 0)
+
+def neuProdWitnessesAreType : Bool :=
+  let σ := neuProdState
+  match σ.findTypeIdx (.base 0), σ.findTypeIdx (.base 1),
+      σ.findTypeIdx (.prod (.base 0) (.base 1)) with
+  | some l, some r, some p =>
+    ((σ.getCell p).oldNeutral || (σ.getCell p).newNeutral) &&
+      (match (σ.getCell l).witness with
+       | some (.fstType p') => p' == p
+       | _ => false) &&
+      (match (σ.getCell r).witness with
+       | some (.sndType p') => p' == p
+       | _ => false)
+  | _, _, _ => false
+
+example : neuProdWitnessesAreType = true := by native_decide
+
+/-- Type projections reconstruct by recursing to the parent product neutral. -/
+def neuProdReconstructOk : Bool :=
+  let σ := neuProdState
+  let hyps := neuProdCtx.hyps
+  match σ.findTypeIdx (.base 0) with
+  | some l =>
+    match (σ.getCell l).witness with
+    | some (.fstType p) =>
+      (match σ.typeAt p with
+       | some (.prod _ _) => true
+       | _ => false) &&
+        (match reconstructWitness (sig := Sig2) 64 σ hyps (.fstType p) with
+         | some ⟨A, _⟩ => A == .base 0
+         | none => false)
+    | _ => false
+  | none => false
+
+example : neuProdReconstructOk = true := by native_decide
+
+/-- η-only product: components from context, never `fstType` / `sndType`. -/
+def etaOnlyProdCtx : ReachCtx 2 where
+  hyps := #[.base 0, .base 1]
+  newFrom := 0
+
+def etaOnlyProdState : ReachState 2 :=
+  runReachability etaOnlyProdCtx (.prod (.base 0) (.base 1))
+
+def etaOnlyNoTypeProjection : Bool :=
+  let σ := etaOnlyProdState
+  match σ.findTypeIdx (.prod (.base 0) (.base 1)),
+      σ.findTypeIdx (.base 0), σ.findTypeIdx (.base 1) with
+  | some p, some l, some r =>
+    let pc := σ.getCell p
+    let isEta :=
+      (match pc.oldWitness with | some .eta => true | _ => false) ||
+        (match pc.newWitness with | some .eta => true | _ => false)
+    let noTypeProj (c : ReachCell) : Bool :=
+      (match c.oldWitness with
+       | some (.fstType _) | some (.sndType _) => false
+       | _ => true) &&
+        (match c.newWitness with
+         | some (.fstType _) | some (.sndType _) => false
+         | _ => true)
+    isEta && !pc.oldNeutral && !pc.newNeutral &&
+      noTypeProj (σ.getCell l) && noTypeProj (σ.getCell r)
+  | _, _, _ => false
+
+example : etaOnlyNoTypeProjection = true := by native_decide
+
+/--
+Mixed provenance: old-neutral product from `f : 1 → X × Y`, plus new hyp
+bindings for the components. Projections occupy the **neutral** slot only;
+the uses-new component slots stay `ctxVar`, not fabricated `fstType`/`sndType`.
+-/
+def mixedNeuEtaCtx : ReachCtx 2 where
+  hyps := #[
+    .exp (.unit) (.prod (.base 0) (.base 1)),
+    .base 0,
+    .base 1
+  ]
+  newFrom := 1
+
+def mixedNeuEtaState : ReachState 2 :=
+  runReachability mixedNeuEtaCtx (.base 0)
+
+def mixedNeuEtaNoFabricatedNewProj : Bool :=
+  let σ := mixedNeuEtaState
+  match σ.findTypeIdx (.prod (.base 0) (.base 1)),
+      σ.findTypeIdx (.base 0), σ.findTypeIdx (.base 1) with
+  | some p, some l, some r =>
+    let pc := σ.getCell p
+    let lc := σ.getCell l
+    let rc := σ.getCell r
+    -- Product carries an old neutral; projections may fill old component slots.
+    pc.oldNeutral &&
+      (match lc.oldWitness with | some (.fstType p') => p' == p | _ => false) &&
+      (match rc.oldWitness with | some (.sndType p') => p' == p | _ => false) &&
+      -- New slots are not type-projections (no η-fabricated neutrals).
+      (match lc.newWitness with | some (.fstType _) | some (.sndType _) => false | _ => true) &&
+      (match rc.newWitness with | some (.fstType _) | some (.sndType _) => false | _ => true)
+  | _, _, _ => false
+
+example : mixedNeuEtaNoFabricatedNewProj = true := by native_decide
+
 /-- Old-only deduction: `Y` reachable without `Γnew` is not scheduled. -/
 def oldOnlyCtx : ReachCtx 2 where
   hyps := #[
@@ -300,9 +448,6 @@ def satUnitEraseOk : Bool :=
 example : satUnitEraseOk = true := by native_decide
 
 /-! ### Schedule application -/
-
-private abbrev Sig2 : Signature := ⟨2, #[]⟩
-private abbrev Sig1 : Signature := ⟨1, #[]⟩
 
 /-- Apply the appCtx schedule: `Y` becomes an observation via `s x`. -/
 def applyAppScheduleIsLetPos : Bool :=
