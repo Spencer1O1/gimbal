@@ -56,6 +56,7 @@ import Gimbal.Equality.ICCTotal
 import Gimbal.Equality.ICCReadyCert
 import Gimbal.Equality.ICCEncodeIx
 import Gimbal.Equality.ICCEncodeSchedule
+import Gimbal.Equality.ICCEncodeScheduleIx
 import Gimbal.Equality.ICCHofRetain
 import Gimbal.Equality.ICCRetain
 import Gimbal.Equality.ICCReflect
