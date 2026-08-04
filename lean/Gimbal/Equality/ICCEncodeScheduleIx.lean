@@ -10,8 +10,13 @@
   `leftNever`). `certifiedScheduleIx_exactCoprod_of_moveStableSummands` keeps the
   `WorklistMoveStableOnly` specialization (stable/atomic summand heads only).
 
+  Never / inconsistent / consistency resolution land here: exact-never abort,
+  top-level inconsistent delegation, and witness → `IxExactEntry` → existing
+  exact clauses (no duplicated atom/coprod/never production).
+
   Does **not** replace legacy `PairEntry`, delete `CertifiedSchedule`, or
-  change `applyObsNeu` / comparator. Consistency witnesses deferred.
+  change `applyObsNeu` / comparator. Full reachability adapter / EncodeTotal
+  deferred.
 -/
 
 import Gimbal.Equality.ICCEncodeIx
@@ -850,6 +855,145 @@ def certifiedScheduleIx_exactCoprod
   let right := certifiedForcedInvert_get (retainedSplitRIx L R s) hwfR leafR hinvR
   ⟨hb, retainedCoprodObsCertified s nSum hb hfr left right⟩
 
+/-! ## Exact never + inconsistent + consistency resolution -/
+
+/--
+Exact never clause: consume `NegNeu Γ .never`, produce canonical `.abort`.
+Matches `applyObsNeu`'s never arm — `rest` is not consumed (irrelevant once
+inconsistency is observed). Readiness/encoding via `retainedNeverObsCertified`
+(`EncodeReady.abortFocus`).
+-/
+def certifiedScheduleIx_exactNever {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hfr : forcedRule (sig := sig) s.ws A = .focus)
+    (nNever : NegNeu Γ .never)
+    (rest : IxExactSchedule Γ) :
+    CertifiedScheduleIx s (⟨.never, nNever⟩ :: rest) A :=
+  let hb : AtSaturationBoundary s := atSaturationBoundary_of_forcedRule_focus s hfr
+  -- `rest` intentionally unused: abort discards remaining schedule entries.
+  let _ := rest
+  ⟨hb, retainedNeverObsCertified s nNever hb hfr⟩
+
+/--
+Top-level inconsistent path: a never-typed neutral (e.g. from `neuOfType`)
+delegates to the same certified exact-never core. Schedule `entries` are ignored,
+matching `applyPairObs` / `applyFixedSchedule` when `σ.inconsistent`.
+-/
+def certifiedScheduleIx_inconsistent {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hfr : forcedRule (sig := sig) s.ws A = .focus)
+    (nNever : NegNeu Γ .never)
+    (entries : IxExactSchedule Γ) :
+    CertifiedScheduleIx s entries A :=
+  let hb : AtSaturationBoundary s := atSaturationBoundary_of_forcedRule_focus s hfr
+  let _ := entries
+  ⟨hb, retainedNeverObsCertified s nNever hb hfr⟩
+
+/--
+Resolve a consistency witness to an `IxExactEntry` when reconstruction succeeds.
+No readiness or encodability premise. Returns `none` when reconstruction fails
+or the recovered type mismatches `P` — totality is **not** assumed (8D).
+-/
+def ixExactEntry_of_consistencyWitness (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases) (w : Witness) :
+    Option (IxExactEntry (Ctx.ofHyps (sig := sig) hyps)) :=
+  match reconstructWitness fuel σ hyps w with
+  | some ⟨P', n⟩ =>
+      if hP : P' = P then
+        some ⟨P, hP ▸ n⟩
+      else
+        none
+  | none => none
+
+/--
+Conditional correctness: successful reconstruction yields a well-phased neutral
+of type `P`. Does not prove reconstruction always succeeds.
+-/
+theorem ixExactEntry_of_consistencyWitness_correct (fuel : Nat)
+    (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (P : Object sig.nBases) (w : Witness)
+    {e : IxExactEntry (Ctx.ofHyps (sig := sig) hyps)}
+    (h : ixExactEntry_of_consistencyWitness (sig := sig) fuel σ hyps P w = some e) :
+    e.P = P ∧ WellNeg e.neu := by
+  simp only [ixExactEntry_of_consistencyWitness] at h
+  split at h
+  · next P' n hrec =>
+      split at h
+      · next hP =>
+          cases h
+          subst hP
+          exact ⟨rfl, wellNeg_reconstructWitness fuel σ hyps w hrec⟩
+      · cases h
+  · cases h
+
+/--
+8D obligation (open): reconstruction of a consistency witness always succeeds
+with the declared type. Not assumed by the retained schedule core.
+-/
+def ReconstructWitnessTotal (sig : Signature) : Prop :=
+  ∀ (fuel : Nat) (σ : ReachState sig.nBases)
+    (hyps : Array (Object sig.nBases)) (P : Object sig.nBases) (w : Witness),
+    ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) hyps) P),
+      reconstructWitness fuel σ hyps w = some ⟨P, n⟩
+
+/--
+Consistency → exact never: after successful witness reconstruction to `.never`,
+delegate to `certifiedScheduleIx_exactNever` (no duplicated abort production).
+-/
+def certifiedScheduleIx_consistencyNever {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hfr : forcedRule (sig := sig) s.ws A = .focus)
+    (nNever : NegNeu Γ .never)
+    (rest : IxExactSchedule Γ) :
+    CertifiedScheduleIx s (⟨.never, nNever⟩ :: rest) A :=
+  certifiedScheduleIx_exactNever s hfr nNever rest
+
+/--
+Consistency → exact atom: after successful witness reconstruction to `.base b`,
+delegate to `certifiedScheduleIx_exactAtom` (no duplicated letPos production).
+-/
+def certifiedScheduleIx_consistencyAtom {Γ : Ctx sig} {b : Fin sig.nBases}
+    {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hfr : forcedRule (sig := sig) s.ws A = .focus)
+    (nP : NegNeu Γ (.base b))
+    (rest : IxExactSchedule Γ)
+    (rec : CertifiedScheduleIx (afterIxAtom b s) (mapIxRestAtom b nP rest) A) :
+    CertifiedScheduleIx s (⟨.base b, nP⟩ :: rest) A :=
+  certifiedScheduleIx_exactAtom s hfr nP rest rec
+
+/--
+Consistency → exact coproduct: after successful witness reconstruction to
+`.coprod L R`, delegate to `certifiedScheduleIx_exactCoprod`.
+-/
+def certifiedScheduleIx_consistencyCoprod {Γ : Ctx sig}
+    {L R A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (hfr : forcedRule (sig := sig) s.ws A = .focus)
+    (nSum : NegNeu Γ (.coprod L R))
+    (rest : IxExactSchedule Γ)
+    (hwsL : (retainedSplitLIx L R s).ws =
+      [{ origin := .split (obsEntryOf s (.coprod L R)).origin false, ty := L }])
+    (hwsR : (retainedSplitRIx L R s).ws =
+      [{ origin := .split (obsEntryOf s (.coprod L R)).origin true, ty := R }])
+    (hwfL : EncodeIx.WellFormed (retainedSplitLIx L R s))
+    (hwfR : EncodeIx.WellFormed (retainedSplitRIx L R s))
+    (recL : CertifiedScheduleIx (afterIxCoprodL L R s)
+      (mapIxRestCoprodL L R nSum rest) A)
+    (recR : CertifiedScheduleIx (afterIxCoprodR L R s)
+      (mapIxRestCoprodR L R nSum rest) A)
+    (hinvL :
+      (certifiedForcedInvert (retainedSplitLIx L R s) hwfL
+        (Produced.castState (emptyWsEncode_eq_afterIxCoprodL s hwsL).symm
+          recL.produced)).isSome = true)
+    (hinvR :
+      (certifiedForcedInvert (retainedSplitRIx L R s) hwfR
+        (Produced.castState (emptyWsEncode_eq_afterIxCoprodR s hwsR).symm
+          recR.produced)).isSome = true) :
+    CertifiedScheduleIx s (⟨.coprod L R, nSum⟩ :: rest) A :=
+  certifiedScheduleIx_exactCoprod s hfr nSum rest hwsL hwsR hwfL hwfR
+    recL recR hinvL hinvR
+
 def TwoObsIxSig : Signature where
   nBases := 1
   generators := #[]
@@ -1397,22 +1541,436 @@ def nestedSchedIx :
 def nestedSchedProduced : Produced nestedSchedEntry NestedP :=
   nestedSchedIx.produced
 
+/-! ## Never / inconsistency / consistency fixtures -/
+
+/-- Signature for exact-never and inconsistent fixtures. -/
+def NeverIxSig : Signature where
+  nBases := 1
+  generators := #[]
+
+private abbrev NeverIxGoal : Object NeverIxSig.nBases := .base ⟨0, by decide⟩
+
+/--
+`f : 1 → 0` is negative, so `EncodeIx.entry` is already a saturation boundary.
+Never is observed as `f ()`, not as a worklist hyp.
+-/
+def neverIxHyps : Array (Object NeverIxSig.nBases) :=
+  #[.exp (.unit : Object NeverIxSig.nBases) .never]
+
+def neverIxΓ : Ctx NeverIxSig := Ctx.ofHyps (sig := NeverIxSig) neverIxHyps
+
+def neverIxEntry : EncodeIx (sig := NeverIxSig) neverIxΓ :=
+  EncodeIx.entry (sig := NeverIxSig) neverIxHyps
+
+theorem neverIxEntry_boundary : AtSaturationBoundary neverIxEntry := by
+  simp only [AtSaturationBoundary, neverIxEntry, EncodeIx.entry, neverIxHyps,
+    OriginEnv.posWorklist, OriginEnv.posCollect]
+  native_decide
+
+theorem neverIx_forcedRule :
+    forcedRule (sig := NeverIxSig) neverIxEntry.ws NeverIxGoal = .focus := by
+  simp only [neverIxEntry_boundary, forcedRule]
+
+/-- Exact never observation: `f () : never`. -/
+def neverIxNeu : NegNeu neverIxΓ .never :=
+  .app (.var .here) (.unit (Γ := neverIxΓ))
+
+/-- Distractor rest (ignored by exact-never abort). -/
+def neverIxRestDistractor : IxExactSchedule neverIxΓ :=
+  [⟨.never, neverIxNeu⟩]
+
+/-- Exact never schedule with a distractor rest entry. -/
+def neverIxSched :
+    CertifiedScheduleIx (sig := NeverIxSig) neverIxEntry
+      (⟨.never, neverIxNeu⟩ :: neverIxRestDistractor) NeverIxGoal :=
+  certifiedScheduleIx_exactNever (sig := NeverIxSig) neverIxEntry
+    neverIx_forcedRule neverIxNeu neverIxRestDistractor
+
+theorem neverIxSched_term :
+    neverIxSched.produced.term = .abort (A := NeverIxGoal) neverIxNeu :=
+  rfl
+
+theorem neverIxSched_encodes :
+    ∃ c, encodeICCGo (encodeFuel neverIxEntry.ws neverIxSched.produced.term)
+        neverIxEntry.ws neverIxEntry.env neverIxEntry.domNext neverIxEntry.obsNext
+        neverIxSched.produced.term = some c :=
+  invCert_encodeGo_some neverIxEntry neverIxSched.produced.term
+    neverIxSched.produced.cert
+
+/-- Reachability hyps that make the state inconsistent (`x : never`). -/
+def neverIxInconsistHyps : Array (Object NeverIxSig.nBases) :=
+  #[(.never : Object NeverIxSig.nBases)]
+
+def neverIxInconsistΓ : Ctx NeverIxSig :=
+  Ctx.ofHyps (sig := NeverIxSig) neverIxInconsistHyps
+
+/--
+Boundary EncodeIx over `x : never` with empty worklist (schedule observes never
+at focus; invertible `leftNever` on the ofHyps worklist is not re-run here).
+-/
+def neverIxInconsistEntry : EncodeIx (sig := NeverIxSig) neverIxInconsistΓ where
+  ws := []
+  env := OriginEnv.ofHyps (sig := NeverIxSig) neverIxInconsistHyps
+  domNext := 0
+  obsNext := 0
+
+theorem neverIxInconsist_forcedRule :
+    forcedRule (sig := NeverIxSig) neverIxInconsistEntry.ws NeverIxGoal = .focus := by
+  simp [forcedRule, neverIxInconsistEntry]
+
+def neverIxReachCtx : ReachCtx NeverIxSig.nBases where
+  hyps := neverIxInconsistHyps
+  newFrom := 0
+
+def neverIxReachState : ReachState NeverIxSig.nBases :=
+  runReachability neverIxReachCtx NeverIxGoal
+
+theorem neverIxReach_inconsistent :
+    neverIxReachState.inconsistent = true := by
+  native_decide
+
+theorem neverIx_neuOfType_some :
+    (neuOfType (sig := NeverIxSig) 32 neverIxReachState neverIxInconsistHyps
+      (.never : Object NeverIxSig.nBases)).isSome = true := by
+  native_decide
+
+def neverIxInconsistentNeu : NegNeu neverIxInconsistΓ .never :=
+  (neuOfType (sig := NeverIxSig) 32 neverIxReachState neverIxInconsistHyps
+    (.never : Object NeverIxSig.nBases)).get neverIx_neuOfType_some
+
+/-- Inconsistent reachability → same exact-never core (entries ignored). -/
+def neverIxInconsistentSched :
+    CertifiedScheduleIx (sig := NeverIxSig) neverIxInconsistEntry
+      ([] : IxExactSchedule neverIxInconsistΓ) NeverIxGoal :=
+  certifiedScheduleIx_inconsistent (sig := NeverIxSig) neverIxInconsistEntry
+    neverIxInconsist_forcedRule neverIxInconsistentNeu []
+
+theorem neverIxInconsistentSched_term :
+    neverIxInconsistentSched.produced.term =
+      .abort (A := NeverIxGoal) neverIxInconsistentNeu :=
+  rfl
+
+/-! ### Consistency → atom -/
+
+def consistAtomIxSig : Signature where
+  nBases := 1
+  generators := #[]
+
+private abbrev ConsistAtom : Object consistAtomIxSig.nBases := .base ⟨0, by decide⟩
+private abbrev consistAtomB : Fin consistAtomIxSig.nBases := ⟨0, by decide⟩
+
+def consistAtomHyps : Array (Object consistAtomIxSig.nBases) := #[ConsistAtom]
+
+def consistAtomΓ : Ctx consistAtomIxSig :=
+  Ctx.ofHyps (sig := consistAtomIxSig) consistAtomHyps
+
+/-- Boundary over `x : Atom` with empty worklist (consistency resolves the hyp). -/
+def consistAtomEntry : EncodeIx (sig := consistAtomIxSig) consistAtomΓ where
+  ws := []
+  env := OriginEnv.ofHyps (sig := consistAtomIxSig) consistAtomHyps
+  domNext := 0
+  obsNext := 0
+
+theorem consistAtom_forcedRule :
+    forcedRule (sig := consistAtomIxSig) consistAtomEntry.ws ConsistAtom = .focus := by
+  simp [forcedRule, consistAtomEntry]
+
+def consistAtomReach : ReachState consistAtomIxSig.nBases :=
+  runReachability ⟨consistAtomHyps, 0⟩ ConsistAtom
+
+theorem consistAtom_resolve_some :
+    (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
+      consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)).isSome = true := by
+  native_decide
+
+def consistAtomEntryResolved : IxExactEntry consistAtomΓ :=
+  (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
+    consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)).get
+    consistAtom_resolve_some
+
+theorem consistAtom_resolve_eq :
+    ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
+      consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0) =
+      some consistAtomEntryResolved :=
+  (Option.some_get consistAtom_resolve_some).symm
+
+theorem consistAtom_resolve_correct :
+    consistAtomEntryResolved.P = ConsistAtom ∧ WellNeg consistAtomEntryResolved.neu :=
+  ixExactEntry_of_consistencyWitness_correct (sig := consistAtomIxSig) 8
+    consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)
+    consistAtom_resolve_eq
+
+/-- Reconstructed atom neutral (definitionally `.var .here` for `ctxVar 0`). -/
+def consistAtomNeu : NegNeu consistAtomΓ ConsistAtom :=
+  .var .here
+
+theorem consistAtomEntryResolved_P :
+    consistAtomEntryResolved.P = ConsistAtom :=
+  consistAtom_resolve_correct.1
+
+def consistAtomAfter : EncodeIx (sig := consistAtomIxSig)
+    (consistAtomΓ ▻ ConsistAtom) :=
+  afterIxAtom consistAtomB consistAtomEntry
+
+theorem consistAtomAfter_boundary :
+    AtSaturationBoundary consistAtomAfter :=
+  afterIxAtom_boundary consistAtomB consistAtomEntry rfl
+
+/-- Leaf under the retained atom binder: return the bound atom. -/
+def consistAtomLeaf : InvTm (consistAtomΓ ▻ ConsistAtom) ConsistAtom :=
+  .foc (.pos (.done (.neu (.var .here))))
+
+theorem consistAtomLeaf_cert : InvCert consistAtomAfter consistAtomLeaf := by
+  change EncodeReady consistAtomAfter.ws consistAtomAfter.env
+    consistAtomAfter.domNext consistAtomAfter.obsNext consistAtomLeaf
+  have hb := consistAtomAfter_boundary
+  rw [show consistAtomAfter.ws = [] from hb]
+  exact EncodeReady.focus (by simp [forcedRule])
+    (.pos (p := .neu (.var .here)))
+
+def consistAtomRec :
+    CertifiedScheduleIx (sig := consistAtomIxSig) consistAtomAfter [] ConsistAtom :=
+  certifiedScheduleIx_nil consistAtomAfter consistAtomAfter_boundary
+    ⟨consistAtomLeaf, consistAtomLeaf_cert⟩
+
+/-- Consistency witness → IxExactEntry → `certifiedScheduleIx_consistencyAtom`. -/
+def consistAtomSched :
+    CertifiedScheduleIx (sig := consistAtomIxSig) consistAtomEntry
+      [⟨ConsistAtom, consistAtomNeu⟩] ConsistAtom :=
+  certifiedScheduleIx_consistencyAtom (sig := consistAtomIxSig) consistAtomEntry
+    consistAtom_forcedRule consistAtomNeu [] consistAtomRec
+
+/-! ### Consistency → coproduct -/
+
+def consistCoprodIxSig : Signature where
+  nBases := 1
+  generators := #[]
+
+private abbrev ConsistCAtom : Object consistCoprodIxSig.nBases := .base ⟨0, by decide⟩
+private abbrev ConsistSum : Object consistCoprodIxSig.nBases :=
+  .coprod ConsistCAtom ConsistCAtom
+
+def consistCoprodHyps : Array (Object consistCoprodIxSig.nBases) := #[ConsistSum]
+
+def consistCoprodΓ : Ctx consistCoprodIxSig :=
+  Ctx.ofHyps (sig := consistCoprodIxSig) consistCoprodHyps
+
+def consistCoprodEntry : EncodeIx (sig := consistCoprodIxSig) consistCoprodΓ where
+  ws := []
+  env := OriginEnv.ofHyps (sig := consistCoprodIxSig) consistCoprodHyps
+  domNext := 0
+  obsNext := 0
+
+theorem consistCoprod_forcedRule :
+    forcedRule (sig := consistCoprodIxSig) consistCoprodEntry.ws ConsistSum = .focus := by
+  simp [forcedRule, consistCoprodEntry]
+
+def consistCoprodReach : ReachState consistCoprodIxSig.nBases :=
+  runReachability ⟨consistCoprodHyps, 0⟩ ConsistSum
+
+theorem consistCoprod_resolve_some :
+    (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
+      consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)).isSome = true := by
+  native_decide
+
+def consistCoprodEntryResolved : IxExactEntry consistCoprodΓ :=
+  (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
+    consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)).get
+    consistCoprod_resolve_some
+
+theorem consistCoprod_resolve_eq :
+    ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
+      consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0) =
+      some consistCoprodEntryResolved :=
+  (Option.some_get consistCoprod_resolve_some).symm
+
+theorem consistCoprod_resolve_correct :
+    consistCoprodEntryResolved.P = ConsistSum ∧ WellNeg consistCoprodEntryResolved.neu :=
+  ixExactEntry_of_consistencyWitness_correct (sig := consistCoprodIxSig) 8
+    consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)
+    consistCoprod_resolve_eq
+
+def consistCoprodNeu : NegNeu consistCoprodΓ ConsistSum := .var .here
+
+theorem consistCoprodEntryResolved_P :
+    consistCoprodEntryResolved.P = ConsistSum :=
+  consistCoprod_resolve_correct.1
+
+def consistCoprodAfterL : EncodeIx (sig := consistCoprodIxSig)
+    (consistCoprodΓ ▻ ConsistSum ▻ ConsistCAtom) :=
+  afterIxCoprodL ConsistCAtom ConsistCAtom consistCoprodEntry
+
+def consistCoprodAfterR : EncodeIx (sig := consistCoprodIxSig)
+    (consistCoprodΓ ▻ ConsistSum ▻ ConsistCAtom) :=
+  afterIxCoprodR ConsistCAtom ConsistCAtom consistCoprodEntry
+
+theorem consistCoprodAfterL_boundary :
+    AtSaturationBoundary consistCoprodAfterL :=
+  afterIxCoprodL_boundary ConsistCAtom ConsistCAtom consistCoprodEntry rfl
+
+theorem consistCoprodAfterR_boundary :
+    AtSaturationBoundary consistCoprodAfterR :=
+  afterIxCoprodR_boundary ConsistCAtom ConsistCAtom consistCoprodEntry rfl
+
+def consistCoprodBranchL :
+    InvTm (consistCoprodΓ ▻ ConsistSum ▻ ConsistCAtom) ConsistSum :=
+  .foc (.pos (.done (.inl (.neu (.var .here)))))
+
+def consistCoprodBranchR :
+    InvTm (consistCoprodΓ ▻ ConsistSum ▻ ConsistCAtom) ConsistSum :=
+  .foc (.pos (.done (.inr (.neu (.var .here)))))
+
+theorem consistCoprodBranchL_cert :
+    InvCert consistCoprodAfterL consistCoprodBranchL := by
+  change EncodeReady consistCoprodAfterL.ws consistCoprodAfterL.env
+    consistCoprodAfterL.domNext consistCoprodAfterL.obsNext consistCoprodBranchL
+  have hb := consistCoprodAfterL_boundary
+  rw [show consistCoprodAfterL.ws = [] from hb]
+  exact EncodeReady.focus (by simp [forcedRule])
+    (.pos (p := .inl (.neu (.var .here))))
+
+theorem consistCoprodBranchR_cert :
+    InvCert consistCoprodAfterR consistCoprodBranchR := by
+  change EncodeReady consistCoprodAfterR.ws consistCoprodAfterR.env
+    consistCoprodAfterR.domNext consistCoprodAfterR.obsNext consistCoprodBranchR
+  have hb := consistCoprodAfterR_boundary
+  rw [show consistCoprodAfterR.ws = [] from hb]
+  exact EncodeReady.focus (by simp [forcedRule])
+    (.pos (p := .inr (.neu (.var .here))))
+
+def consistCoprodRecL :
+    CertifiedScheduleIx (sig := consistCoprodIxSig) consistCoprodAfterL [] ConsistSum :=
+  certifiedScheduleIx_nil consistCoprodAfterL consistCoprodAfterL_boundary
+    ⟨consistCoprodBranchL, consistCoprodBranchL_cert⟩
+
+def consistCoprodRecR :
+    CertifiedScheduleIx (sig := consistCoprodIxSig) consistCoprodAfterR [] ConsistSum :=
+  certifiedScheduleIx_nil consistCoprodAfterR consistCoprodAfterR_boundary
+    ⟨consistCoprodBranchR, consistCoprodBranchR_cert⟩
+
+theorem consistCoprod_splitL_ws :
+    (retainedSplitLIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+      consistCoprodEntry).ws =
+      [{ origin := .split (obsEntryOf consistCoprodEntry ConsistSum).origin false,
+         ty := ConsistCAtom }] := by
+  rw [retainedSplitLIx_ws_of_boundary ConsistCAtom ConsistCAtom consistCoprodEntry rfl]
+  simp [pushPos, ConsistCAtom, objectPolarity, List.mergeSort_singleton]
+
+theorem consistCoprod_splitR_ws :
+    (retainedSplitRIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+      consistCoprodEntry).ws =
+      [{ origin := .split (obsEntryOf consistCoprodEntry ConsistSum).origin true,
+         ty := ConsistCAtom }] := by
+  rw [retainedSplitRIx_ws_of_boundary ConsistCAtom ConsistCAtom consistCoprodEntry rfl]
+  simp [pushPos, ConsistCAtom, objectPolarity, List.mergeSort_singleton]
+
+theorem consistCoprod_splitL_wf :
+    EncodeIx.WellFormed
+      (retainedSplitLIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+        consistCoprodEntry) := by
+  have hentry : EncodeIx.WellFormed consistCoprodEntry :=
+    { env_wf := OriginEnv.ofHyps_wellFormed _
+      env_bounded := by
+        intro A x
+        simp only [consistCoprodEntry, OriginEnv.ofHyps]
+        exact Origin.counterBounded_hyp _ _ _
+      ws_bounded := fun he => by cases he
+      ws_in_env := fun he => by cases he
+      ws_nodup := by simp [consistCoprodEntry]
+      ws_split_fresh := by
+        intro e he side A x hx
+        simp only [consistCoprodEntry] at he
+        cases he
+      split_parent_live := by
+        intro A x p side hx
+        simp only [consistCoprodEntry, OriginEnv.ofHyps] at hx
+        cases hx }
+  have hbind := EncodeIx.WellFormed.bindObs hentry ConsistSum
+  have hpos : objectPolarity (ConsistSum : Object _) = .pos := by
+    simp [ConsistSum, objectPolarity_coprod]
+  have hwsObs :
+      (consistCoprodEntry.bindObs ConsistSum).ws =
+        [obsEntryOf consistCoprodEntry ConsistSum] :=
+    bindObs_ws_of_boundary consistCoprodEntry ConsistSum rfl hpos
+  simpa [retainedSplitLIx, EncodeIx.splitL, hwsObs] using
+    EncodeIx.WellFormed.splitL hbind (obsEntryOf consistCoprodEntry ConsistSum) []
+      ConsistCAtom (by simp [hwsObs])
+
+theorem consistCoprod_splitR_wf :
+    EncodeIx.WellFormed
+      (retainedSplitRIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+        consistCoprodEntry) := by
+  have hentry : EncodeIx.WellFormed consistCoprodEntry :=
+    { env_wf := OriginEnv.ofHyps_wellFormed _
+      env_bounded := by
+        intro A x
+        simp only [consistCoprodEntry, OriginEnv.ofHyps]
+        exact Origin.counterBounded_hyp _ _ _
+      ws_bounded := fun he => by cases he
+      ws_in_env := fun he => by cases he
+      ws_nodup := by simp [consistCoprodEntry]
+      ws_split_fresh := by
+        intro e he side A x hx
+        simp only [consistCoprodEntry] at he
+        cases he
+      split_parent_live := by
+        intro A x p side hx
+        simp only [consistCoprodEntry, OriginEnv.ofHyps] at hx
+        cases hx }
+  have hbind := EncodeIx.WellFormed.bindObs hentry ConsistSum
+  have hpos : objectPolarity (ConsistSum : Object _) = .pos := by
+    simp [ConsistSum, objectPolarity_coprod]
+  have hwsObs :
+      (consistCoprodEntry.bindObs ConsistSum).ws =
+        [obsEntryOf consistCoprodEntry ConsistSum] :=
+    bindObs_ws_of_boundary consistCoprodEntry ConsistSum rfl hpos
+  simpa [retainedSplitRIx, EncodeIx.splitR, hwsObs] using
+    EncodeIx.WellFormed.splitR hbind (obsEntryOf consistCoprodEntry ConsistSum) []
+      ConsistCAtom (by simp [hwsObs])
+
+theorem consistCoprod_invL_isSome :
+    (certifiedForcedInvert
+      (retainedSplitLIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+        consistCoprodEntry)
+      consistCoprod_splitL_wf
+      (Produced.castState
+        (emptyWsEncode_eq_afterIxCoprodL consistCoprodEntry consistCoprod_splitL_ws).symm
+        consistCoprodRecL.produced)).isSome = true := by
+  native_decide
+
+theorem consistCoprod_invR_isSome :
+    (certifiedForcedInvert
+      (retainedSplitRIx (sig := consistCoprodIxSig) ConsistCAtom ConsistCAtom
+        consistCoprodEntry)
+      consistCoprod_splitR_wf
+      (Produced.castState
+        (emptyWsEncode_eq_afterIxCoprodR consistCoprodEntry consistCoprod_splitR_ws).symm
+        consistCoprodRecR.produced)).isSome = true := by
+  native_decide
+
+/-- Consistency witness → IxExactEntry → `certifiedScheduleIx_consistencyCoprod`. -/
+def consistCoprodSched :
+    CertifiedScheduleIx (sig := consistCoprodIxSig) consistCoprodEntry
+      [⟨ConsistSum, consistCoprodNeu⟩] ConsistSum :=
+  certifiedScheduleIx_consistencyCoprod (sig := consistCoprodIxSig)
+    consistCoprodEntry consistCoprod_forcedRule consistCoprodNeu []
+    consistCoprod_splitL_ws consistCoprod_splitR_ws
+    consistCoprod_splitL_wf consistCoprod_splitR_wf
+    consistCoprodRecL consistCoprodRecR
+    consistCoprod_invL_isSome consistCoprod_invR_isSome
+
 /-!
-### Status — forced inversion + nested fixtures
+### Status — forced inversion + nested fixtures + never/consistency
 
 **Landed:**
-* `certifiedForcedInvert` — peel-based, goal-polymorphic (`moveStable` /
-  `leftNever` / `leftCoprod` via `produced_emptyWs_split*` +
-  `invCert_leftCoprod_peel`)
-* `produced_emptyWs_splitL/R` — full `produced_of_embedding` transport
-* `certifiedScheduleIx_exactCoprod` drains summands via `certifiedForcedInvert`
-* `certifiedScheduleIx_exactCoprod_of_moveStableSummands` kept (TwoObs regression)
-* Nested unit fixture + non-unit `NestedA` invert (`nestedIxNonUnitProduced`)
-* Nested-summand schedule (`nestedSchedIx`) observing `(A+B)+C`
+* `certifiedForcedInvert` — peel-based, goal-polymorphic
+* `certifiedScheduleIx_exactCoprod` / nested fixtures
+* `certifiedScheduleIx_exactNever` / `certifiedScheduleIx_inconsistent`
+* Consistency resolution: `ixExactEntry_of_consistencyWitness` →
+  `certifiedScheduleIx_consistency{Never,Atom,Coprod}` (delegates only)
+* Reconstruction totality left open as `ReconstructWitnessTotal` (8D)
 
-**Cleanup A:** legacy `CertifiedSchedule` / `ICCReadyCert` deleted; EncodeIx
-imports `ICCEncodeReady` (not `ICCTotal`) for helpers such as
-`encodeReady_abort_leftNever`. Consistency / public evaluator still deferred.
+**Deferred:** full reachability adapter / EncodeTotal / Cleanup B.
 -/
 
 end Equality

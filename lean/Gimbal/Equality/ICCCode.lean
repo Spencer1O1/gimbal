@@ -1048,6 +1048,9 @@ def encodeICCGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
       | .focus =>
           match t with
           | .foc f => encodeFocGo fuel ws ε domNest obsSlot f
+          -- Schedule / inconsistent never: abort at the saturation boundary
+          -- (empty worklist). Keyed by the next obs slot without allocating.
+          | .abort _ => some (.abort (.obs (sig := sig) obsSlot))
           | _ => none
 
 def encodeFocGo (fuel : Nat) {Γ : Ctx sig} (ws : List (PosEntry sig))
@@ -1243,6 +1246,13 @@ inductive EncodeReady : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
       {_ε : OriginEnv Γ} {_domNest _obsSlot : Nat} {n : NegNeu Γ .never}
       (hty : e.ty = .never) :
       EncodeReady (e :: _ws) _ε _domNest _obsSlot (.abort (A := A) n)
+  /-- Saturation-boundary never observation (`applyObsNeu` never arm): abort
+  under `focus` with an empty invertible worklist. Remaining schedule entries
+  are irrelevant once inconsistency is observed. -/
+  | abortFocus {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {n : NegNeu Γ .never}
+      (hfr : forcedRule ws A = .focus) :
+      EncodeReady ws ε domNest obsSlot (.abort (A := A) n)
   | rightUnit {Γ} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
       {domNest obsSlot : Nat}
       (hfr : forcedRule ws (.unit : Object sig.nBases) = .rightUnit) :
@@ -1350,6 +1360,10 @@ inductive EncodeReadyNoPeel : ∀ {Γ : Ctx sig} (ws : List (PosEntry sig))
       {_ε : OriginEnv Γ} {_domNest _obsSlot : Nat} {n : NegNeu Γ .never}
       (hty : e.ty = .never) :
       EncodeReadyNoPeel (e :: _ws) _ε _domNest _obsSlot (.abort (A := A) n)
+  | abortFocus {Γ A} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
+      {domNest obsSlot : Nat} {n : NegNeu Γ .never}
+      (hfr : forcedRule ws A = .focus) :
+      EncodeReadyNoPeel ws ε domNest obsSlot (.abort (A := A) n)
   | rightUnit {Γ} {ws : List (PosEntry sig)} {ε : OriginEnv Γ}
       {domNest obsSlot : Nat}
       (hfr : forcedRule ws (.unit : Object sig.nBases) = .rightUnit) :
@@ -1416,9 +1430,10 @@ theorem encodeReady_of_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
   refine EncodeReadyNoPeel.rec
     (motive_1 := fun {Γ} ws ε d o {A} t _ => EncodeReady ws ε d o t)
     (motive_2 := fun {Γ} ws ε d o {A} f _ => EncodeReadyFoc ws ε d o f)
-    ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
+    ?ms ?ln ?af ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
   case ms => intros; exact .moveStable ‹_› ‹_›
   case ln => intros; exact .leftNever ‹_›
+  case af => intros; exact .abortFocus ‹_›
   case ru => intros; exact .rightUnit ‹_›
   case rp => intros; exact .rightProd_pair ‹_› ‹_› ‹_›
   case rpf => intros; exact .rightProd_foc ‹_› ‹_›
@@ -1439,9 +1454,10 @@ theorem encodeReadyFoc_of_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
   refine EncodeReadyFocNoPeel.rec
     (motive_1 := fun {Γ} ws ε d o {A} t _ => EncodeReady ws ε d o t)
     (motive_2 := fun {Γ} ws ε d o {A} f _ => EncodeReadyFoc ws ε d o f)
-    ?ms ?ln ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
+    ?ms ?ln ?af ?ru ?rp ?rpf ?re ?ref ?fo ?pos ?neg ?lp ?sat
   case ms => intros; exact .moveStable ‹_› ‹_›
   case ln => intros; exact .leftNever ‹_›
+  case af => intros; exact .abortFocus ‹_›
   case ru => intros; exact .rightUnit ‹_›
   case rp => intros; exact .rightProd_pair ‹_› ‹_› ‹_›
   case rpf => intros; exact .rightProd_foc ‹_› ‹_›

@@ -82,6 +82,14 @@ theorem encodeICCGo_leftNever_abort {Γ : Ctx sig} {A : Object sig.nBases}
       some (.abort e.origin) := by
   simp [encodeICCGo, hforce]
 
+theorem encodeICCGo_abort_focus {Γ : Ctx sig} {A : Object sig.nBases}
+    (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
+    (domNest obsSlot : Nat) (n : NegNeu Γ .never)
+    (hforce : forcedRule ws A = .focus) :
+    encodeICCGo (fuel + 1) ws ε domNest obsSlot (.abort (A := A) n) =
+      some (.abort (.obs (sig := sig) obsSlot)) := by
+  simp [encodeICCGo, hforce]
+
 theorem encodeICCGo_rightUnit_unit {Γ : Ctx sig}
     (fuel : Nat) (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
     (domNest obsSlot : Nat)
@@ -376,11 +384,14 @@ theorem encode_successful_fuel_mono (fuel₁ : Nat) :
                     rw [encodeICCGo_focus_eq fuel₁ ws ε domNest obsSlot f hfr] at h
                     rw [encodeICCGo_focus_eq fuel₂ ws ε domNest obsSlot f hfr]
                     exact ihFoc fuel₂ ws ε domNest obsSlot f c hle' h
+                | abort n =>
+                    rw [encodeICCGo_abort_focus fuel₁ ws ε domNest obsSlot n hfr] at h
+                    rw [encodeICCGo_abort_focus fuel₂ ws ε domNest obsSlot n hfr]
+                    exact h
                 | unit => simp [encodeICCGo, hfr] at h
                 | pair _ _ => simp [encodeICCGo, hfr] at h
                 | lam _ => simp [encodeICCGo, hfr] at h
                 | case _ _ _ => simp [encodeICCGo, hfr] at h
-                | abort _ => simp [encodeICCGo, hfr] at h
       have focMono :
           ∀ {Γ : Ctx sig} {A : Object sig.nBases} (fuel₂ : Nat)
             (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
@@ -784,11 +795,13 @@ theorem encode_step_irrelevance (n : Nat) :
                 rw [encodeICCGo_focus_eq (n+1) ws ε domNest obsSlot f hfr,
                   encodeICCGo_focus_eq n ws ε domNest obsSlot f hfr]
                 exact ihFoc ws ε domNest obsSlot f hFoc
+            | abort n' =>
+                rw [encodeICCGo_abort_focus (n+1) ws ε domNest obsSlot n' hfr,
+                  encodeICCGo_abort_focus n ws ε domNest obsSlot n' hfr]
             | unit => unfold encodeICCGo; simp only [hfr]
             | pair _ _ => unfold encodeICCGo; simp only [hfr]
             | lam _ => unfold encodeICCGo; simp only [hfr]
             | case _ _ _ => unfold encodeICCGo; simp only [hfr]
-            | abort _ => unfold encodeICCGo; simp only [hfr]
       have foc : ∀ {Γ : Ctx sig} {A : Object sig.nBases}
           (ws : List (PosEntry sig)) (ε : OriginEnv Γ)
           (domNest obsSlot : Nat) (f : FocTm Γ A),
@@ -1157,7 +1170,7 @@ theorem encodeReady_go_some {Γ : Ctx sig} {A : Object sig.nBases}
       ∃ c, encodeICCGo (encodeFuel ws t) ws ε domNest obsSlot t = some c)
     (motive_2 := fun {Γ} ws ε domNest obsSlot {A} f _ =>
       ∃ c, encodeFocGo (encodeFuelFoc ws f + 1) ws ε domNest obsSlot f = some c)
-    ?moveStable ?leftNever ?rightUnit ?rightProd_pair ?rightProd_foc
+    ?moveStable ?leftNever ?abortFocus ?rightUnit ?rightProd_pair ?rightProd_foc
     ?rightExp_lam ?rightExp_foc ?leftCoprod_peel ?leftCoprod_unitEta ?focus
     ?pos ?neg ?letPos ?sat
   case moveStable =>
@@ -1179,6 +1192,13 @@ theorem encodeReady_go_some {Γ : Ctx sig} {A : Object sig.nBases}
     refine ⟨.abort e.origin, ?_⟩
     simp only [hm]
     exact encodeICCGo_abort_leftNever fuel e ws ε domNest obsSlot n hty
+  case abortFocus =>
+    intro Γ A ws ε domNest obsSlot n hfr
+    have hpos := encodeFuel_pos ws (.abort (A := A) n)
+    obtain ⟨fuel, hm⟩ := Nat.exists_eq_succ_of_ne_zero (Nat.pos_iff_ne_zero.mp hpos)
+    refine ⟨.abort (.obs (sig := sig) obsSlot), ?_⟩
+    simp only [hm]
+    exact encodeICCGo_abort_focus fuel ws ε domNest obsSlot n hfr
   case rightUnit =>
     intro Γ ws ε domNest obsSlot hfr
     have hpos := encodeFuel_pos ws (.unit (Γ := Γ))
@@ -1384,6 +1404,12 @@ theorem encodeReady_abort_leftNever {Γ : Ctx sig} {A : Object sig.nBases}
     (domNest obsSlot : Nat) (n : NegNeu Γ .never) (hty : e.ty = .never) :
     EncodeReady (e :: ws) ε domNest obsSlot (.abort (A := A) n) :=
   .leftNever hty
+
+theorem encodeReady_abort_focus {Γ : Ctx sig} {A : Object sig.nBases}
+    (ε : OriginEnv Γ) (ws : List (PosEntry sig)) (domNest obsSlot : Nat)
+    (n : NegNeu Γ .never) (hfr : forcedRule ws A = .focus) :
+    EncodeReady ws ε domNest obsSlot (.abort (A := A) n) :=
+  .abortFocus hfr
 
 theorem encodeReady_foc_pos_nil {Γ : Ctx sig} {A : Object sig.nBases}
     (ε : OriginEnv Γ) (domNest obsSlot : Nat) (p : PosNeu Γ A)

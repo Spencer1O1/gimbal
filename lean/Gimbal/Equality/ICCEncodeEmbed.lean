@@ -260,6 +260,8 @@ private theorem encodeReady_of_embedding_aux {Γ : Ctx sig} {A : Object sig.nBas
         .moveStable hfr (ih ρ ε' hswf' htwf' hε hρ))
       (fun {Γ} A e _ws _ε _d _o n hty {_Δ} ρ _ε' _hswf _htwf _hε _hρ =>
         .leftNever (n := NegNeu.rename ρ n) hty)
+      (fun {Γ} A ws _ε _d _o n hfr {_Δ} ρ ε' _hswf _htwf _hε _hρ =>
+        .abortFocus (n := NegNeu.rename ρ n) (ε := ε') hfr)
       (fun {Γ} ws _ε d o hfr {_Δ} ρ ε' _hswf _htwf _hε _hρ =>
         by simpa [InvTm.rename] using EncodeReady.rightUnit (ε := ε') hfr)
       (fun {Γ} L R ws ε d o t u hfr _ _ iht ihu {_Δ} ρ ε' hswf htwf hε hρ =>
@@ -405,6 +407,8 @@ theorem encodeReadyNoPeel_of_embedding {Γ Δ : Ctx sig} {A : Object sig.nBases}
         .moveStable hfr (ih ρ ε' hε))
       (fun {Γ} A e _ws _ε _d _o n hty {_Δ} ρ _ε' _hε =>
         .leftNever (n := NegNeu.rename ρ n) hty)
+      (fun {Γ} A ws _ε _d _o n hfr {_Δ} ρ ε' _hε =>
+        .abortFocus (n := NegNeu.rename ρ n) (ε := ε') hfr)
       (fun {Γ} ws _ε d o hfr {_Δ} ρ ε' _hε =>
         by simpa [InvTm.rename] using EncodeReadyNoPeel.rightUnit (ε := ε') hfr)
       (fun {Γ} L R ws ε d o t u hfr _ _ iht ihu {_Δ} ρ ε' hε =>

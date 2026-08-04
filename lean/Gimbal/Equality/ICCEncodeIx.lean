@@ -914,6 +914,22 @@ theorem retainedCoprodObsCertified_erase {Γ : Ctx sig} {L R X : Object sig.nBas
   exact erase_retained_coprod_obs n uL uR
 
 /--
+Retained never observation at the saturation boundary: canonical `.abort`,
+matching `applyObsNeu`'s never arm. Does not bind an observation or recurse on
+a continuation — remaining schedule entries are irrelevant.
+-/
+def retainedNeverObsCertified {Γ : Ctx sig} {X : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ)
+    (n : NegNeu Γ .never)
+    (_hbound : AtSaturationBoundary s)
+    (hfr : forcedRule (sig := sig) s.ws X = .focus) :
+    Produced s X where
+  term := .abort n
+  cert := by
+    change EncodeReady s.ws s.env s.domNext s.obsNext (.abort (A := X) n)
+    exact encodeReady_abort_focus s.env s.ws s.domNext s.obsNext n hfr
+
+/--
 Retained atomic observation at the saturation boundary: `letPos` then
 `moveStable` restores the boundary for a nested continuation.
 -/
