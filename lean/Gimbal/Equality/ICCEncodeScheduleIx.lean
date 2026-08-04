@@ -17,6 +17,7 @@
 -/
 
 import Gimbal.Equality.ICCEncodeIx
+import Gimbal.Equality.ICCEncodeEmbed
 import Gimbal.Equality.Saturation
 
 namespace Gimbal
@@ -242,13 +243,13 @@ Separate from schedule recursion: mirrors `forcedRule`, decreases
   (`leftCoprod_unitEta` for goal `.unit`; `encodeReady_case_var_leftCoprod`
   when a general leaf transports).
 
-**STOP (non-unit `leftCoprod` leaf transport):** the measure decreases on
-`splitL`/`splitR` (`worklistWeight`), so no fuel is needed. What is missing is
-a generic
-`Produced (emptyWsEncode s) A → Produced (emptyWsEncode (splitEncode …)) A`
-(unused-binder weaken of arbitrary empty-worklist readiness). Until that lemma
-exists, `certifiedForcedInvert` requires that any coproduct worklist head implies
-goal `.unit` (branch leaves are then `.unit` by `rightUnit`, no transport).
+**STOP (non-unit `leftCoprod` leaf transport):** measure decreases on
+`splitL`/`splitR` (`worklistWeight`). `EncodeIxEmbedding` + peel-free
+`Produced` transport land in `ICCEncodeEmbed` (λ / `letPos` exercises OK;
+`letPos` is **not** blocked — counters agree). Remaining law for arbitrary
+leaves: `peelCaseOuter` / `find?` naturality under rename. Until that lifts
+`encodeReadyNoPeel_of_embedding` to full `EncodeReady`, non-unit nested
+`leftCoprod` forced inversion stays on the unit-η path.
 -/
 
 /-- EncodeIx with the same env/counters as `s` but an empty worklist. -/
@@ -295,6 +296,50 @@ def splitEncodeR {Γ : Ctx sig} (s : EncodeIx (sig := sig) Γ)
   env := OriginEnv.weaken (A := R) s.env (.split e.origin true)
   domNext := s.domNext
   obsNext := s.obsNext
+
+/-- Unused-binder embedding: `emptyWsEncode s → emptyWsEncode (splitEncodeL …)`. -/
+theorem encodeIxEmbedding_emptyWs_splitL {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    EncodeIxEmbedding (Rename.weaken (A := L))
+      (emptyWsEncode s)
+      (emptyWsEncode (splitEncodeL s e tail L hws)) := by
+  simpa [emptyWsEncode, splitEncodeL] using
+    encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin false)
+
+theorem encodeIxEmbedding_emptyWs_splitR {Γ : Ctx sig}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail) :
+    EncodeIxEmbedding (Rename.weaken (A := R))
+      (emptyWsEncode s)
+      (emptyWsEncode (splitEncodeR s e tail R hws)) := by
+  simpa [emptyWsEncode, splitEncodeR] using
+    encodeIxEmbedding_weaken (emptyWsEncode s) (.split e.origin true)
+
+/-- Peel-free leaf transport into a left split empty-worklist state. -/
+def produced_emptyWs_splitL_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (L : Object sig.nBases)
+    (hws : s.ws = e :: tail)
+    (p : Produced (emptyWsEncode s) A)
+    (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
+      (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
+      p.term) :
+    Produced (emptyWsEncode (splitEncodeL s e tail L hws)) A :=
+  produced_of_embedding_noPeel (encodeIxEmbedding_emptyWs_splitL s e tail L hws) p h
+
+def produced_emptyWs_splitR_noPeel {Γ : Ctx sig} {A : Object sig.nBases}
+    (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig)
+    (tail : List (PosEntry sig)) (R : Object sig.nBases)
+    (hws : s.ws = e :: tail)
+    (p : Produced (emptyWsEncode s) A)
+    (h : EncodeReadyNoPeel (sig := sig) (emptyWsEncode s).ws
+      (emptyWsEncode s).env (emptyWsEncode s).domNext (emptyWsEncode s).obsNext
+      p.term) :
+    Produced (emptyWsEncode (splitEncodeR s e tail R hws)) A :=
+  produced_of_embedding_noPeel (encodeIxEmbedding_emptyWs_splitR s e tail R hws) p h
 
 theorem forcedInvertMeasure_pop_lt {Γ : Ctx sig}
     (s : EncodeIx (sig := sig) Γ) (e : PosEntry sig) (tail : List (PosEntry sig))
@@ -923,10 +968,9 @@ theorem nestedIx_branches_reach_boundary :
   every atomic branch pop is `AtSaturationBoundary`; full invert isSome
 
 **STOP (non-unit leftCoprod leaf transport):** measure decreases on
-`splitEncodeL/R` (`worklistWeight`); no fuel. Missing lemma:
-`Produced (emptyWsEncode s) A → Produced (emptyWsEncode (splitEncode …)) A`
-for arbitrary empty-worklist readiness. Unit goal avoids it via `rightUnit`
-branch leaves. Do not add nesting-depth constructors.
+`splitEncodeL/R`. `EncodeIxEmbedding` + peel-free transport land (`ICCEncodeEmbed`;
+λ/`letPos` exercises; `letPos` not blocked). Remaining: `peelCaseOuter`/`find?`
+rename naturality to lift to full `EncodeReady`. No fuel; no nesting-depth cases.
 
 Legacy `CertifiedSchedule` kept. Consistency / public evaluator deferred.
 -/
