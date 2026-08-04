@@ -505,11 +505,101 @@ def RequestedNeutralDomain {σ : ReachState sig.nBases}
   (findHypVar hyps A).isSome = true ∨
     ∃ i, σ.findTypeIdx A = some i ∧ (cert.rankOfNeutralSlot i).isSome = true
 
-/-- Invertible obligation under a strictly larger ambient derivation rank. -/
+/--
+Faithful domain for `invOfTypeWF` / `invOf` success (no polarity shortcut).
+
+* hypothesis of type `A` — reconstructs as a variable (any polarity);
+* `A = .unit` — reconstructs unconditionally;
+* certified witness for `A` at rank `< ambient` — neutral via `selectNeutralLt`,
+  or intro via structural `invOf` on lower-ranked `RuleDeps` parents
+  (product η → components; coprod intro → payload; function η → return).
+-/
 def InvertibleArgDomain {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (ambientRank : Nat) (A : Object sig.nBases) : Prop :=
-  (∃ i b r, σ.findTypeIdx A = some i ∧ cert.rank i b = some r ∧ r < ambientRank) ∨
-    (objectPolarity A = .pos)
+    (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases) : Prop :=
+  (findHypVar hyps A).isSome = true ∨
+    A = (.unit : Object sig.nBases) ∨
+      ∃ (i : Nat) (b : SlotNew) (r : Nat),
+        σ.findTypeIdx A = some i ∧
+          cert.rank i b = some r ∧
+            r < ambientRank
+
+theorem InvertibleArgDomain.of_hyp (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
+    (h : (findHypVar hyps A).isSome = true) :
+    InvertibleArgDomain cert ambientRank hyps A :=
+  Or.inl h
+
+theorem InvertibleArgDomain.of_unit (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) :
+    InvertibleArgDomain (σ := σ) cert ambientRank hyps .unit :=
+  Or.inr (Or.inl rfl)
+
+theorem InvertibleArgDomain.of_ranked_lt (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
+    {i : Nat} {b : SlotNew} {r : Nat}
+    (hfind : σ.findTypeIdx A = some i)
+    (hr : cert.rank i b = some r) (hlt : r < ambientRank) :
+    InvertibleArgDomain cert ambientRank hyps A :=
+  Or.inr (Or.inr ⟨i, b, r, hfind, hr, hlt⟩)
+
+/-- Argument accepted by `hypAppRule`: deps `[aIdx]` ranked below the fresh app rank. -/
+theorem InvertibleArgDomain.of_hypApp_arg {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
+    (Arg : Object sig.nBases) (aIdx : Nat)
+    (hfind : σ.findTypeIdx Arg = some aIdx)
+    (hpar : RankedParents cert (RuleDeps.hypApp aIdx)) :
+    InvertibleArgDomain cert hpar.freshRank hyps Arg := by
+  obtain ⟨b, r, hr⟩ := hpar aIdx (by simp [RuleDeps.hypApp])
+  exact InvertibleArgDomain.of_ranked_lt cert hpar.freshRank hyps Arg hfind hr
+    (RankedParents.lt_freshRank hpar aIdx (by simp [RuleDeps.hypApp]) b r hr)
+
+/-- Argument accepted by `expAppRule`: `aIdx` is a `typeApp` parent below fresh rank. -/
+theorem InvertibleArgDomain.of_expApp_arg {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
+    (Arg : Object sig.nBases) (fnIdx aIdx : Nat)
+    (hfind : σ.findTypeIdx Arg = some aIdx)
+    (hpar : RankedParents cert (RuleDeps.typeApp fnIdx aIdx)) :
+    InvertibleArgDomain cert hpar.freshRank hyps Arg := by
+  have hmem : aIdx ∈ RuleDeps.typeApp fnIdx aIdx := by
+    simp [RuleDeps.typeApp]
+  obtain ⟨b, r, hr⟩ := hpar aIdx hmem
+  exact InvertibleArgDomain.of_ranked_lt cert hpar.freshRank hyps Arg hfind hr
+    (RankedParents.lt_freshRank hpar aIdx hmem b r hr)
+
+/-- No ranked slot when the cell is not simply deducible (`rank_iff`). -/
+theorem ReachRankCert.rank_eq_none_of_not_simplyDeducible {n : Nat}
+    {σ : ReachState n} (cert : ReachRankCert σ) (i : Nat)
+    (h : (σ.getCell i).simplyDeducible = false) (b : SlotNew) :
+    cert.rank i b = none := by
+  have hslot : (σ.getCell i).slotWitness b = none := by
+    have h' :
+        ((σ.getCell i).retrievable = false ∧ (σ.getCell i).oldWitness = none) ∧
+          (σ.getCell i).newWitness = none := by
+      simpa [ReachCell.simplyDeducible, Bool.or_eq_false_iff,
+        Option.isSome_eq_false_iff, Option.isNone_iff_eq_none] using h
+    cases b <;> simp [ReachCell.slotWitness, h'.1.2, h'.2]
+  have hrs : (cert.rank i b).isSome = false := by
+    simpa [hslot] using (cert.rank_iff i b).symm
+  cases hr : cert.rank i b with
+  | none => rfl
+  | some _ => simp [hr] at hrs
+
+/-- Outside the domain: no hyp, not unit, and no simply-deducible cell for `A`. -/
+theorem InvertibleArgDomain.not_of_unsupported {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (ambientRank : Nat)
+    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
+    (hhyp : (findHypVar hyps A).isSome = false)
+    (hunit : A ≠ (.unit : Object sig.nBases))
+    (hnone : ∀ i, σ.findTypeIdx A = some i →
+      (σ.getCell i).simplyDeducible = false) :
+    ¬ InvertibleArgDomain cert ambientRank hyps A := by
+  intro h
+  rcases h with h | h | ⟨i, b, r, hfind, hr, _⟩
+  · simp [hhyp] at h
+  · exact hunit h
+  · have := cert.rank_eq_none_of_not_simplyDeducible i (hnone i hfind) b
+    simp [this] at hr
 
 end Equality
 end Gimbal

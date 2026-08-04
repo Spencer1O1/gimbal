@@ -508,19 +508,26 @@ def expEtaRule (σ : ReachState n) (ti : Nat) (Ret : Object n) : ReachState n :=
     | none => σ
   else σ
 
-/-- Fire a deducible function type once its argument type is deducible. -/
+/--
+Fire a **neutral** function type once its argument type is deducible.
+
+Provenance mirrors product projection (neutral parent, not merely simply-deducible /
+η):
+* old Ret: `fn.oldNeutral ∧ arg.oldDeducible`
+* new Ret: `(fn.oldNeutral ∧ arg.usesNew) ∨ (fn.newNeutral ∧ arg.simplyDeducible)`
+
+η-only functions must not manufacture `.appTy` (Ret was already available from η).
+-/
 def expAppRule (σ : ReachState n) (ti : Nat) (Arg Ret : Object n) : ReachState n :=
-  if (σ.getCell ti).simplyDeducible then
-    match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
-    | some aIdx, some rIdx =>
-        if (σ.getCell aIdx).simplyDeducible then
-          σ.discoverDual rIdx
-            ((σ.getCell ti).oldDeducible && (σ.getCell aIdx).oldDeducible)
-            ((σ.getCell ti).usesNew || (σ.getCell aIdx).usesNew)
-            (.appTy ti aIdx)
-        else σ
-    | _, _ => σ
-  else σ
+  match σ.findTypeIdx Arg, σ.findTypeIdx Ret with
+  | some aIdx, some rIdx =>
+      let c := σ.getCell ti
+      let a := σ.getCell aIdx
+      let oldOk := c.oldNeutral && a.oldDeducible
+      let newOk :=
+        (c.oldNeutral && a.usesNew) || (c.newNeutral && a.simplyDeducible)
+      σ.discoverDual rIdx oldOk newOk (.appTy ti aIdx)
+  | _, _ => σ
 
 /-- Synthesize a coproduct from whichever injection has a deducible payload. -/
 def coprodTypeRule (σ : ReachState n) (ti : Nat) (L R : Object n) : ReachState n :=
@@ -676,11 +683,7 @@ theorem expAppRule_le (σ : ReachState n) (ti : Nat) (Arg Ret : Object n) :
     ReachState.Le σ (expAppRule σ ti Arg Ret) := by
   unfold expAppRule
   split
-  · split
-    · split
-      · exact ReachState.le_discoverDual _ _ _ _ _
-      · exact ReachState.Le.refl _
-    · exact ReachState.Le.refl _
+  · exact ReachState.le_discoverDual _ _ _ _ _
   · exact ReachState.Le.refl _
 
 theorem coprodTypeRule_le (σ : ReachState n) (ti : Nat) (L R : Object n) :

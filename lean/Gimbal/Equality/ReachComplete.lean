@@ -600,26 +600,36 @@ theorem complete_of_fixed {Γ : ReachCtx n} {σ : ReachState n} (hf : ReachFixed
       obtain ⟨t, ht⟩ := exists_findTypeIdx hexp
       obtain ⟨a, ha⟩ := exists_findTypeIdx hda.univ
       obtain ⟨r, hr⟩ := exists_findTypeIdx hu
-      have hrule := hf.expAppRule_eq (ReachState.typeAt_of_findTypeIdx ht)
-      unfold expAppRule at hrule
-      rw [if_pos (index_deducible ht ihf), ha, hr] at hrule
-      dsimp only at hrule
+      have hfn := index_deducible ht ihf
       have hadec := index_deducible ha iha
-      rw [if_pos hadec] at hrule
-      have hfire : ((σ.getCell t).oldDeducible && (σ.getCell a).oldDeducible) = true ∨
-          ((σ.getCell t).usesNew || (σ.getCell a).usesNew) = true := by
-        cases huf : (σ.getCell t).usesNew
-        · cases hua : (σ.getCell a).usesNew
-          · left
-            exact Bool.and_eq_true_iff.mpr ⟨
-              hs.oldDeducible_of t _ (ReachState.typeAt_of_findTypeIdx ht)
-                (index_deducible ht ihf) huf,
-              hs.oldDeducible_of a _ (ReachState.typeAt_of_findTypeIdx ha) hadec hua⟩
-          · exact Or.inr rfl
-        · exact Or.inr rfl
-      exact isSimplyDeducible_of_index hr
-        (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
-          (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
+      by_cases hNeu :
+          (σ.getCell t).oldNeutral = true ∨ (σ.getCell t).newNeutral = true
+      · have hrule := hf.expAppRule_eq (ReachState.typeAt_of_findTypeIdx ht)
+        unfold expAppRule at hrule
+        rw [ha, hr] at hrule
+        dsimp only at hrule
+        have hfire :
+            ((σ.getCell t).oldNeutral && (σ.getCell a).oldDeducible) = true ∨
+              (((σ.getCell t).oldNeutral && (σ.getCell a).usesNew) ||
+                ((σ.getCell t).newNeutral && (σ.getCell a).simplyDeducible)) = true := by
+          cases hNeu with
+          | inl holdN =>
+            cases hu' : (σ.getCell a).usesNew
+            · left
+              exact Bool.and_eq_true_iff.mpr ⟨holdN,
+                hs.oldDeducible_of a _ (ReachState.typeAt_of_findTypeIdx ha) hadec hu'⟩
+            · right
+              exact Bool.or_eq_true_iff.mpr (Or.inl
+                (Bool.and_eq_true_iff.mpr ⟨holdN, rfl⟩))
+          | inr hnewN =>
+            right
+            exact Bool.or_eq_true_iff.mpr (Or.inr
+              (Bool.and_eq_true_iff.mpr ⟨hnewN, hadec⟩))
+        exact isSimplyDeducible_of_index hr
+          (ReachState.simplyDeducible_of_discoverDual_eq hf.sized
+            (ReachState.typeAt_of_findTypeIdx hr) hrule hfire)
+      · exact hs.etaExp t Arg Ret (ReachState.typeAt_of_findTypeIdx ht)
+          (eta_of_nonneutral_exp hs (ReachState.typeAt_of_findTypeIdx ht) hfn hNeu)
   | @expEta Arg Ret hd hu ih =>
       obtain ⟨t, ht⟩ := exists_findTypeIdx hu
       by_cases hdec : (σ.getCell t).simplyDeducible = true

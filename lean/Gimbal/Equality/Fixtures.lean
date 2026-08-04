@@ -420,6 +420,40 @@ def mixedNeuEtaNoFabricatedNewProj : Bool :=
 
 example : mixedNeuEtaNoFabricatedNewProj = true := by native_decide
 
+/--
+Regression: old Ret + new Arg with an η-only function must **not** manufacture
+`.appTy` on Ret. η on the function is a β-detour; Ret was already deducible from
+η, and intro/η must not count as neutral function provenance for `expAppRule`.
+-/
+def etaOnlyFnAppCtx : ReachCtx 2 where
+  hyps := #[
+    .base 1,  -- Ret (old)
+    .base 0   -- Arg (new)
+  ]
+  newFrom := 1
+
+def etaOnlyFnAppState : ReachState 2 :=
+  runReachability etaOnlyFnAppCtx (.exp (.base 0) (.base 1))
+
+def etaOnlyFnNoFabricatedAppTy : Bool :=
+  let σ := etaOnlyFnAppState
+  match σ.findTypeIdx (.exp (.base 0) (.base 1)),
+      σ.findTypeIdx (.base 1) with
+  | some f, some r =>
+    let fc := σ.getCell f
+    let rc := σ.getCell r
+    let isEta :=
+      (match fc.oldWitness with | some .eta => true | _ => false) ||
+        (match fc.newWitness with | some .eta => true | _ => false)
+    let noAppTy :=
+      (match rc.oldWitness with | some (.appTy _ _) => false | _ => true) &&
+        (match rc.newWitness with | some (.appTy _ _) => false | _ => true)
+    isEta && !fc.oldNeutral && !fc.newNeutral && noAppTy &&
+      isSimplyDeducible σ (.base 1) && isSimplyDeducible σ (.base 0)
+  | _, _ => false
+
+example : etaOnlyFnNoFabricatedAppTy = true := by native_decide
+
 /-! ### Neutral selector + η-argument application (invOf deps) -/
 
 /-- Preferred `witness` can be intro while `neutralWitness` still finds a neutral. -/
