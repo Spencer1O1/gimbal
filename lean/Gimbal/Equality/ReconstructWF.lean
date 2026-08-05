@@ -128,66 +128,6 @@ theorem ReachRankCert.selectNeutralLe_rank_le {n : Nat} {σ : ReachState n}
       have := cert.tryNeutralSlot_ok i false (fun r => decide (r ≤ ambient)) h
       exact of_decide_eq_true this
 
-/-! ## Stop condition: `invOf → neuOf` without rank decrease -/
-
-/--
-Witness/rule diagnostic when `invOf` would call `neuOf` without a strictly
-smaller derivation rank. Totality on certified completed states must prove this
-is unreachable.
--/
-structure InvOfNeuOfRankViolation where
-  ambientRank : Nat
-  cellIdx : Nat
-  neutralRank : Nat
-  w : Witness
-  deriving Repr
-
-def InvOfNeuOfRankViolation.ok (v : InvOfNeuOfRankViolation) : Prop :=
-  v.neutralRank < v.ambientRank
-
-theorem invOf_neuOf_requires_rank_lt (v : InvOfNeuOfRankViolation) :
-    v.ok ↔ v.neutralRank < v.ambientRank :=
-  Iff.rfl
-
-/-! ## Explicit measure decrease lemmas -/
-
-theorem measure_neuOf_to_witness (r : Nat) {n : Nat} (A : Object n) :
-    ReconMeasure.lt
-      (reconMeasure r .witness (.unit : Object n))
-      (reconMeasure r .neuOf A) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat, reconObjectSize]
-  refine Or.inr ⟨rfl, Or.inl (by omega)⟩
-
-theorem measure_witness_to_parent_neuOf
-    (childRank parentRank : Nat) (h : parentRank < childRank)
-    {n : Nat} (A : Object n) :
-    ReconMeasure.lt
-      (reconMeasure parentRank .neuOf A)
-      (reconMeasure childRank .witness (.unit : Object n)) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inl h
-
-theorem measure_witness_to_invOf (r : Nat) {n : Nat} (A : Object n) :
-    ReconMeasure.lt
-      (reconMeasure r .invOf A)
-      (reconMeasure r .witness (.unit : Object n)) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat, reconObjectSize]
-  refine Or.inr ⟨rfl, Or.inl (by omega)⟩
-
-theorem measure_invOf_to_neuOf_rank
-    (rAmb rNeu : Nat) (h : rNeu < rAmb) {n : Nat} (A : Object n) :
-    ReconMeasure.lt
-      (reconMeasure rNeu .witness (.unit : Object n))
-      (reconMeasure rAmb .invOf A) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inl h
-
-theorem measure_invOf_size_lt (r : Nat) {n : Nat} {A B : Object n}
-    (h : reconObjectSize A < reconObjectSize B) :
-    ReconMeasure.lt (reconMeasure r .invOf A) (reconMeasure r .invOf B) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inr ⟨rfl, Or.inr ⟨rfl, h⟩⟩
-
 /-! ## Well-founded reconstruction worker
 
 Single recursive function on `(ambientRank, phase, objSize)`.
@@ -1172,17 +1112,6 @@ def InvertibleArgDomain {σ : ReachState sig.nBases}
           cert.rank i b = some r ∧
             r < ambientRank
 
-theorem InvertibleArgDomain.of_hyp (cert : ReachRankCert σ) (ambientRank : Nat)
-    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-    (h : (findHypVar hyps A).isSome = true) :
-    InvertibleArgDomain cert ambientRank hyps A :=
-  Or.inl h
-
-theorem InvertibleArgDomain.of_unit (cert : ReachRankCert σ) (ambientRank : Nat)
-    (hyps : Array (Object sig.nBases)) :
-    InvertibleArgDomain (σ := σ) cert ambientRank hyps .unit :=
-  Or.inr (Or.inl rfl)
-
 theorem InvertibleArgDomain.of_ranked_lt (cert : ReachRankCert σ) (ambientRank : Nat)
     (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
     {i : Nat} {b : SlotNew} {r : Nat}
@@ -1190,64 +1119,6 @@ theorem InvertibleArgDomain.of_ranked_lt (cert : ReachRankCert σ) (ambientRank 
     (hr : cert.rank i b = some r) (hlt : r < ambientRank) :
     InvertibleArgDomain cert ambientRank hyps A :=
   Or.inr (Or.inr ⟨i, b, r, hfind, hr, hlt⟩)
-
-/-- Argument accepted by `hypAppRule`: deps `[aIdx]` ranked below the fresh app rank. -/
-theorem InvertibleArgDomain.of_hypApp_arg {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
-    (Arg : Object sig.nBases) (aIdx : Nat)
-    (hfind : σ.findTypeIdx Arg = some aIdx)
-    (hpar : RankedParents cert (RuleDeps.hypApp aIdx)) :
-    InvertibleArgDomain cert hpar.freshRank hyps Arg := by
-  obtain ⟨b, r, hr⟩ := hpar aIdx (by simp [RuleDeps.hypApp])
-  exact InvertibleArgDomain.of_ranked_lt cert hpar.freshRank hyps Arg hfind hr
-    (RankedParents.lt_freshRank hpar aIdx (by simp [RuleDeps.hypApp]) b r hr)
-
-/-- Argument accepted by `expAppRule`: `aIdx` is a `typeApp` parent below fresh rank. -/
-theorem InvertibleArgDomain.of_expApp_arg {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
-    (Arg : Object sig.nBases) (fnIdx aIdx : Nat)
-    (hfind : σ.findTypeIdx Arg = some aIdx)
-    (hpar : RankedParents cert (RuleDeps.typeApp fnIdx aIdx)) :
-    InvertibleArgDomain cert hpar.freshRank hyps Arg := by
-  have hmem : aIdx ∈ RuleDeps.typeApp fnIdx aIdx := by
-    simp [RuleDeps.typeApp]
-  obtain ⟨b, r, hr⟩ := hpar aIdx hmem
-  exact InvertibleArgDomain.of_ranked_lt cert hpar.freshRank hyps Arg hfind hr
-    (RankedParents.lt_freshRank hpar aIdx hmem b r hr)
-
-/-- No ranked slot when the cell is not simply deducible (`rank_iff`). -/
-theorem ReachRankCert.rank_eq_none_of_not_simplyDeducible {n : Nat}
-    {σ : ReachState n} (cert : ReachRankCert σ) (i : Nat)
-    (h : (σ.getCell i).simplyDeducible = false) (b : SlotNew) :
-    cert.rank i b = none := by
-  have hslot : (σ.getCell i).slotWitness b = none := by
-    have h' :
-        ((σ.getCell i).retrievable = false ∧ (σ.getCell i).oldWitness = none) ∧
-          (σ.getCell i).newWitness = none := by
-      simpa [ReachCell.simplyDeducible, Bool.or_eq_false_iff,
-        Option.isSome_eq_false_iff, Option.isNone_iff_eq_none] using h
-    cases b <;> simp [ReachCell.slotWitness, h'.1.2, h'.2]
-  have hrs : (cert.rank i b).isSome = false := by
-    simpa [hslot] using (cert.rank_iff i b).symm
-  cases hr : cert.rank i b with
-  | none => rfl
-  | some _ => simp [hr] at hrs
-
-/-- Outside the domain: no hyp, not unit, and no simply-deducible cell for `A`. -/
-theorem InvertibleArgDomain.not_of_unsupported {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (ambientRank : Nat)
-    (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-    (hhyp : (findHypVar hyps A).isSome = false)
-    (hunit : A ≠ (.unit : Object sig.nBases))
-    (hnone : ∀ i, σ.findTypeIdx A = some i →
-      (σ.getCell i).simplyDeducible = false) :
-    ¬ InvertibleArgDomain cert ambientRank hyps A := by
-  intro h
-  rcases h with h | h | ⟨i, b, r, hfind, hr, _⟩
-  · simp [hhyp] at h
-  · exact hunit h
-  · have := cert.rank_eq_none_of_not_simplyDeducible i (hnone i hfind) b
-    simp [this] at hr
 
 end Equality
 end Gimbal
