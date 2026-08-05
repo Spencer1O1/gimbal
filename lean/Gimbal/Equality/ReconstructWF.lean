@@ -479,6 +479,22 @@ def reconstructWitnessWF {σ : ReachState sig.nBases}
       if hH : hyps' = hyps then some ⟨A, NegNeu.castHyps hH n⟩ else none
     | _ => none
 
+/--
+Reconstruct `w` using the ranked slot of cell `i` that stores it.
+Callers that only know the cell (preferred `witness`) use this entry point.
+-/
+def reconstructWitnessWF_ofCell {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (i : Nat)
+    (hyps : Array (Object sig.nBases)) (w : Witness) :
+    Option ((A : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) A) :=
+  let c := σ.getCell i
+  if c.newWitness == some w then
+    reconstructWitnessWF cert i true hyps w
+  else if c.oldWitness == some w then
+    reconstructWitnessWF cert i false hyps w
+  else
+    none
+
 /-- Requested neutral (hyp or ranked neutral cell). -/
 def neuOfTypeWF {σ : ReachState sig.nBases}
     (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))

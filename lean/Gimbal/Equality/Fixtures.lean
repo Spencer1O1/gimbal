@@ -8,6 +8,7 @@ import Gimbal.Equality.Opacity
 import Gimbal.Equality.Translate
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.Saturation
+import Gimbal.Equality.ReconstructWF
 import Gimbal.Equality.ICC
 import Gimbal.Equality.ICCCode
 import Gimbal.Equality.Compare
@@ -291,20 +292,22 @@ def prodHypWitnessesAreHyp : Bool :=
 
 example : prodHypWitnessesAreHyp = true := by native_decide
 
-/-- Hyp projections reconstruct from the context variable alone. -/
+/-- Hyp projections reconstruct from the context variable alone (WF API). -/
 def prodHypReconstructOk : Bool :=
+  let cr := certifiedRunReachability prodCtx (.base 0)
+  let σ := cr.state
   let hyps := prodCtx.hyps
-  match prodState.findTypeIdx (.base 0), prodState.findTypeIdx (.base 1) with
+  match σ.findTypeIdx (.base 0), σ.findTypeIdx (.base 1) with
   | some l, some r =>
-    (match (prodState.getCell l).witness with
+    (match (σ.getCell l).witness with
      | some w =>
-       match reconstructWitness (sig := Sig2) 64 prodState hyps w with
+       match reconstructWitnessWF_ofCell (sig := Sig2) cr.cert l hyps w with
        | some ⟨A, _⟩ => A == .base 0
        | none => false
      | none => false) &&
-      (match (prodState.getCell r).witness with
+      (match (σ.getCell r).witness with
        | some w =>
-         match reconstructWitness (sig := Sig2) 64 prodState hyps w with
+         match reconstructWitnessWF_ofCell (sig := Sig2) cr.cert r hyps w with
          | some ⟨A, _⟩ => A == .base 1
          | none => false
        | none => false)
@@ -336,9 +339,10 @@ def neuProdWitnessesAreType : Bool :=
 
 example : neuProdWitnessesAreType = true := by native_decide
 
-/-- Type projections reconstruct by recursing to the parent product neutral. -/
+/-- Type projections reconstruct by recursing to the parent product neutral (WF). -/
 def neuProdReconstructOk : Bool :=
-  let σ := neuProdState
+  let cr := certifiedRunReachability neuProdCtx (.base 0)
+  let σ := cr.state
   let hyps := neuProdCtx.hyps
   match σ.findTypeIdx (.base 0) with
   | some l =>
@@ -347,7 +351,7 @@ def neuProdReconstructOk : Bool :=
       (match σ.typeAt p with
        | some (.prod _ _) => true
        | _ => false) &&
-        (match reconstructWitness (sig := Sig2) 64 σ hyps (.fstType p) with
+        (match reconstructWitnessWF_ofCell (sig := Sig2) cr.cert l hyps (.fstType p) with
          | some ⟨A, _⟩ => A == .base 0
          | none => false)
     | _ => false
@@ -467,7 +471,9 @@ example : neutralWitnessIgnoresNewEta = true := by native_decide
 
 /--
 Crafted dual provenance on a product cell: old `.app` (neutral) + new `.eta`.
-`neuOf` must use `neutralWitness`, not preferred `witness`.
+`neutralWitness` must prefer the old neutral over preferred intro `witness`.
+Full `neuOfTypeWF` on crafted (uncertified) states is out of scope for Bool
+fixtures; certified selector coverage lives in `ReconstructWF`.
 -/
 def mixedOldNeutralNewEtaNeuOfOk : Bool :=
   let Γ : ReachCtx 2 := ⟨#[.exp (.unit) (.prod (.base 0) (.base 1)), .base 0], 0⟩
@@ -480,10 +486,7 @@ def mixedOldNeutralNewEtaNeuOfOk : Bool :=
     let σ3 := σ2.discover p true .eta
     let c := σ3.getCell p
     (match c.witness with | some .eta => true | _ => false) &&
-      (match c.neutralWitness with | some (.app _ _) => true | _ => false) &&
-      (match neuOfType (sig := Sig2) 64 σ3 Γ.hyps (.prod (.base 0) (.base 1)) with
-       | some _ => true
-       | none => false)
+      (match c.neutralWitness with | some (.app _ _) => true | _ => false)
   | _, _ => false
 
 example : mixedOldNeutralNewEtaNeuOfOk = true := by native_decide
@@ -504,7 +507,8 @@ def etaArgAppState : ReachState 3 :=
   runReachability etaArgAppCtx (.base 2)
 
 def etaArgAppReconstructOk : Bool :=
-  let σ := etaArgAppState
+  let cr := certifiedRunReachability etaArgAppCtx (.base 2)
+  let σ := cr.state
   match σ.findTypeIdx (.prod (.base 0) (.base 1)),
       σ.findTypeIdx (.base 2) with
   | some p, some r =>
@@ -515,7 +519,8 @@ def etaArgAppReconstructOk : Bool :=
     match (σ.getCell r).witness with
     | some (.app 0 p') =>
       isEta && !pc.oldNeutral && !pc.newNeutral && p' == p &&
-        (match reconstructWitness (sig := Sig3) 64 σ etaArgAppCtx.hyps (.app 0 p) with
+        (match reconstructWitnessWF_ofCell (sig := Sig3) cr.cert r
+            etaArgAppCtx.hyps (.app 0 p) with
          | some ⟨A, _⟩ => A == .base 2
          | none => false)
     | _ => false
