@@ -15,12 +15,14 @@
   exact clauses (no duplicated atom/coprod/never production).
 
   Does **not** replace legacy `PairEntry`, delete `CertifiedSchedule`, or
-  change `applyObsNeu` / comparator. Full reachability adapter / EncodeTotal
-  deferred.
+  change `applyObsNeu` / comparator. Retained-adapter entry totality for
+  consistency / inconsistent-never is landed here; full schedule recursion /
+  EncodeTotal remain deferred.
 -/
 
 import Gimbal.Equality.ICCEncodeIx
 import Gimbal.Equality.ICCEncodeEmbed
+import Gimbal.Equality.ReconstructTotal
 import Gimbal.Equality.Saturation
 
 namespace Gimbal
@@ -891,8 +893,9 @@ def certifiedScheduleIx_inconsistent {Γ : Ctx sig} {A : Object sig.nBases}
 
 /--
 Resolve a consistency witness to an `IxExactEntry` when reconstruction succeeds.
-No readiness or encodability premise. Returns `none` when reconstruction fails
-or the recovered type mismatches `P` — totality is **not** assumed (8D).
+Executable `Option` interface retained for the adapter. On certified complete
+states, schedule membership implies success
+(`ixExactEntry_of_consistencyWitness_isSome_of_buildSchedule`).
 -/
 def ixExactEntry_of_consistencyWitness {σ : ReachState sig.nBases}
     (cert : ReachRankCert σ)
@@ -933,11 +936,146 @@ theorem ixExactEntry_of_consistencyWitness_correct {σ : ReachState sig.nBases}
           · cases h
       · cases h
 
-/-!
-8D reconstruction totality is landed as `ReconstructTotalityPackage` (WF).
-Consistency resolution here stays `Option`-valued for the retained schedule
-adapter; it does not assume totality at this layer.
+/--
+`reconstructWitnessWF_ofCell` selects the newWitness slot when it stores `w`.
+Matches `buildSchedule` (new-only) and the true-slot used by
+`consistencyWitnessTotalWF_inst`.
 -/
+theorem reconstructWitnessWF_ofCell_eq_of_newWitness {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (i : Nat)
+    (hyps : Array (Object sig.nBases)) (w : Witness)
+    (hnew : (σ.getCell i).newWitness = some w) :
+    reconstructWitnessWF_ofCell (sig := sig) cert i hyps w =
+      reconstructWitnessWF (sig := sig) cert i true hyps w := by
+  dsimp [reconstructWitnessWF_ofCell]
+  have hbeq : ((σ.getCell i).newWitness == some w) = true := by
+    simp [hnew]
+  simp [hbeq]
+
+/--
+Schedule consistency entry on a certified complete state always resolves to an
+`IxExactEntry` of declared type `P` with a `WellNeg` neutral.
+
+Uses `consistencyWitnessTotalWF_inst` (schedule `Array.any` → ranked
+reconstruction). Cell selection for the executable `_ofCell` entry matches the
+schedule’s newWitness / true slot (`mem_buildSchedule_storedNeutral`), so the
+ranked slot supplied by totality is the one `_ofCell` selects — no extra
+invariant.
+-/
+theorem ixExactEntry_of_consistencyWitness_isSome_of_buildSchedule
+    (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
+    (P : Object sig.nBases) (w : Witness)
+    (hany :
+      (buildSchedule
+        (certifiedComplete (sig := sig) Γ goal).result.state).entries.any
+        (fun e => e.1 == P && e.2 == w) = true) :
+    ∃ (e : IxExactEntry (Ctx.ofHyps (sig := sig) Γ.hyps)),
+      ixExactEntry_of_consistencyWitness (sig := sig)
+          (certifiedComplete (sig := sig) Γ goal).result.cert Γ.hyps P w =
+        some e ∧
+      e.P = P ∧ WellNeg e.neu := by
+  set C := certifiedComplete (sig := sig) Γ goal with hC
+  set σ := C.result.state with hσ
+  -- Totality gate: schedule membership reconstructs at the declared type.
+  have htot := consistencyWitnessTotalWF_inst (sig := sig) Γ goal P w (by
+    simpa [← hC, ← hσ] using hany)
+  -- Schedule supplies the newWitness / true slot that `_ofCell` selects.
+  have hmem : (P, w) ∈ (buildSchedule σ).entries := by
+    obtain ⟨k, hk, hp⟩ :=
+      (Array.any_eq_true
+        (p := fun e : Object sig.nBases × Witness => e.1 == P && e.2 == w)).mp
+        (by simpa [← hσ] using hany)
+    have h1 : (buildSchedule σ).entries[k].1 = P := by
+      simp only [Bool.and_eq_true, beq_iff_eq] at hp; exact hp.1
+    have h2 : (buildSchedule σ).entries[k].2 = w := by
+      simp only [Bool.and_eq_true, beq_iff_eq] at hp; exact hp.2
+    have heq : (buildSchedule σ).entries[k] = (P, w) := by
+      revert h1 h2; cases (buildSchedule σ).entries[k]; intro h1 h2; simp_all
+    exact (heq ▸ Array.getElem_mem hk)
+  obtain ⟨i, hty, hwTrue, hne, hrs⟩ :=
+    mem_buildSchedule_storedNeutral C.result.cert hmem
+  have hnew : (σ.getCell i).newWitness = some w := by
+    simpa [ReachCell.slotWitness] using hwTrue
+  -- True-slot reconstruction (same path as `consistencyWitnessTotalWF_inst`).
+  have hdom : StoredNeutralDomain C.result.cert i true w := ⟨hwTrue, hne, hrs⟩
+  obtain ⟨A, n, htyA, _, hrec⟩ := by
+    have h := reconstructWitnessTotalWF_inst (sig := sig)
+    dsimp [ReconstructWitnessTotalWF] at h
+    exact h Γ goal i true w hdom
+  have hAP : A = P := Option.some.inj (htyA.symm.trans hty)
+  -- `cases` on `Eq` keeps the LHS; use `P = A` so `A` becomes `P`.
+  rcases hAP.symm with rfl
+  -- Confirm totality’s schedule cell agrees (Nodup types); keep `htot` live.
+  have ⟨_, iTot, _, htyTot, _, _⟩ := htot
+  have : iTot = i :=
+    Option.some.inj <|
+      (σ.findTypeIdx_of_typeAt C.types_nodup htyTot).symm.trans
+        (σ.findTypeIdx_of_typeAt C.types_nodup hty)
+  have hfind : σ.findTypeIdx P = some i :=
+    σ.findTypeIdx_of_typeAt C.types_nodup hty
+  have hcell :
+      reconstructWitnessWF_ofCell (sig := sig) C.result.cert i Γ.hyps w =
+        some ⟨P, n⟩ := by
+    rw [reconstructWitnessWF_ofCell_eq_of_newWitness (sig := sig)
+      C.result.cert i Γ.hyps w hnew]
+    exact hrec
+  refine ⟨⟨P, n⟩, ?_, rfl,
+    wellNeg_reconstructWitnessWF_ofCell C.result.cert i Γ.hyps w hcell⟩
+  -- `this` pins `iTot` to the schedule cell used above.
+  let _ := this
+  dsimp [ixExactEntry_of_consistencyWitness]
+  rw [hfind]
+  simp only []  -- reduce `match some i`
+  rw [hcell]
+  exact dif_pos rfl
+
+/--
+Completed inconsistent certified reachability always yields a reconstructable
+`.never` neutral. Packages `inconsistentNeverTotalWF_inst` for the retained
+adapter’s `certifiedScheduleIx_inconsistent` entry.
+-/
+theorem neuOfTypeWF_never_of_certifiedComplete_inconsistent
+    (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
+    (hinc :
+      (certifiedComplete (sig := sig) Γ goal).result.state.inconsistent = true) :
+    ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps)
+        (.never : Object sig.nBases)),
+      neuOfTypeWF (sig := sig)
+          (certifiedComplete (sig := sig) Γ goal).result.cert Γ.hyps
+          (.never : Object sig.nBases) =
+        some n ∧
+      WellNeg n := by
+  have his :=
+    inconsistentNeverTotalWF_inst (sig := sig) Γ goal hinc
+  obtain ⟨n, hn⟩ := Option.isSome_iff_exists.mp his
+  exact ⟨n, hn, wellNeg_neuOfTypeWF _ _ _ hn⟩
+
+/-- Same statement on the raw `certifiedRunReachability` result. -/
+theorem neuOfTypeWF_never_of_certifiedRunReachability_inconsistent
+    (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
+    (hinc : (certifiedRunReachability Γ goal).state.inconsistent = true) :
+    ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps)
+        (.never : Object sig.nBases)),
+      neuOfTypeWF (sig := sig) (certifiedRunReachability Γ goal).cert Γ.hyps
+          (.never : Object sig.nBases) =
+        some n ∧
+      WellNeg n :=
+  neuOfTypeWF_never_of_certifiedComplete_inconsistent (sig := sig) Γ goal hinc
+
+/-- Schedule form on the raw `certifiedRunReachability` certificate. -/
+theorem ixExactEntry_of_consistencyWitness_isSome_of_certifiedRunReachability
+    (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
+    (P : Object sig.nBases) (w : Witness)
+    (hany :
+      (buildSchedule (certifiedRunReachability Γ goal).state).entries.any
+        (fun e => e.1 == P && e.2 == w) = true) :
+    ∃ (e : IxExactEntry (Ctx.ofHyps (sig := sig) Γ.hyps)),
+      ixExactEntry_of_consistencyWitness (sig := sig)
+          (certifiedRunReachability Γ goal).cert Γ.hyps P w =
+        some e ∧
+      e.P = P ∧ WellNeg e.neu :=
+  ixExactEntry_of_consistencyWitness_isSome_of_buildSchedule
+    (sig := sig) Γ goal P w hany
 
 /--
 Consistency → exact never: after successful witness reconstruction to `.never`,
@@ -1981,11 +2119,17 @@ def consistCoprodSched :
 * `certifiedScheduleIx_exactNever` / `certifiedScheduleIx_inconsistent`
 * Consistency resolution: `ixExactEntry_of_consistencyWitness` →
   `certifiedScheduleIx_consistency{Never,Atom,Coprod}` (delegates only)
-* Reconstruction totality: **gated** — see `ReconstructTotal.lean` (missing
-  discovery-rank / parent-DAG WF). Consistency resolution stays `Option`.
+* Retained-adapter entry totality (WF, no EncodeReady / encodability):
+  * `ixExactEntry_of_consistencyWitness_isSome_of_buildSchedule` /
+    `_of_certifiedRunReachability` via `consistencyWitnessTotalWF_inst`
+  * `neuOfTypeWF_never_of_certifiedComplete_inconsistent` /
+    `_of_certifiedRunReachability_inconsistent` via
+    `inconsistentNeverTotalWF_inst`
+* Executable `Option` interfaces preserved; success proved from schedule
+  membership / certified inconsistency + reconstruction totality
 
-**Deferred:** full reachability adapter / EncodeTotal / Cleanup B (after 8D
-reconstruction totality closes).
+**Deferred:** full reachability→schedule adapter recursion / EncodeTotal /
+Cleanup B.
 -/
 
 end Equality
