@@ -1575,6 +1575,21 @@ theorem certifiedDiscover_project {n : Nat} (σ : ReachState n)
       · simp [hi]
       · simp [hi, ReachState.setCell]
 
+theorem certifiedDiscover_seq_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness) (deps : List Nat)
+    (h : RankedParents cert deps) (hpre : NeutralParentPremise σ w)
+    (hdeps : WitnessDepsOk σ i w deps) (j : Nat) (b' : SlotNew) (w' : Witness)
+    (deps' : List Nat)
+    (h' : RankedParents (certifiedDiscover σ cert i b w deps h hpre hdeps).cert deps')
+    (hpre' : NeutralParentPremise (certifiedDiscover σ cert i b w deps h hpre hdeps).state w')
+    (hdeps' : WitnessDepsOk (certifiedDiscover σ cert i b w deps h hpre hdeps).state j w' deps') :
+    (certifiedDiscover (certifiedDiscover σ cert i b w deps h hpre hdeps).state
+        (certifiedDiscover σ cert i b w deps h hpre hdeps).cert
+        j b' w' deps' h' hpre' hdeps').project =
+      (σ.discover i b w).discover j b' w' := by
+  rw [certifiedDiscover_project]; congr 1
+  exact certifiedDiscover_project σ cert i b w deps h hpre hdeps
+
 theorem RankedParents.of_certifiedDiscover {n : Nat} (σ : ReachState n)
     (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
     (deps : List Nat) (h : RankedParents cert deps)
@@ -1657,25 +1672,28 @@ theorem certifiedDiscoverDual_project {n : Nat} (σ : ReachState n)
   · rfl
   · exact certifiedDiscover_project σ cert i true w deps (h (Or.inr rfl)) (hpre (Or.inr rfl)) hdeps
   · exact certifiedDiscover_project σ cert i false w deps (h (Or.inl rfl)) (hpre (Or.inl rfl)) hdeps
-  · have h₀ := h (Or.inl rfl)
-    have hpre₀ := hpre (Or.inl rfl)
-    have h₁ := certifiedDiscover_project σ cert i false w deps h₀ hpre₀ hdeps
-    have hdeps₁ : WitnessDepsOk
-        (certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps).state i w deps := by
-      refine WitnessDepsOk.of_types_eq ?_ hdeps
-      intro j
-      rw [show (certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps).state =
-          σ.discover i false w from h₁]
-      simp [ReachState.typeAt, ← (σ.le_discover i false w).types]
-    have h₂ := certifiedDiscover_project
-      (certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps).state
-      (certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps).cert i true w deps
-      (RankedParents.of_certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps deps h₀)
-      (NeutralParentPremise.of_certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps hpre₀)
-      hdeps₁
-    simp only [certifiedDiscoverDual, CertifiedReachResult.project] at h₁ h₂ ⊢
-    rw [h₂, h₁]
-    rfl
+  · simp only [certifiedDiscoverDual]
+    exact certifiedDiscover_seq_project σ cert i false w deps (h (Or.inl rfl))
+      (hpre (Or.inl rfl)) hdeps i true w deps _ _ _
+
+theorem certifiedDiscoverDual_seq_project {n : Nat} (σ : ReachState n)
+    (cert : ReachRankCert σ) (i : Nat) (oldOk newOk : Bool) (w : Witness) (deps : List Nat)
+    (h : (oldOk = true ∨ newOk = true) → RankedParents cert deps)
+    (hpre : (oldOk = true ∨ newOk = true) → NeutralParentPremise σ w)
+    (hdeps : WitnessDepsOk σ i w deps) (j : Nat) (oldOk' newOk' : Bool) (w' : Witness)
+    (deps' : List Nat)
+    (h' : (oldOk' = true ∨ newOk' = true) →
+      RankedParents (certifiedDiscoverDual σ cert i oldOk newOk w deps h hpre hdeps).cert deps')
+    (hpre' : (oldOk' = true ∨ newOk' = true) →
+      NeutralParentPremise (certifiedDiscoverDual σ cert i oldOk newOk w deps h hpre hdeps).state w')
+    (hdeps' : WitnessDepsOk
+      (certifiedDiscoverDual σ cert i oldOk newOk w deps h hpre hdeps).state j w' deps') :
+    (certifiedDiscoverDual (certifiedDiscoverDual σ cert i oldOk newOk w deps h hpre hdeps).state
+        (certifiedDiscoverDual σ cert i oldOk newOk w deps h hpre hdeps).cert
+        j oldOk' newOk' w' deps' h' hpre' hdeps').project =
+      (σ.discoverDual i oldOk newOk w).discoverDual j oldOk' newOk' w' := by
+  rw [certifiedDiscoverDual_project]; congr 1
+  exact certifiedDiscoverDual_project σ cert i oldOk newOk w deps h hpre hdeps
 
 def certifiedMarkHyp {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
     (cert : ReachRankCert σ) (hypIdx : Nat) :
@@ -1832,29 +1850,10 @@ theorem certifiedHypProdRule_project {n : Nat} (Γ : ReachCtx n) (σ : ReachStat
       | none => simp [hP, hL, hR, CertifiedReachResult.project]
       | some rIdx =>
           simp only [hP, hL, hR]
-          have h₁ := certifiedDiscover_project σ cert lIdx (Γ.isNew i) (.fstHyp i)
+          exact certifiedDiscover_seq_project σ cert lIdx (Γ.isNew i) (.fstHyp i)
             RuleDeps.hypProj (RankedParents_nil cert) True.intro
             (WitnessDepsOk.fstHyp σ lIdx i)
-          have h₂ := certifiedDiscover_project
-            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
-              RuleDeps.hypProj (RankedParents_nil cert) True.intro
-              (WitnessDepsOk.fstHyp σ lIdx i)).state
-            (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
-              RuleDeps.hypProj (RankedParents_nil cert) True.intro
-              (WitnessDepsOk.fstHyp σ lIdx i)).cert
-            rIdx (Γ.isNew i) (.sndHyp i) RuleDeps.hypProj
-            (RankedParents.of_certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
-              RuleDeps.hypProj (RankedParents_nil cert) True.intro
-              (WitnessDepsOk.fstHyp σ lIdx i)
-              RuleDeps.hypProj (RankedParents_nil cert))
-            True.intro
-            (WitnessDepsOk.sndHyp
-              (certifiedDiscover σ cert lIdx (Γ.isNew i) (.fstHyp i)
-                RuleDeps.hypProj (RankedParents_nil cert) True.intro
-                (WitnessDepsOk.fstHyp σ lIdx i)).state
-              rIdx i)
-          simp only [CertifiedReachResult.project] at h₁ h₂ ⊢
-          rw [h₂, h₁]
+            rIdx (Γ.isNew i) (.sndHyp i) RuleDeps.hypProj _ True.intro _
 
 def certifiedHypAppRule {n : Nat} (Γ : ReachCtx n) (σ : ReachState n)
     (cert : ReachRankCert σ) (i : Nat) (Arg Ret : Object n) :
@@ -2075,92 +2074,36 @@ theorem certifiedProdTypeRule.go_project {n : Nat} (σ : ReachState n)
     (hL : σ.typeAt lIdx = some L) (hR : σ.typeAt rIdx = some R) :
     (certifiedProdTypeRule.go σ cert ti lIdx rIdx L R hti hL hR).project =
       prodTypeRule.core σ ti lIdx rIdx := by
-  unfold certifiedProdTypeRule.go prodTypeRule.core
-  set hdepsFst := WitnessDepsOk.fstType σ lIdx ti
-  set hdepsSnd0 := WitnessDepsOk.sndType σ rIdx ti
-  have h₁ := certifiedDiscoverDual_project σ cert lIdx
-    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
-    (RuleDeps.typeProj ti)
-    (fun h => RankedParents.singleton_of_neutral cert ti h)
-    (fun h => h) hdepsFst
-  set c₁ := certifiedDiscoverDual σ cert lIdx
-    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
-    (RuleDeps.typeProj ti)
-    (fun h => RankedParents.singleton_of_neutral cert ti h)
-    (fun h => h) hdepsFst
-  have hdepsSnd : WitnessDepsOk c₁.state rIdx (.sndType ti) (RuleDeps.typeProj ti) := by
-    refine WitnessDepsOk.of_types_eq ?_ hdepsSnd0
-    intro j
-    rw [show c₁.state = σ.discoverDual lIdx (σ.getCell ti).oldNeutral
-        (σ.getCell ti).newNeutral (.fstType ti) from h₁]
-    simp [ReachState.typeAt, ← (σ.le_discoverDual lIdx (σ.getCell ti).oldNeutral
-      (σ.getCell ti).newNeutral (.fstType ti)).types]
-  have h₂ := certifiedDiscoverDual_project c₁.state c₁.cert rIdx
-    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
-    (RuleDeps.typeProj ti)
-    (fun h =>
-      RankedParents.of_certifiedDiscoverDual σ cert lIdx
-        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
-        (RuleDeps.typeProj ti)
-        (fun h0 => RankedParents.singleton_of_neutral cert ti h0)
-        (fun h0 => h0) hdepsFst
-        (RuleDeps.typeProj ti)
-        (RankedParents.singleton_of_neutral cert ti h))
-    (fun h =>
-      NeutralParentPremise.of_le
-        (by
-          rw [show c₁.state = σ.discoverDual lIdx (σ.getCell ti).oldNeutral
-              (σ.getCell ti).newNeutral (.fstType ti) from h₁]
-          exact σ.le_discoverDual lIdx (σ.getCell ti).oldNeutral
-            (σ.getCell ti).newNeutral (.fstType ti))
-        (show NeutralParentPremise σ (.sndType ti) from h))
-    hdepsSnd
-  set c₂ := certifiedDiscoverDual c₁.state c₁.cert rIdx
-    (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
-    (RuleDeps.typeProj ti)
-    (fun h =>
-      RankedParents.of_certifiedDiscoverDual σ cert lIdx
-        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
-        (RuleDeps.typeProj ti)
-        (fun h0 => RankedParents.singleton_of_neutral cert ti h0)
-        (fun h0 => h0) hdepsFst
-        (RuleDeps.typeProj ti)
-        (RankedParents.singleton_of_neutral cert ti h))
-    (fun h =>
-      NeutralParentPremise.of_le
-        (by
-          rw [show c₁.state = σ.discoverDual lIdx (σ.getCell ti).oldNeutral
-              (σ.getCell ti).newNeutral (.fstType ti) from h₁]
-          exact σ.le_discoverDual lIdx (σ.getCell ti).oldNeutral
-            (σ.getCell ti).newNeutral (.fstType ti))
-        (show NeutralParentPremise σ (.sndType ti) from h))
-    hdepsSnd
-  have hσ₁ : c₂.project =
-      (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
-        (.fstType ti)).discoverDual
-        rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti) := by
-    simp only [CertifiedReachResult.project] at h₁ h₂ ⊢
-    rw [h₂, h₁]
   cases hsd : (σ.getCell ti).simplyDeducible with
   | true =>
-      simp only [hsd, ↓reduceIte, CertifiedReachResult.project]
-      exact hσ₁
+      simp only [certifiedProdTypeRule.go, prodTypeRule.core, hsd, ↓reduceIte]
+      exact certifiedDiscoverDual_seq_project σ cert lIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+        (RuleDeps.typeProj ti)
+        (fun h => RankedParents.singleton_of_neutral cert ti h)
+        (fun h => h) (WitnessDepsOk.fstType σ lIdx ti)
+        rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+        (RuleDeps.typeProj ti) _ _ _
   | false =>
-      simp only [hsd, Bool.false_eq_true, ↓reduceIte]
-      have heta : WitnessDepsOk c₂.state ti .eta (RuleDeps.productEta lIdx rIdx) := by
-        refine WitnessDepsOk.of_types_eq ?_ (WitnessDepsOk.eta_prod hti hL hR)
-        intro j
-        rw [show c₂.state =
-            (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
-              (.fstType ti)).discoverDual
-              rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
-            from hσ₁]
-        simp [ReachState.typeAt,
-          ← (σ.le_discoverDual lIdx (σ.getCell ti).oldNeutral
-            (σ.getCell ti).newNeutral (.fstType ti)).types,
-          ← ((σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
-              (.fstType ti)).le_discoverDual rIdx (σ.getCell ti).oldNeutral
-            (σ.getCell ti).newNeutral (.sndType ti)).types]
+      simp only [certifiedProdTypeRule.go, prodTypeRule.core, hsd,
+        Bool.false_eq_true, ↓reduceIte]
+      generalize_proofs hpar₁ hpre₁ hdeps₁ hpar₂ hpre₂ hdeps₂ _ _ heta
+      set c₁ := certifiedDiscoverDual σ cert lIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+        (RuleDeps.typeProj ti) hpar₁ hpre₁ hdeps₁
+      set c₂ := certifiedDiscoverDual c₁.state c₁.cert rIdx
+        (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+        (RuleDeps.typeProj ti) hpar₂ hpre₂ hdeps₂
+      set σ₁ :=
+        (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
+          (.fstType ti)).discoverDual
+          rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+      have hσ₁ : c₂.project = σ₁ := by
+        simpa [c₂, c₁] using certifiedDiscoverDual_seq_project σ cert lIdx
+          (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.fstType ti)
+          (RuleDeps.typeProj ti) hpar₁ hpre₁ hdeps₁
+          rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
+          (RuleDeps.typeProj ti) hpar₂ hpre₂ hdeps₂
       refine Eq.trans
         (CertifiedReachResult.project_dite_bool
           ((c₂.state.getCell lIdx).simplyDeducible &&
@@ -2171,9 +2114,8 @@ theorem certifiedProdTypeRule.go_project {n : Nat} (σ : ReachState n)
                 (c₂.state.getCell rIdx).oldDeducible)
               ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
               .eta (RuleDeps.productEta lIdx rIdx)
-              (fun _ =>
-                RankedParents.pair_of_simplyDeducible c₂.cert lIdx rIdx
-                  (bool_and_left hcomp) (bool_and_right hcomp))
+              (fun _ => RankedParents.pair_of_simplyDeducible c₂.cert lIdx rIdx
+                (bool_and_left hcomp) (bool_and_right hcomp))
               (fun _ => True.intro) heta)
           c₂
           (c₂.state.discoverDual ti
@@ -2182,37 +2124,11 @@ theorem certifiedProdTypeRule.go_project {n : Nat} (σ : ReachState n)
             ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
             .eta)
           c₂.project
-          (fun hcomp =>
-            certifiedDiscoverDual_project c₂.state c₂.cert ti
-              ((c₂.state.getCell lIdx).oldDeducible &&
-                (c₂.state.getCell rIdx).oldDeducible)
-              ((c₂.state.getCell lIdx).usesNew || (c₂.state.getCell rIdx).usesNew)
-              .eta (RuleDeps.productEta lIdx rIdx) _
-              (fun _ => True.intro) heta)
+          (fun _ =>
+            certifiedDiscoverDual_project c₂.state c₂.cert ti _ _ .eta
+              (RuleDeps.productEta lIdx rIdx) _ (fun _ => True.intro) heta)
           rfl) ?_
-      set σ₁ :=
-        (σ.discoverDual lIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral
-          (.fstType ti)).discoverDual
-          rIdx (σ.getCell ti).oldNeutral (σ.getCell ti).newNeutral (.sndType ti)
-      have heq : c₂.state = σ₁ := hσ₁
-      cases hcomp :
-          ((c₂.state.getCell lIdx).simplyDeducible &&
-            (c₂.state.getCell rIdx).simplyDeducible) with
-      | false =>
-          simp only [hcomp, ↓reduceIte, heq]
-          have hcomp' :
-              ((σ₁.getCell lIdx).simplyDeducible &&
-                (σ₁.getCell rIdx).simplyDeducible) = false := by
-            simpa [← heq] using hcomp
-          simp only [hcomp', ↓reduceIte]
-          exact hσ₁
-      | true =>
-          simp only [hcomp, ↓reduceIte, heq]
-          have hcomp' :
-              ((σ₁.getCell lIdx).simplyDeducible &&
-                (σ₁.getCell rIdx).simplyDeducible) = true := by
-            simpa [← heq] using hcomp
-          simp only [hcomp', ↓reduceIte, heq]
+      simp [show c₂.state = σ₁ from hσ₁, CertifiedReachResult.project]
 
 theorem certifiedProdTypeRule_project {n : Nat} (σ : ReachState n)
     (cert : ReachRankCert σ) (ti : Nat) (L R : Object n)
