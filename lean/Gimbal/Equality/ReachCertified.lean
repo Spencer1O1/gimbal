@@ -29,26 +29,6 @@ slot leave `w` and `r` unchanged. Dual-fire into the *other* provenance slot is
 independent and does not disturb the first slot's rank.
 -/
 
-theorem ReachCell.record_keeps_old (c : ReachCell) (w w' : Witness)
-    (h : c.oldWitness = some w) :
-    (c.record false w').oldWitness = some w := by
-  simp [ReachCell.record, h]
-
-theorem ReachCell.record_keeps_new (c : ReachCell) (w w' : Witness)
-    (h : c.newWitness = some w) :
-    (c.record true w').newWitness = some w := by
-  simp [ReachCell.record, h]
-
-theorem ReachCell.record_sets_old_of_none (c : ReachCell) (w : Witness)
-    (h : c.oldWitness = none) :
-    (c.record false w).oldWitness = some w := by
-  simp [ReachCell.record, h]
-
-theorem ReachCell.record_sets_new_of_none (c : ReachCell) (w : Witness)
-    (h : c.newWitness = none) :
-    (c.record true w).newWitness = some w := by
-  simp [ReachCell.record, h]
-
 /-! ## Parent relation (reconstruction-relevant cell indices)
 
 Parents are **type-table indices** that `reconstructGoWF` may follow via
@@ -77,34 +57,6 @@ def Witness.cellParents : Witness → List Nat
   | .appTy fnIdx argIdx => [fnIdx, argIdx]
   | .inl pIdx | .inr pIdx => [pIdx]
   | .unit | .eta => []
-
-theorem Witness.cellParents_fstHyp (i : Nat) :
-    Witness.cellParents (.fstHyp i) = [] :=
-  rfl
-
-theorem Witness.cellParents_sndHyp (i : Nat) :
-    Witness.cellParents (.sndHyp i) = [] :=
-  rfl
-
-theorem Witness.cellParents_fstType (p : Nat) :
-    Witness.cellParents (.fstType p) = [p] :=
-  rfl
-
-theorem Witness.cellParents_sndType (p : Nat) :
-    Witness.cellParents (.sndType p) = [p] :=
-  rfl
-
-theorem Witness.cellParents_app (fnHyp argIdx : Nat) :
-    Witness.cellParents (.app fnHyp argIdx) = [argIdx] :=
-  rfl
-
-theorem Witness.cellParents_appTy (fnIdx argIdx : Nat) :
-    Witness.cellParents (.appTy fnIdx argIdx) = [fnIdx, argIdx] :=
-  rfl
-
-theorem Witness.cellParents_ctxVar (i : Nat) :
-    Witness.cellParents (.ctxVar i) = [] :=
-  rfl
 
 /-! ## Centralized rule dependency lists
 
@@ -142,43 +94,7 @@ def productEta (lIdx rIdx : Nat) : List Nat := [lIdx, rIdx]
 /-- Function η: return type. -/
 def functionEta (retIdx : Nat) : List Nat := [retIdx]
 
-theorem hypProj_eq_cellParents_fstHyp (i : Nat) :
-    hypProj = Witness.cellParents (.fstHyp i) := rfl
-
-theorem hypProj_eq_cellParents_sndHyp (i : Nat) :
-    hypProj = Witness.cellParents (.sndHyp i) := rfl
-
-theorem typeProj_eq_cellParents_fstType (p : Nat) :
-    typeProj p = Witness.cellParents (.fstType p) := rfl
-
-theorem typeProj_eq_cellParents_sndType (p : Nat) :
-    typeProj p = Witness.cellParents (.sndType p) := rfl
-
-theorem hypApp_eq_cellParents (fnHyp argIdx : Nat) :
-    hypApp argIdx = Witness.cellParents (.app fnHyp argIdx) := rfl
-
-theorem typeApp_eq_cellParents (fnIdx argIdx : Nat) :
-    typeApp fnIdx argIdx = Witness.cellParents (.appTy fnIdx argIdx) := rfl
-
-theorem coprodIntro_eq_cellParents_inl (p : Nat) :
-    coprodIntro p = Witness.cellParents (.inl p) := rfl
-
-theorem coprodIntro_eq_cellParents_inr (p : Nat) :
-    coprodIntro p = Witness.cellParents (.inr p) := rfl
-
 end RuleDeps
-
-theorem Witness.isNeutral_fstHyp (i : Nat) :
-    Witness.isNeutral (.fstHyp i) = true :=
-  rfl
-
-theorem Witness.isNeutral_fstType (p : Nat) :
-    Witness.isNeutral (.fstType p) = true :=
-  rfl
-
-theorem Witness.isNeutral_ctxVar (i : Nat) :
-    Witness.isNeutral (.ctxVar i) = true :=
-  rfl
 
 /-! ## Local object measure (intro / `invOf` decrease) -/
 
@@ -186,9 +102,6 @@ def reconObjectSize {n : Nat} : Object n → Nat
   | .base _ | .never | .unit => 1
   | .prod A B | .coprod A B | .exp A B =>
       reconObjectSize A + reconObjectSize B + 1
-
-theorem reconObjectSize_pos {n : Nat} (A : Object n) : 0 < reconObjectSize A := by
-  cases A <;> simp [reconObjectSize]
 
 theorem reconObjectSize_prod_left_lt {n : Nat} (L R : Object n) :
     reconObjectSize L < reconObjectSize (.prod L R) := by
@@ -1648,15 +1561,6 @@ def certifiedDiscover {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
       else
         ⟨σ.markInconsistentIf A, cert.ofMarkInconsistentIf A⟩
 
-/-- Default deps = `Witness.cellParents w`. -/
-def certifiedDiscoverDefault {n : Nat} (σ : ReachState n) (cert : ReachRankCert σ)
-    (i : Nat) (b : SlotNew) (w : Witness)
-    (h : ParentsCertified cert w)
-    (hpre : NeutralParentPremise σ w)
-    (hdeps : WitnessDepsOk σ i w (Witness.cellParents w)) :
-    CertifiedReachResult n :=
-  certifiedDiscover σ cert i b w (Witness.cellParents w) h hpre hdeps
-
 theorem certifiedDiscover_project {n : Nat} (σ : ReachState n)
     (cert : ReachRankCert σ) (i : Nat) (b : SlotNew) (w : Witness)
     (deps : List Nat) (h : RankedParents cert deps)
@@ -1842,11 +1746,6 @@ theorem RankedParents.of_certifiedDiscoverDual {n : Nat} (σ : ReachState n)
       (NeutralParentPremise.of_certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps hpre₀)
       hdeps₁ ps
       (RankedParents.of_certifiedDiscover σ cert i false w deps h₀ hpre₀ hdeps ps hp)
-
-theorem CertifiedReachResult.project_ite {n : Nat} (b : Bool)
-    (c₁ c₂ : CertifiedReachResult n) :
-    (if b then c₁ else c₂).project = if b then c₁.project else c₂.project := by
-  cases b <;> rfl
 
 /-! ## Certified forward-chaining rules
 
@@ -2798,11 +2697,6 @@ Stored-neutral reconstruction restricts to `Witness.isNeutral`. Intro-only
 `.unit` / `.inl` / `.inr` / `.eta` must **not** be over-quantified into
 `neuOfType` / `neuOfTypeWF` success — they justify invertible arguments only.
 -/
-
-theorem Witness.not_neutral_unit : Witness.isNeutral .unit = false := rfl
-theorem Witness.not_neutral_eta : Witness.isNeutral .eta = false := rfl
-theorem Witness.not_neutral_inl (i : Nat) : Witness.isNeutral (.inl i) = false := rfl
-theorem Witness.not_neutral_inr (i : Nat) : Witness.isNeutral (.inr i) = false := rfl
 
 end Equality
 end Gimbal
