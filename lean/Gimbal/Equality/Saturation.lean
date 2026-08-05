@@ -12,6 +12,7 @@ import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
 import Gimbal.Equality.ReachCertified
 import Gimbal.Equality.ReconstructCore
+import Gimbal.Equality.ReconstructWF
 
 namespace Gimbal
 namespace Equality
@@ -284,46 +285,6 @@ def reconstructWitness (fuel : Nat) (σ : ReachState sig.nBases)
   | _ => none
 
 /-! ### Reconstructed witnesses are phase legal -/
-
-/-- Casts are invisible to phase legality. -/
-theorem wellNeg_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
-    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.castCtx h n) := by
-  cases h; exact hn
-
-theorem wellNeg_cast {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
-    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.cast h n) := by
-  cases h; exact hn
-
-theorem wellInv_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
-    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castCtx h t) := by
-  cases h; exact ht
-
-theorem wellInv_castTy {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
-    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castTy h t) := by
-  cases h; exact ht
-
-theorem wellNeg_castHyps {hyps hyps' : Array (Object sig.nBases)}
-    {A : Object sig.nBases} (h : hyps = hyps')
-    {n : NegNeu (Ctx.ofHyps hyps) A} (hn : WellNeg n) :
-    WellNeg (NegNeu.castHyps h n) :=
-  wellNeg_castCtx _ hn
-
-theorem wellInv_castHyps {hyps hyps' : Array (Object sig.nBases)}
-    {A : Object sig.nBases} (h : hyps = hyps')
-    {t : InvTm (Ctx.ofHyps hyps) A} (ht : WellInv t) :
-    WellInv (InvTm.castHyps h t) :=
-  wellInv_castCtx _ ht
-
-/-- A legal positive focus exposes a legal value at a positive type. -/
-theorem wellPos_of_wellInv {Γ : Ctx sig} {A : Object sig.nBases} {p : PosNeu Γ A}
-    (h : WellInv (.foc (.pos (.done p)))) : WellPos p := by
-  cases h with | foc hf => cases hf with | pos _ hp => exact hp
-
-/-- Phase legality of a reconstruction result. -/
-private def ReconstructVal.Well : ReconstructVal sig → Prop
-  | .neu _ _ n => WellNeg n
-  | .wit _ ⟨_, n⟩ => WellNeg n
-  | .inv _ _ t => WellInv t
 
 private theorem well_reconstructGo : ∀ (fuel : Nat) (σ : ReachState sig.nBases)
     (cmd : ReconstructCmd sig) {v : ReconstructVal sig},

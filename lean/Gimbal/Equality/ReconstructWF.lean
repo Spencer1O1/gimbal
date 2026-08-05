@@ -464,6 +464,570 @@ decreasing_by
     | exact Prod.Lex.right _ (Prod.Lex.right _ (by
         dsimp [ReconstructCmd.objSize, reconObjectSize]; omega))
 
+/-! ## Phase legality of well-founded reconstruction -/
+
+/-- Casts are invisible to phase legality. -/
+theorem wellNeg_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
+    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.castCtx h n) := by
+  cases h; exact hn
+
+theorem wellNeg_cast {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
+    {n : NegNeu Γ A} (hn : WellNeg n) : WellNeg (NegNeu.cast h n) := by
+  cases h; exact hn
+
+theorem wellInv_castCtx {Γ Δ : Ctx sig} {A : Object sig.nBases} (h : Γ = Δ)
+    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castCtx h t) := by
+  cases h; exact ht
+
+theorem wellInv_castTy {Γ : Ctx sig} {A B : Object sig.nBases} (h : A = B)
+    {t : InvTm Γ A} (ht : WellInv t) : WellInv (InvTm.castTy h t) := by
+  cases h; exact ht
+
+theorem wellNeg_castHyps {hyps hyps' : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (h : hyps = hyps')
+    {n : NegNeu (Ctx.ofHyps hyps) A} (hn : WellNeg n) :
+    WellNeg (NegNeu.castHyps h n) :=
+  wellNeg_castCtx _ hn
+
+theorem wellInv_castHyps {hyps hyps' : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (h : hyps = hyps')
+    {t : InvTm (Ctx.ofHyps hyps) A} (ht : WellInv t) :
+    WellInv (InvTm.castHyps h t) :=
+  wellInv_castCtx _ ht
+
+/-- A legal positive focus exposes a legal value at a positive type. -/
+theorem wellPos_of_wellInv {Γ : Ctx sig} {A : Object sig.nBases} {p : PosNeu Γ A}
+    (h : WellInv (.foc (.pos (.done p)))) : WellPos p := by
+  cases h with | foc hf => cases hf with | pos _ hp => exact hp
+
+/-- Phase legality of a reconstruction result. -/
+def ReconstructVal.Well : ReconstructVal sig → Prop
+  | .neu _ _ n => WellNeg n
+  | .wit _ ⟨_, n⟩ => WellNeg n
+  | .inv _ _ t => WellInv t
+
+private def goLt (p q : Nat × ReconstructCmd sig) : Prop :=
+  Prod.Lex Nat.lt (Prod.Lex Nat.lt Nat.lt)
+    (p.1, (ReconstructCmd.phase (sig := sig) p.2).toNat,
+      ReconstructCmd.objSize (sig := sig) p.2)
+    (q.1, (ReconstructCmd.phase (sig := sig) q.2).toNat,
+      ReconstructCmd.objSize (sig := sig) q.2)
+
+private theorem goLt_wf : WellFounded (goLt (sig := sig)) :=
+  InvImage.wf
+    (fun p : Nat × ReconstructCmd sig =>
+      (p.1, (ReconstructCmd.phase (sig := sig) p.2).toNat,
+        ReconstructCmd.objSize (sig := sig) p.2))
+    (Prod.lex (inferInstance : WellFoundedRelation Nat)
+      (Prod.lex (inferInstance : WellFoundedRelation Nat)
+        (inferInstance : WellFoundedRelation Nat))).wf
+
+private theorem well_invOf_hypFocus {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} (x : Var (Ctx.ofHyps hyps) A) {v : ReconstructVal sig}
+    (h : (match objectPolarity A with
+      | .pos => some (.inv hyps A (.foc (.pos (.done (.neu (.var x))))))
+      | .neg => some (.inv hyps A (.foc (.neg (.done (.var x)))))) = some v) :
+    ReconstructVal.Well v := by
+  cases hpol : objectPolarity A <;> simp [hpol] at h <;> cases h
+  · exact .foc (.pos hpol (.neu hpol .var))
+  · exact .foc (.neg hpol .var)
+
+private theorem well_invOf_neuFocus {hyps : Array (Object sig.nBases)}
+    {A : Object sig.nBases} {n : NegNeu (Ctx.ofHyps hyps) A} (hn : WellNeg n)
+    {v : ReconstructVal sig}
+    (h : (match objectPolarity A with
+      | .pos => some (.inv hyps A (.foc (.pos (.done (.neu n)))))
+      | .neg => some (.inv hyps A (.foc (.neg (.done n))))) = some v) :
+    ReconstructVal.Well v := by
+  cases hpol : objectPolarity A <;> simp [hpol] at h <;> cases h
+  · exact .foc (.pos hpol (.neu hpol hn))
+  · exact .foc (.neg hpol hn)
+
+private theorem well_coprod_inl {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) L}
+    (ht : WellInv t) {v : ReconstructVal sig}
+    (h : (if objectPolarity L == .neg then
+            some (.inv hyps (.coprod L R)
+              (.foc (.pos (.done (.inl (.val t))))))
+          else
+            match t with
+            | .foc (.pos (.done p)) =>
+                some (.inv hyps (.coprod L R) (.foc (.pos (.done (.inl p)))))
+            | _ => none) = some v) :
+    ReconstructVal.Well v := by
+  split at h
+  · cases h
+    refine .foc (.pos rfl (.inl (.val ?_ ht)))
+    simpa [beq_iff_eq] using ‹(objectPolarity L == Polarity.neg) = true›
+  · cases t with
+    | foc f =>
+      cases f with
+      | pos intro =>
+        cases intro with
+        | done p =>
+          cases h
+          exact .foc (.pos rfl (.inl (wellPos_of_wellInv ht)))
+      | neg _ => cases h
+      | letPos _ _ => cases h
+      | sat _ => cases h
+    | unit => cases h
+    | pair _ _ => cases h
+    | lam _ => cases h
+    | case _ _ _ => cases h
+    | abort _ => cases h
+
+private theorem well_coprod_inr {hyps : Array (Object sig.nBases)}
+    {L R : Object sig.nBases} {t : InvTm (Ctx.ofHyps hyps) R}
+    (ht : WellInv t) {v : ReconstructVal sig}
+    (h : (if objectPolarity R == .neg then
+            some (.inv hyps (.coprod L R)
+              (.foc (.pos (.done (.inr (.val t))))))
+          else
+            match t with
+            | .foc (.pos (.done p)) =>
+                some (.inv hyps (.coprod L R) (.foc (.pos (.done (.inr p)))))
+            | _ => none) = some v) :
+    ReconstructVal.Well v := by
+  split at h
+  · cases h
+    refine .foc (.pos rfl (.inr (.val ?_ ht)))
+    simpa [beq_iff_eq] using ‹(objectPolarity R == Polarity.neg) = true›
+  · cases t with
+    | foc f =>
+      cases f with
+      | pos intro =>
+        cases intro with
+        | done p =>
+          cases h
+          exact .foc (.pos rfl (.inr (wellPos_of_wellInv ht)))
+      | neg _ => cases h
+      | letPos _ _ => cases h
+      | sat _ => cases h
+    | unit => cases h
+    | pair _ _ => cases h
+    | lam _ => cases h
+    | case _ _ _ => cases h
+    | abort _ => cases h
+
+private def reconstructTryNeuWF {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+    (a : Nat) (hyps : Array (Object sig.nBases)) (A : Object sig.nBases) :
+    Option (ReconstructVal sig) :=
+  match σ.findTypeIdx A with
+  | none => none
+  | some i =>
+    match hsel : cert.selectNeutralLt i a with
+    | none => none
+    | some (w, rNeu) =>
+      match reconstructGoWF cert rNeu (.witness hyps w) with
+      | some (.wit hyps' ⟨B, n⟩) =>
+        if hH : hyps' = hyps then
+          if hA : B = A then
+            let n' := NegNeu.cast hA (NegNeu.castHyps hH n)
+            match objectPolarity A with
+            | .pos => some (.inv hyps A (.foc (.pos (.done (.neu n')))))
+            | .neg => some (.inv hyps A (.foc (.neg (.done n'))))
+          else none
+        else none
+      | _ => none
+
+private def reconstructInlValWF {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+    (a : Nat) (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases) :
+    Option (ReconstructVal sig) :=
+  match reconstructGoWF cert a (.invOf hyps L) with
+  | some (.inv hyps' A' t) =>
+    if hH : hyps' = hyps then
+      if hA : A' = L then
+        let t' : InvTm (Ctx.ofHyps hyps) L := InvTm.castTy hA (InvTm.castHyps hH t)
+        if objectPolarity L == .neg then
+          some (.inv hyps (L.coprod R) (.foc (.pos (.done (.inl (.val t'))))))
+        else match t' with
+          | .foc (.pos (.done p)) =>
+            some (.inv hyps (L.coprod R) (.foc (.pos (.done (.inl p)))))
+          | _ => none
+      else none
+    else none
+  | _ => none
+
+private def reconstructInrValWF {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+    (a : Nat) (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases) :
+    Option (ReconstructVal sig) :=
+  match reconstructGoWF cert a (.invOf hyps R) with
+  | some (.inv hyps' A' t) =>
+    if hH : hyps' = hyps then
+      if hA : A' = R then
+        let t' : InvTm (Ctx.ofHyps hyps) R := InvTm.castTy hA (InvTm.castHyps hH t)
+        if objectPolarity R == .neg then
+          some (.inv hyps (L.coprod R) (.foc (.pos (.done (.inr (.val t'))))))
+        else match t' with
+          | .foc (.pos (.done p)) =>
+            some (.inv hyps (L.coprod R) (.foc (.pos (.done (.inr p)))))
+          | _ => none
+      else none
+    else none
+  | _ => none
+
+/-- Successful well-founded reconstruction yields a phase-legal value. -/
+theorem well_reconstructGoWF {σ : ReachState sig.nBases} (cert : ReachRankCert σ) :
+    ∀ (ambientRank : Nat) (cmd : ReconstructCmd sig) {v : ReconstructVal sig},
+      reconstructGoWF cert ambientRank cmd = some v → ReconstructVal.Well v := by
+  intro ambientRank cmd
+  refine WellFounded.fix (goLt_wf (sig := sig))
+    (C := fun p => ∀ {v},
+      reconstructGoWF cert p.1 p.2 = some v → ReconstructVal.Well v) ?_
+    ⟨ambientRank, cmd⟩
+  intro ⟨ambientRank, cmd⟩ ih v h
+  cases cmd with
+  | neuOf hyps A =>
+    rw [reconstructGoWF.eq_1] at h
+    split at h
+    · cases h; exact .var
+    · split at h
+      · cases h
+      · split at h
+        · cases h
+        · rename_i _ _ _ i _ w rNeu hsel
+          have hlt : goLt ⟨rNeu, .witness hyps w⟩ ⟨ambientRank, .neuOf hyps A⟩ := by
+            cases Nat.lt_or_eq_of_le
+                (ReachRankCert.selectNeutralLe_rank_le cert i ambientRank hsel) with
+            | inl hlt => exact Prod.Lex.left _ _ hlt
+            | inr heq =>
+              subst heq
+              exact Prod.Lex.right _ (Prod.Lex.left _ _ (by decide : (1 : Nat) < 2))
+          split at h
+          · rename_i hyps' B n hw
+            have hwWell := ih ⟨rNeu, .witness hyps w⟩ hlt hw
+            split at h
+            · split at h
+              · cases h; exact wellNeg_cast _ (wellNeg_castHyps _ hwWell)
+              · cases h
+            · cases h
+          · cases h
+  | witness hyps w =>
+    cases w with
+    | ctxVar hypIdx =>
+      rw [reconstructGoWF.eq_2] at h; split at h <;> (try cases h); exact .var
+    | fstHyp hypIdx =>
+      rw [reconstructGoWF.eq_3] at h
+      split at h <;> try cases h
+      split at h <;> try cases h
+      split at h <;> try cases h
+      exact .fst (wellNeg_cast _ .var)
+    | sndHyp hypIdx =>
+      rw [reconstructGoWF.eq_4] at h
+      split at h <;> try cases h
+      split at h <;> try cases h
+      split at h <;> try cases h
+      exact .snd (wellNeg_cast _ .var)
+    | fstType pIdx =>
+      rw [reconstructGoWF.eq_5] at h
+      split at h
+      · rename_i _ L R _
+        split at h
+        · cases h
+        · rename_i _ w rP hsel
+          have hlt : goLt ⟨rP, .neuOf hyps (.prod L R)⟩
+              ⟨ambientRank, .witness hyps (.fstType pIdx)⟩ :=
+            Prod.Lex.left _ _
+              (ReachRankCert.selectNeutralLt_rank_lt cert pIdx ambientRank hsel)
+          split at h
+          · rename_i hyps' _A n hn
+            have hnWell := ih ⟨rP, .neuOf hyps (.prod L R)⟩ hlt hn
+            split at h
+            · split at h
+              · cases h; exact .fst (wellNeg_cast _ (wellNeg_castHyps _ hnWell))
+              · cases h
+            · cases h
+          · cases h
+      · cases h
+    | sndType pIdx =>
+      rw [reconstructGoWF.eq_6] at h
+      split at h
+      · rename_i _ L R _
+        split at h
+        · cases h
+        · rename_i _ w rP hsel
+          have hlt : goLt ⟨rP, .neuOf hyps (.prod L R)⟩
+              ⟨ambientRank, .witness hyps (.sndType pIdx)⟩ :=
+            Prod.Lex.left _ _
+              (ReachRankCert.selectNeutralLt_rank_lt cert pIdx ambientRank hsel)
+          split at h
+          · rename_i hyps' _A n hn
+            have hnWell := ih ⟨rP, .neuOf hyps (.prod L R)⟩ hlt hn
+            split at h
+            · split at h
+              · cases h; exact .snd (wellNeg_cast _ (wellNeg_castHyps _ hnWell))
+              · cases h
+            · cases h
+          · cases h
+      · cases h
+    | app fnHypIdx argIdx =>
+      rw [reconstructGoWF.eq_7] at h
+      split at h
+      · rename_i _ _ Arg Ret Arg' _ _
+        split at h
+        · have hlt : goLt ⟨ambientRank, .invOf hyps Arg⟩
+              ⟨ambientRank, .witness hyps (.app fnHypIdx argIdx)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.left _ _ (by decide : (0 : Nat) < 1))
+          split at h
+          · rename_i fnTy x hyps' A' argTm hv hi
+            have hiWell := ih ⟨ambientRank, .invOf hyps Arg⟩ hlt hi
+            split at h
+            · split at h
+              · split at h
+                · cases h
+                  exact .app (wellNeg_cast _ .var)
+                    (wellInv_castTy _ (wellInv_castHyps _ hiWell))
+                · cases h
+              · cases h
+            · cases h
+          · cases h
+        · cases h
+      · cases h
+    | appTy fnTypeIdx argIdx =>
+      rw [reconstructGoWF.eq_8] at h
+      split at h
+      · rename_i _ _ Arg Ret Arg' _ _
+        split at h
+        · have hltI : goLt ⟨ambientRank, .invOf hyps Arg⟩
+              ⟨ambientRank, .witness hyps (.appTy fnTypeIdx argIdx)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.left _ _ (by decide : (0 : Nat) < 1))
+          split at h
+          · cases h
+          · rename_i _ w rFn hsel
+            have hltN : goLt ⟨rFn, .neuOf hyps (.exp Arg Ret)⟩
+                ⟨ambientRank, .witness hyps (.appTy fnTypeIdx argIdx)⟩ :=
+              Prod.Lex.left _ _
+                (ReachRankCert.selectNeutralLt_rank_lt cert fnTypeIdx ambientRank hsel)
+            split at h
+            · rename_i hyps₁ A₁ n hyps₂ A₂ argTm hn hi
+              have hnWell := ih ⟨rFn, .neuOf hyps (.exp Arg Ret)⟩ hltN hn
+              have hiWell := ih ⟨ambientRank, .invOf hyps Arg⟩ hltI hi
+              split at h
+              · split at h
+                · split at h
+                  · split at h
+                    · cases h
+                      exact .app (wellNeg_cast _ (wellNeg_castHyps _ hnWell))
+                        (wellInv_castTy _ (wellInv_castHyps _ hiWell))
+                    · cases h
+                  · cases h
+                · cases h
+              · cases h
+            · cases h
+        · cases h
+      · cases h
+    | unit => rw [reconstructGoWF.eq_9] at h; cases h
+    | inl _ => rw [reconstructGoWF.eq_10] at h; cases h
+    | inr _ => rw [reconstructGoWF.eq_11] at h; cases h
+    | eta => rw [reconstructGoWF.eq_12] at h; cases h
+  | invOf hyps A =>
+    have tryW {v : ReconstructVal sig}
+        (htry : reconstructTryNeuWF cert ambientRank hyps A = some v) :
+        ReconstructVal.Well v := by
+      dsimp [reconstructTryNeuWF] at htry
+      split at htry
+      · cases htry
+      · split at htry
+        · cases htry
+        · rename_i i _ w rNeu hsel
+          have hlt : goLt ⟨rNeu, .witness hyps w⟩ ⟨ambientRank, .invOf hyps A⟩ :=
+            Prod.Lex.left _ _
+              (ReachRankCert.selectNeutralLt_rank_lt cert i ambientRank hsel)
+          split at htry
+          · rename_i hyps' B n hw
+            have hwWell := ih ⟨rNeu, .witness hyps w⟩ hlt hw
+            split at htry
+            · split at htry
+              · exact well_invOf_neuFocus
+                  (wellNeg_cast _ (wellNeg_castHyps _ hwWell)) htry
+              · cases htry
+            · cases htry
+          · cases htry
+    cases A with
+    | unit =>
+      rw [reconstructGoWF.eq_13] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · change (match reconstructTryNeuWF cert ambientRank hyps
+            (Object.unit : Object sig.nBases) with
+          | some u => some u
+          | none => some (.inv hyps (Object.unit : Object sig.nBases) .unit)) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps
+            (Object.unit : Object sig.nBases) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none => simp [htry] at h; cases h; exact .unit
+    | prod L R =>
+      rw [reconstructGoWF.eq_14] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · change (match reconstructTryNeuWF cert ambientRank hyps (L.prod R) with
+          | some u => some u
+          | none =>
+            match reconstructGoWF cert ambientRank (.invOf hyps L),
+                  reconstructGoWF cert ambientRank (.invOf hyps R) with
+            | some (.inv hyps₁ A₁ t), some (.inv hyps₂ A₂ u) =>
+              if h1 : hyps₁ = hyps then
+                if h2 : hyps₂ = hyps then
+                  if hL : A₁ = L then
+                    if hR : A₂ = R then
+                      some (.inv hyps (L.prod R)
+                        (.pair (InvTm.castTy hL (InvTm.castHyps h1 t))
+                          (InvTm.castTy hR (InvTm.castHyps h2 u))))
+                    else none
+                  else none
+                else none
+              else none
+            | _, _ => none) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps (L.prod R) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none =>
+          simp [htry] at h
+          have hltL : goLt ⟨ambientRank, .invOf hyps L⟩
+              ⟨ambientRank, .invOf hyps (L.prod R)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.right _ (reconObjectSize_prod_left_lt L R))
+          have hltR : goLt ⟨ambientRank, .invOf hyps R⟩
+              ⟨ambientRank, .invOf hyps (L.prod R)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.right _ (reconObjectSize_prod_right_lt L R))
+          split at h
+          · rename_i hyps₁ A₁ t hyps₂ A₂ u hL0 hR0
+            have wL := ih ⟨ambientRank, .invOf hyps L⟩ hltL hL0
+            have wR := ih ⟨ambientRank, .invOf hyps R⟩ hltR hR0
+            split at h
+            · split at h
+              · split at h
+                · split at h
+                  · cases h
+                    exact .pair (wellInv_castTy _ (wellInv_castHyps _ wL))
+                      (wellInv_castTy _ (wellInv_castHyps _ wR))
+                  · cases h
+                · cases h
+              · cases h
+            · cases h
+          · cases h
+    | coprod L R =>
+      rw [reconstructGoWF.eq_15] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · have inlW {v} (hinl : reconstructInlValWF cert ambientRank hyps L R = some v) :
+            ReconstructVal.Well v := by
+          dsimp [reconstructInlValWF] at hinl
+          have hlt : goLt ⟨ambientRank, .invOf hyps L⟩
+              ⟨ambientRank, .invOf hyps (L.coprod R)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.right _ (reconObjectSize_coprod_left_lt L R))
+          split at hinl
+          · rename_i hyps' A' t hL
+            have wL := ih ⟨ambientRank, .invOf hyps L⟩ hlt hL
+            split at hinl
+            · split at hinl
+              · exact well_coprod_inl (wellInv_castTy _ (wellInv_castHyps _ wL)) hinl
+              · cases hinl
+            · cases hinl
+          · cases hinl
+        have inrW {v} (hinr : reconstructInrValWF cert ambientRank hyps L R = some v) :
+            ReconstructVal.Well v := by
+          dsimp [reconstructInrValWF] at hinr
+          have hlt : goLt ⟨ambientRank, .invOf hyps R⟩
+              ⟨ambientRank, .invOf hyps (L.coprod R)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.right _ (reconObjectSize_coprod_right_lt L R))
+          split at hinr
+          · rename_i hyps' A' t hR
+            have wR := ih ⟨ambientRank, .invOf hyps R⟩ hlt hR
+            split at hinr
+            · split at hinr
+              · exact well_coprod_inr (wellInv_castTy _ (wellInv_castHyps _ wR)) hinr
+              · cases hinr
+            · cases hinr
+          · cases hinr
+        change (match reconstructTryNeuWF cert ambientRank hyps (L.coprod R) with
+          | some u => some u
+          | none =>
+            if (match σ.findTypeIdx (L.coprod R) with
+                | some i =>
+                  match (σ.getCell i).witness with
+                  | some (.inr _) => true
+                  | _ => false
+                | none => false) then
+              match reconstructInrValWF cert ambientRank hyps L R with
+              | some u => some u
+              | none => reconstructInlValWF cert ambientRank hyps L R
+            else
+              match reconstructInlValWF cert ambientRank hyps L R with
+              | some u => some u
+              | none => reconstructInrValWF cert ambientRank hyps L R) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps (L.coprod R) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none =>
+          simp [htry] at h
+          split_ifs at h
+          · cases hinr : reconstructInrValWF cert ambientRank hyps L R with
+            | some _ => simp [hinr] at h; cases h; exact inrW hinr
+            | none => simp [hinr] at h; exact inlW h
+          · cases hinl : reconstructInlValWF cert ambientRank hyps L R with
+            | some _ => simp [hinl] at h; cases h; exact inlW hinl
+            | none => simp [hinl] at h; exact inrW h
+    | exp Arg Ret =>
+      rw [reconstructGoWF.eq_16] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · change (match reconstructTryNeuWF cert ambientRank hyps (Arg.exp Ret) with
+          | some u => some u
+          | none =>
+            let hyps' := hyps.push Arg
+            have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ Arg :=
+              Ctx.ofHyps_push hyps Arg
+            match reconstructGoWF cert ambientRank (.invOf hyps' Ret) with
+            | some (.inv hyps'' B t) =>
+              if hH : hyps'' = hyps' then
+                if hB : B = Ret then
+                  some (.inv hyps (Arg.exp Ret)
+                    (.lam (InvTm.castCtx hctx
+                      (InvTm.castTy hB (InvTm.castHyps hH t)))))
+                else none
+              else none
+            | _ => none) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps (Arg.exp Ret) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none =>
+          simp [htry] at h
+          have hlt : goLt ⟨ambientRank, .invOf (hyps.push Arg) Ret⟩
+              ⟨ambientRank, .invOf hyps (Arg.exp Ret)⟩ :=
+            Prod.Lex.right _ (Prod.Lex.right _ (reconObjectSize_exp_ret_lt Arg Ret))
+          split at h
+          · rename_i hyps'' B t hi
+            have wi := ih ⟨ambientRank, .invOf (hyps.push Arg) Ret⟩ hlt hi
+            split at h
+            · split at h
+              · cases h
+                exact .lam (wellInv_castCtx _
+                  (wellInv_castTy _ (wellInv_castHyps _ wi)))
+              · cases h
+            · cases h
+          · cases h
+    | base q =>
+      rw [reconstructGoWF.eq_17 cert ambientRank hyps (.base q)
+        (by intro h; cases h) (by intro _ _ h; cases h)
+        (by intro _ _ h; cases h) (by intro _ _ h; cases h)] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · change (match reconstructTryNeuWF cert ambientRank hyps (.base q) with
+          | some u => some u | none => none) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps (.base q) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none => simp [htry] at h
+    | never =>
+      rw [reconstructGoWF.eq_17 cert ambientRank hyps .never
+        (by intro h; cases h) (by intro _ _ h; cases h)
+        (by intro _ _ h; cases h) (by intro _ _ h; cases h)] at h
+      split at h
+      · rename_i x _; exact well_invOf_hypFocus x h
+      · change (match reconstructTryNeuWF cert ambientRank hyps
+          (Object.never : Object sig.nBases) with
+          | some u => some u | none => none) = some v at h
+        cases htry : reconstructTryNeuWF cert ambientRank hyps
+            (Object.never : Object sig.nBases) with
+        | some _ => simp [htry] at h; cases h; exact tryW htry
+        | none => simp [htry] at h
+
 /-! ## Domain entry points (certified ranks only) -/
 
 /-- Reconstruct a stored neutral witness at its certified slot rank. -/
