@@ -112,47 +112,6 @@ def ReconstructTotalityPackage (sig : Signature) : Prop :=
     InvertibleArgTotalWF sig ∧
     RequestedNeutralTotalWF sig
 
-/-! ## Legacy fueled names (migration bridge)
-
-Prefer the WF predicates above. These aliases keep older call sites compiling
-until fueled reconstruction is removed.
--/
-
-/-- @deprecated use `StoredWitnessReconstructsWF` -/
-def StoredWitnessReconstructs (σ : ReachState sig.nBases)
-    (hyps : Array (Object sig.nBases)) (i : Nat) (w : Witness) : Prop :=
-  ∃ (A : Object sig.nBases) (n : NegNeu (Ctx.ofHyps (sig := sig) hyps) A),
-    σ.typeAt i = some A ∧
-      Witness.isNeutral w = true ∧
-      ∃ fuel, reconstructWitness (sig := sig) fuel σ hyps w = some ⟨A, n⟩
-
-/-- @deprecated use `ReconstructWitnessTotalWF` -/
-def ReconstructWitnessTotal (sig : Signature) : Prop :=
-  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
-    let σ := runReachability (n := sig.nBases) Γ goal
-    ∀ (i : Nat) (w : Witness),
-      i < σ.cells.size →
-        ((σ.getCell i).oldWitness = some w ∨ (σ.getCell i).newWitness = some w) →
-          Witness.isNeutral w = true →
-            StoredWitnessReconstructs (sig := sig) σ Γ.hyps i w
-
-/-- @deprecated use `ConsistencyWitnessTotalWF` -/
-def ConsistencyWitnessTotal (sig : Signature) : Prop :=
-  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
-    let σ := runReachability (n := sig.nBases) Γ goal
-    ∀ (P : Object sig.nBases) (w : Witness),
-      (buildSchedule σ).entries.any (fun e => e.1 == P && e.2 == w) = true →
-        ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) P) (fuel : Nat),
-          reconstructWitness (sig := sig) fuel σ Γ.hyps w = some ⟨P, n⟩
-
-/-- @deprecated use `InconsistentNeverTotalWF` -/
-def InconsistentNeverTotal (sig : Signature) : Prop :=
-  ∀ (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases),
-    let σ := runReachability (n := sig.nBases) Γ goal
-    σ.inconsistent = true →
-      ∃ (n : NegNeu (Ctx.ofHyps (sig := sig) Γ.hyps) .never) (fuel : Nat),
-        neuOfType (sig := sig) fuel σ Γ.hyps .never = some n
-
 theorem InconsistentNeverTotalWF_of_package {sig : Signature}
     (h : ReconstructTotalityPackage sig) : InconsistentNeverTotalWF sig :=
   h.2.2.1

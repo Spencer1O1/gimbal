@@ -927,11 +927,9 @@ theorem ixExactEntry_of_consistencyWitness_correct (fuel : Nat)
   · cases h
 
 /-!
-8D reconstruction totality is **blocked** on a missing discovery-rank /
-parent-DAG package. See `ReconstructTotal.lean` for the scoped Props
-(`ReconstructWitnessTotal`, `ConsistencyWitnessTotal`, `InconsistentNeverTotal`)
-and failure accounting. The retained schedule core does not assume totality —
-consistency resolution stays `Option`-valued.
+8D reconstruction totality is landed as `ReconstructTotalityPackage` (WF).
+Consistency resolution here stays `Option`-valued for the retained schedule
+adapter; it does not assume totality at this layer.
 -/
 
 /--
