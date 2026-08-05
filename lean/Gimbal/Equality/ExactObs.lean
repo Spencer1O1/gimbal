@@ -435,11 +435,11 @@ theorem pairObs_ok_of_allUseNew (Γ : ReachCtx sig.nBases) (goal : Object sig.nB
     (hu : exactsAllUseNew Γ.hyps.size Γ.newFrom (collectExact u) = true) :
     pairObs Γ goal t u =
       .ok
-        (mergePairObs (runReachability Γ goal) Γ.hyps
-          (buildSchedule (runReachability Γ goal))
-          (selectExactObs (runReachability Γ goal) Γ.hyps
+        (mergePairObs (certifiedRunReachability Γ goal).state Γ.hyps
+          (buildSchedule (certifiedRunReachability Γ goal).state)
+          (selectExactObs (certifiedRunReachability Γ goal).state Γ.hyps
             (unionExact (collectExact t) (collectExact u))))
-        (runReachability Γ goal) := by
+        (certifiedRunReachability Γ goal) := by
   unfold pairObs
   rw [if_neg (by
     simp [exactsAllUseNew_selectExactObs (exactsAllUseNew_unionExact ht hu)])]

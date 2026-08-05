@@ -58,14 +58,14 @@ Operational shared-schedule saturation only: `pairObs` built a schedule and
 def RawReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBases}
     (t' : InvTm (Ctx.ofHyps hyps) A) : Prop :=
   ∃ (newFrom : Nat) (goal : Object sig.nBases) (fuel : Nat)
-      (entries : Array (PairEntry sig hyps)) (σ : ReachState sig.nBases)
+      (entries : Array (PairEntry sig hyps)) (c : CertifiedReachResult sig.nBases)
       (t₀ u₀ : InvTm (Ctx.ofHyps hyps) A),
     checkOldInvariant (ReachCtx.oldPrefix ⟨hyps, newFrom⟩) goal = true ∧
       WellInv t₀ ∧
       WellInv u₀ ∧
-      pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries σ ∧
-      (applyPairObs (saturationBudget fuel entries.size) σ hyps entries t₀ = .ok t' ∨
-        applyPairObs (saturationBudget fuel entries.size) σ hyps entries u₀ = .ok t')
+      pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries c ∧
+      (applyPairObs (saturationBudget fuel entries.size) c.state hyps entries t₀ = .ok t' ∨
+        applyPairObs (saturationBudget fuel entries.size) c.state hyps entries u₀ = .ok t')
 
 /--
 Raw production plus encode alignment of the schedule result.
@@ -155,15 +155,15 @@ Raw certificate for one left-saturating reference phase (no readiness).
 -/
 theorem rawReferenceProduced_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hobs : pairObs Γ goal t u = .ok entries σ)
-    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
+    (hobs : pairObs Γ goal t u = .ok entries c)
+    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
       .ok t') :
     RawReferenceProduced t' :=
-  ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hobs, Or.inl h⟩
+  ⟨Γ.newFrom, goal, fuel, entries, c, t, u, hinv, ht, hu, hobs, Or.inl h⟩
 
 /--
 Provisional: left phase with an explicit readiness proof of `t'`.
@@ -171,12 +171,12 @@ Replace `hready'` by `encodeReady_of_rawReferenceProduced` once the loop closes.
 -/
 theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hobs : pairObs Γ goal t u = .ok entries σ)
-    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
+    (hobs : pairObs Γ goal t u = .ok entries c)
+    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
       .ok t')
     (hready' : PhaseEncodeReady t') :
     ValidEncodeFragment t' :=
@@ -198,26 +198,26 @@ Raw certificate for one right-saturating reference phase.
 theorem rawReferenceProduced_referencePhase_right (fuel : Nat)
     {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
     {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {u' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hobs : pairObs Γ goal t u = .ok entries σ)
-    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u =
+    (hobs : pairObs Γ goal t u = .ok entries c)
+    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries u =
       .ok u') :
     RawReferenceProduced u' :=
-  ⟨Γ.newFrom, goal, fuel, entries, σ, t, u, hinv, ht, hu, hobs, Or.inr h⟩
+  ⟨Γ.newFrom, goal, fuel, entries, c, t, u, hinv, ht, hu, hobs, Or.inr h⟩
 
 /-- Provisional right-phase packaging with stashed readiness of `u'`. -/
 theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
     {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {u' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
-    (hobs : pairObs Γ goal t u = .ok entries σ)
-    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u =
+    (hobs : pairObs Γ goal t u = .ok entries c)
+    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries u =
       .ok u')
     (hready' : PhaseEncodeReady u') :
     ValidEncodeFragment u' :=
@@ -229,11 +229,11 @@ theorem validEncodeFragment_referencePhase_right (fuel : Nat)
 /-- Canonicalize image of a schedule result remains well-focused (compare path). -/
 theorem wellInv_canonicalize_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (ht : WellInv t) (hu : WellInv u)
-    (hobs : pairObs Γ goal t u = .ok entries σ)
-    (h : applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t =
+    (hobs : pairObs Γ goal t u = .ok entries c)
+    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
       .ok t') :
     WellInv (canonicalize t') :=
   wellInv_referencePhase (saturationBudget fuel entries.size) ht hu hobs h

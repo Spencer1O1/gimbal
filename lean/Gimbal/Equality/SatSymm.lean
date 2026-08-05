@@ -124,8 +124,9 @@ demands, not of the order they were collected in.
 -/
 theorem pairObs_symm {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
     {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {e₁ e₂ : Array (PairEntry sig Γ.hyps)} {σ₁ σ₂ : ReachState sig.nBases}
-    (h₁ : pairObs Γ goal t u = .ok e₁ σ₁) (h₂ : pairObs Γ goal u t = .ok e₂ σ₂)
+    {e₁ e₂ : Array (PairEntry sig Γ.hyps)}
+    {c₁ c₂ : CertifiedReachResult sig.nBases}
+    (h₁ : pairObs Γ goal t u = .ok e₁ c₁) (h₂ : pairObs Γ goal u t = .ok e₂ c₂)
     (x : PairEntry sig Γ.hyps) : MemIdEq e₁ x ↔ MemIdEq e₂ x := by
   rw [pairObs] at h₁ h₂
   split at h₁

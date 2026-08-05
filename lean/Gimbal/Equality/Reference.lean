@@ -59,8 +59,8 @@ def completeSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     else
       match pairObs Γ goal t t with
       | .invariantFailure => .invariantFailure
-      | .ok entries σ =>
-        match applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t with
+      | .ok entries c =>
+        match applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t with
         | .exhausted => .exhausted
         | .invariantFailure => .invariantFailure
         | .ok t' =>
@@ -138,9 +138,9 @@ def referenceSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
     else
       match pairObs Γ goal t u with
       | .invariantFailure => .invariantFailure
-      | .ok entries σ =>
-        match applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries t,
-              applyPairObs (saturationBudget fuel entries.size) σ Γ.hyps entries u with
+      | .ok entries c =>
+        match applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t,
+              applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries u with
         | .exhausted, _ | _, .exhausted => .exhausted .saturate
         | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
         | .ok t', .ok u' =>

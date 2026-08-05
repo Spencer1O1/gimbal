@@ -405,8 +405,8 @@ observation is a legal spine at a positive type.
 theorem wellEntries_pairObs {Γ : ReachCtx sig.nBases} {goal : Object sig.nBases}
     {A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
     (ht : WellInv t) (hu : WellInv u)
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
-    (h : pairObs Γ goal t u = .ok entries σ) : WellEntries entries.toList := by
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
+    (h : pairObs Γ goal t u = .ok entries c) : WellEntries entries.toList := by
   rw [pairObs] at h
   split at h
   · exact absurd h (by simp)
@@ -436,7 +436,7 @@ the same list, so saturation cannot favour one argument over the other.
 -/
 theorem exact_complete_pairObs {Γ : ReachCtx sig.nBases} {goal A : Object sig.nBases}
     {t u : InvTm (Ctx.ofHyps Γ.hyps) A} {entries : Array (PairEntry sig Γ.hyps)}
-    {σ : ReachState sig.nBases} (h : pairObs Γ goal t u = .ok entries σ)
+    {c : CertifiedReachResult sig.nBases} (h : pairObs Γ goal t u = .ok entries c)
     {e : Exact (Ctx.ofHyps Γ.hyps)}
     (he : MemI (collectExact t) e ∨ MemI (collectExact u) e)
     (hpol : objectPolarity e.1 = .pos) (hvar : e.2.isVar = false) :
@@ -565,12 +565,12 @@ well-focused continuation to a well-focused term.
 -/
 theorem wellInv_saturate_pairObs (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {goal A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
-    {entries : Array (PairEntry sig Γ.hyps)} {σ : ReachState sig.nBases}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {B : Object sig.nBases} {cont t' : InvTm (Ctx.ofHyps Γ.hyps) B}
-    (ht : WellInv t) (hu : WellInv u) (hobs : pairObs Γ goal t u = .ok entries σ)
+    (ht : WellInv t) (hu : WellInv u) (hobs : pairObs Γ goal t u = .ok entries c)
     (hcont : WellInv cont)
-    (h : applyPairObs fuel σ Γ.hyps entries cont = .ok t') : WellInv t' :=
-  wellInv_applyPairObs fuel σ Γ.hyps entries (wellEntries_pairObs ht hu hobs) hcont h
+    (h : applyPairObs fuel c.state Γ.hyps entries cont = .ok t') : WellInv t' :=
+  wellInv_applyPairObs fuel c.state Γ.hyps entries (wellEntries_pairObs ht hu hobs) hcont h
 
 /--
 An inconsistent context collapses to the canonical absurd branch: saturation

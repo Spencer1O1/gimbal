@@ -1386,9 +1386,9 @@ def reverseThenCanonicalSame : Bool :=
   let goal : Object 3 := .unit
   let cont : InvTm (Ctx.ofHyps (sig := Sig3) Γ.hyps) (.unit : Object 3) := .unit
   match pairObs (sig := Sig3) Γ goal cont cont with
-  | .ok entries σ =>
+  | .ok entries c =>
     let rev := entries.reverse
-    pairObsEntriesEq (canonicalizePairObsOrder σ rev) entries
+    pairObsEntriesEq (canonicalizePairObsOrder c.state rev) entries
   | .invariantFailure => false
 
 example : reverseThenCanonicalSame = true := by native_decide
@@ -1450,8 +1450,8 @@ def auditAbstractionReplacesNeutral : Bool :=
   | some t =>
     match pairObs (sig := Sig1) Γ (.base 0) t t with
     | .invariantFailure => false
-    | .ok entries σ =>
-      match applyPairObs (sig := Sig1) 64 σ hyps entries t with
+    | .ok entries c =>
+      match applyPairObs (sig := Sig1) 64 c.state hyps entries t with
       | .ok t' =>
         match InvTm.toRaw t' with
         | .letPos _ body => body == .pos (.neu (.var 0))

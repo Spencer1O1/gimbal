@@ -10,6 +10,7 @@
 import Gimbal.Equality.Abstract
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
+import Gimbal.Equality.ReachCertified
 import Gimbal.Equality.ReconstructCore
 
 namespace Gimbal
@@ -922,7 +923,8 @@ def mergePairObs (σ : ReachState sig.nBases)
 
 /-- Outcome of building the shared pair observation list. -/
 inductive PairObsResult (sig : Signature) (hyps : Array (Object sig.nBases)) where
-  | ok : Array (PairEntry sig hyps) → ReachState sig.nBases → PairObsResult sig hyps
+  | ok : Array (PairEntry sig hyps) → CertifiedReachResult sig.nBases →
+      PairObsResult sig hyps
   | invariantFailure
 
 /-- Schedule entry lists compare equal under `PairEntry.idEq`. -/
@@ -942,17 +944,34 @@ Build the shared pair-directed observation list: consistency ∪ exact demands
 from both terms (union is left/right-symmetric). Old-only exact neutrals
 selected for observation are an invariant failure. Order is dependency-respecting
 and deterministic.
+
+Uses a single `certifiedRunReachability` pass; the certificate is retained for
+well-founded reconstruction. The projected state equals `runReachability`.
 -/
 def pairObs (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases)
     {A : Object sig.nBases}
     (t u : InvTm (Ctx.ofHyps Γ.hyps) A) : PairObsResult sig Γ.hyps :=
-  let σ := runReachability Γ goal
+  let c := certifiedRunReachability Γ goal
+  let σ := c.state
   let exactSel :=
     selectExactObs σ Γ.hyps (unionExact (collectExact t) (collectExact u))
   if !exactsAllUseNew Γ.hyps.size Γ.newFrom exactSel then
     .invariantFailure
   else
-    .ok (mergePairObs σ Γ.hyps (buildSchedule σ) exactSel) σ
+    .ok (mergePairObs σ Γ.hyps (buildSchedule σ) exactSel) c
+
+/-- Projected state of a successful `pairObs` equals computational reachability. -/
+theorem pairObs_ok_project {Γ : ReachCtx sig.nBases} {goal : Object sig.nBases}
+    {A : Object sig.nBases} {t u : InvTm (Ctx.ofHyps Γ.hyps) A}
+    {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
+    (h : pairObs Γ goal t u = .ok entries c) :
+    c.state = runReachability Γ goal := by
+  rw [pairObs] at h
+  split at h
+  · exact absurd h (by simp)
+  · simp only [PairObsResult.ok.injEq] at h
+    obtain ⟨-, rfl⟩ := h
+    exact certifiedRunReachability_project Γ goal
 
 /--
 Union consistency witnesses with term-demanded positive types.
