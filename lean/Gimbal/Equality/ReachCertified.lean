@@ -1,13 +1,10 @@
 /-
-  Bounded design spike: proof-only reachability rank certificates.
+  Proof-only reachability rank certificates around `runReachability`.
 
-  Goal: retain a well-founded discovery certificate *around* `runReachability`
-  without adding observable `discoverGen` fields to `ReachCell` / `Witness`.
-  Operational state, schedule identity, and fixed-point equality stay unchanged.
-
-  **Spike scope:** parent relation, assign-once audit, `CertifiedReachResult`
-  shape, certified `markHyp` + one `discover` rule, lex reconstruction measure,
-  inconsistent-never obligation, migration-cost comparison.
+  Retains a well-founded discovery certificate without adding observable
+  `discoverGen` fields to `ReachCell` / `Witness`. Operational state, schedule
+  identity, and fixed-point equality stay unchanged: `certifiedRunReachability`
+  projects to `runReachability`.
 
   Does **not** resume the retained schedule adapter or EncodeTotal.
 -/
@@ -54,7 +51,7 @@ theorem ReachCell.record_sets_new_of_none (c : ReachCell) (w : Witness)
 
 /-! ## Parent relation (reconstruction-relevant cell indices)
 
-Parents are **type-table indices** that `reconstructGo` may follow via
+Parents are **type-table indices** that `reconstructGoWF` may follow via
 `.neuOf` / cell witnesses. Hypothesis indices (`.ctxVar`, `.app`'s fn hyp) are
 not cell parents — they resolve through `Ctx.varOldest` / hyps.
 -/
@@ -63,7 +60,7 @@ not cell parents — they resolve through `Ctx.varOldest` / hyps.
 Proof-only reconstruction dependencies of a witness shape (index fields + the
 cells `invOf` / `neuOf` must already have ranked).
 
-This is **not** “immediate calls in `reconstructGo` only”:
+This is **not** “immediate calls in `reconstructGoWF` only”:
 * `.app` / `.appTy` recurse through `invOf Arg`, which may η-split a product and
   eventually `neuOf` component neutrals — so the **argument cell** is a parent.
 * `.eta` carries no indices on `Witness`; product/function η parent lists are
@@ -247,85 +244,6 @@ def reconMeasure (witnessRank : Nat) (phase : ReconPhase) {n : Nat}
 def ReconMeasure.lt : ReconMeasure → ReconMeasure → Prop
   | (r₁, p₁, s₁), (r₂, p₂, s₂) =>
       r₁ < r₂ ∨ (r₁ = r₂ ∧ (p₁ < p₂ ∨ (p₁ = p₂ ∧ s₁ < s₂)))
-
-/-- Hard case demo: reconstructing `.fstType` at child rank calls `neuOf(prod)` at
-parent rank — first component decreases even though `reconObjectSize` rises. -/
-theorem reconMeasure_fstType_parent_lt (childRank parentRank : Nat)
-    (h : parentRank < childRank) {n : Nat} (L R : Object n) :
-    ReconMeasure.lt
-      (reconMeasure parentRank .neuOf (.prod L R : Object n))
-      (reconMeasure childRank .witness L) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inl h
-
-/-- Intro case demo: `invOf` on a product component decreases object size at
-equal witness rank and phase. -/
-theorem reconMeasure_invOf_prod_left_lt (r : Nat) {n : Nat} (L R : Object n) :
-    ReconMeasure.lt
-      (reconMeasure r .invOf L)
-      (reconMeasure r .invOf (.prod L R)) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  refine Or.inr ⟨rfl, Or.inr ⟨rfl, reconObjectSize_prod_left_lt L R⟩⟩
-
-/--
-η-argument application path (strict decrease at each edge), assuming ranks
-satisfy `r_comp < r_arg ≤ r_app` (argument cell ranked from its η/components;
-application ranked above the argument):
-
-* `witness(app)` → `invOf(Arg)` — phase drop at fixed app rank;
-* `invOf(prod)` → `invOf(component)` — object-size drop;
-* `invOf(component)` → `neuOf(component)` — rank drop to the component neutral.
--/
-theorem reconMeasure_app_to_invOf_lt (rApp : Nat) {n : Nat} (Arg Ret : Object n) :
-    ReconMeasure.lt
-      (reconMeasure rApp .invOf Arg)
-      (reconMeasure rApp .witness Ret) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inr ⟨rfl, Or.inl (by decide : (0 : Nat) < 1)⟩
-
-theorem reconMeasure_invOf_to_neuOf_component_lt
-    (rApp rComp : Nat) (h : rComp < rApp) {n : Nat} (X : Object n) :
-    ReconMeasure.lt
-      (reconMeasure rComp .neuOf X)
-      (reconMeasure rApp .invOf X) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inl h
-
-/-- Composite: app witness → invOf product → invOf component → neuOf component. -/
-theorem reconMeasure_app_invOf_neuOf_chain
-    (rApp rArg rComp : Nat)
-    (hArg : rArg ≤ rApp) (hComp : rComp < rArg)
-    {n : Nat} (X Y R : Object n) :
-    ReconMeasure.lt
-      (reconMeasure rApp .invOf (.prod X Y))
-      (reconMeasure rApp .witness R) ∧
-    ReconMeasure.lt
-      (reconMeasure rApp .invOf X)
-      (reconMeasure rApp .invOf (.prod X Y)) ∧
-    ReconMeasure.lt
-      (reconMeasure rComp .neuOf X)
-      (reconMeasure rApp .invOf X) := by
-  refine ⟨reconMeasure_app_to_invOf_lt rApp (.prod X Y) R,
-    reconMeasure_invOf_prod_left_lt rApp X Y, ?_⟩
-  exact reconMeasure_invOf_to_neuOf_component_lt rApp rComp
-    (Nat.lt_of_lt_of_le hComp hArg) X
-
-/-- `.appTy` parent `neuOf(exp)` at smaller rank. -/
-theorem reconMeasure_appTy_fn_lt (childRank parentRank : Nat)
-    (h : parentRank < childRank) {n : Nat} (Arg Ret : Object n) :
-    ReconMeasure.lt
-      (reconMeasure parentRank .neuOf (.exp Arg Ret : Object n))
-      (reconMeasure childRank .witness Ret) := by
-  dsimp [ReconMeasure.lt, reconMeasure, ReconPhase.toNat]
-  exact Or.inl h
-
-/-- `.appTy` also depends on the argument cell (same invOf path as `.app`). -/
-theorem reconMeasure_appTy_arg_invOf_lt (rApp : Nat) {n : Nat}
-    (Arg Ret : Object n) :
-    ReconMeasure.lt
-      (reconMeasure rApp .invOf Arg)
-      (reconMeasure rApp .witness Ret) :=
-  reconMeasure_app_to_invOf_lt rApp Arg Ret
 
 /-! ## Proof-only rank certificate -/
 
@@ -771,10 +689,7 @@ structure CertifiedReachResult (n : Nat) where
 def CertifiedReachResult.project (c : CertifiedReachResult n) : ReachState n :=
   c.state
 
-/--
-Spike target for the full runner: certificate whose state equals
-`runReachability Γ goal`. Not constructed in this spike (needs every rule).
--/
+/-- Certificate whose state equals `runReachability Γ goal`. -/
 def CertifiedReachResult.soundFor (c : CertifiedReachResult n)
     (Γ : ReachCtx n) (goal : Object n) : Prop :=
   c.state = runReachability Γ goal
@@ -2877,50 +2792,17 @@ theorem certifiedRunReachability_soundFor {n : Nat} (Γ : ReachCtx n)
     (certifiedRunReachability Γ goal).soundFor Γ goal :=
   certifiedRunReachability_project Γ goal
 
-/-! ## Status
-
-**Landed:** proof-only full-rank certificates; centralized `RuleDeps`; certified
-wrappers for every forward-chaining rule; `certifiedReachSweep` /
-`certifiedReachStep` / `certifiedRunReachability` with
-`project = runReachability`.
-
-**Stop condition:** a fresh slot is ranked only under `RankedParents` for the
-deps of **that** derivation (`RuleDeps`); missing parents make the certified
-term uninhabited.
-
-**Source of truth (intended final):** `certifiedRunReachability` is the retained
-engine; computational `runReachability` stays as the projection reference until
-the post-`ReconstructTotalityPackage` cleanup collapses the mirror.
-
-**Next stage (not this pass):** well-founded reconstruction / totality package.
-Afterwards: delete superseded measure demos, collapse duplicate wrappers, remove
-fueled reconstruct once callers migrate — target a net-negative cleanup commit.
--/
-
 /-! ## Totality scope (neutral only)
 
-`ReconstructWitnessTotal` / `StoredWitnessReconstructs` restrict to
-`Witness.isNeutral`. Intro-only `.unit` / `.inl` / `.inr` / `.eta` must **not**
-be over-quantified into `neuOfType` success — they justify invertible arguments
-only (`Witness.isNeutral = false`).
+Stored-neutral reconstruction restricts to `Witness.isNeutral`. Intro-only
+`.unit` / `.inl` / `.inr` / `.eta` must **not** be over-quantified into
+`neuOfType` / `neuOfTypeWF` success — they justify invertible arguments only.
 -/
 
 theorem Witness.not_neutral_unit : Witness.isNeutral .unit = false := rfl
 theorem Witness.not_neutral_eta : Witness.isNeutral .eta = false := rfl
 theorem Witness.not_neutral_inl (i : Nat) : Witness.isNeutral (.inl i) = false := rfl
 theorem Witness.not_neutral_inr (i : Nat) : Witness.isNeutral (.inr i) = false := rfl
-
-/-! ## Migration-cost comparison (spike conclusion)
-
-| Design | Pros | Cons | Verdict |
-|---|---|---|---|
-| **A. Proof-only `ReachRankCert` / certified runner** | No contamination of `ReachCell` equality; `project` = `runReachability` | Temporary control-flow mirror until cleanup | **Preferred** — now landed |
-| **B. Runtime `discoverGen`** | Easy local WF | Contaminates equality | Rejected |
-| **C. Structural derivation trees** | Intrinsic WF | Heavier API | Defer |
-
-**Final source of truth:** `certifiedRunReachability`. After totality, collapse the
-computational mirror so only one engine remains.
--/
 
 end Equality
 end Gimbal
