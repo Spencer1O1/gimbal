@@ -23,6 +23,8 @@ import Gimbal.Equality.Translate
 import Gimbal.Equality.Interpret
 import Gimbal.Equality.TmEq
 import Gimbal.Equality.Polarized
+import Gimbal.Equality.Scherer.Polarized
+import Gimbal.Equality.Scherer.Syntax
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
