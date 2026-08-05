@@ -22,3 +22,5 @@ lean/.lake/
 *.log
 .env
 .env.*
+
+*.code-workspace
