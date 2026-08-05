@@ -25,6 +25,11 @@ import Gimbal.Equality.TmEq
 import Gimbal.Equality.Polarized
 import Gimbal.Equality.Scherer.Polarized
 import Gimbal.Equality.Scherer.Syntax
+import Gimbal.Equality.Scherer.Focused
+import Gimbal.Equality.Scherer.Erase
+import Gimbal.Equality.Scherer.TmAlgebra
+import Gimbal.Equality.Scherer.Renaming
+import Gimbal.Equality.Scherer.EraseComm
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
