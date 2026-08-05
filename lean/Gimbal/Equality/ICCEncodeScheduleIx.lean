@@ -875,7 +875,7 @@ def certifiedScheduleIx_exactNever {Γ : Ctx sig} {A : Object sig.nBases}
   ⟨hb, retainedNeverObsCertified s nNever hb hfr⟩
 
 /--
-Top-level inconsistent path: a never-typed neutral (e.g. from `neuOfType`)
+Top-level inconsistent path: a never-typed neutral (e.g. from `neuOfTypeWF`)
 delegates to the same certified exact-never core. Schedule `entries` are ignored,
 matching `applyPairObs` / `applyFixedSchedule` when `σ.inconsistent`.
 -/
