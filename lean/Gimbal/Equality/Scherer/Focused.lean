@@ -6,7 +6,8 @@
   * `Inv.focusShift` / `Inv.focusPos`
   * no `SFoc`, direct saturated focus, or generic `enterSat`
   * `SInv.satShift` / `SInv.satPos`
-  * `Sat.up` and nonempty `Sat.batch` of `SNegNeu (old++new) (.shift Q)`
+  * `Sat.done` (empty selection; payload in `old ++ new`) and nonempty `Sat.batch`
+    of `SNegNeu (old++new) (.shift Q)`
   * batch body: `SInv (old++new) .empty selected (.pos P)`
   * `SPosNeu.shift` from `SInv Γ .empty .empty (.neg N)` only
 
@@ -119,14 +120,16 @@ inductive NonemptyBatchObs : StableCtx sig → Pending sig → Type where
 
 /--
 Saturation at positive boundary `P`.
-`up` covers the no-observation case (and forces `new = []`).
+`done` covers the empty-selection case: a saturated positive neutral already
+typed in `old ++ new` (New may be nonempty when the result is strongly
+retrievable without observations).
 `batch` requires a nonempty observation list typed in `old ++ new`, with body
 under promoted old context, empty new, and all selected results as pending.
 -/
 inductive Sat : StableCtx sig → StableCtx sig → Pos sig.nBases → Type where
-  | up {Old P} :
-      SPosNeu Old P →
-      Sat Old .empty P
+  | done {Old New P} :
+      SPosNeu (Old.append New) P →
+      Sat Old New P
   | batch {Old New selected P} :
       NonemptyBatchObs (Old.append New) selected →
       SInv (Old.append New) .empty selected (.pos P) →
@@ -263,9 +266,9 @@ end SInv
 
 namespace Sat
 
-def asUp {Old : StableCtx sig} {P : Pos sig.nBases} :
-    Sat Old .empty P → Option (SPosNeu Old P)
-  | .up v => some v
+def asDone {Old New : StableCtx sig} {P : Pos sig.nBases} :
+    Sat Old New P → Option (SPosNeu (Old.append New) P)
+  | .done v => some v
   | .batch _ _ => none
 
 def asBatch {Old New : StableCtx sig} {P : Pos sig.nBases} :
@@ -274,7 +277,7 @@ def asBatch {Old New : StableCtx sig} {P : Pos sig.nBases} :
         NonemptyBatchObs (Old.append New) selected ×
         SInv (Old.append New) .empty selected (.pos P))
   | .batch obs body => some ⟨_, obs, body⟩
-  | .up _ => none
+  | .done _ => none
 
 end Sat
 
@@ -347,20 +350,31 @@ def inv_focusPos_atom :
       (.pos (.atom ⟨0, Nat.zero_lt_one⟩)) :=
   .focusPos (.up (.atom .here))
 
-/-- `Sat.up` from `SPosNeu.shift` of saturated unit. -/
-def sat_up :
+/-- `Sat.done` from `SPosNeu.shift` of saturated unit (empty/empty). -/
+def sat_done :
     Sat (sig := sig0) .empty .empty (.shift .one) :=
-  .up (.shift (SInv.unit (Old := .empty) (New := .empty)))
+  .done (.shift (SInv.unit (Old := .empty) (New := .empty)))
+
+/--
+Empty-selection saturation with nonempty `New`: atom `q` is strongly
+retrievable from `New` alone (`SPosNeu.atom .here`). The old empty-selection
+constructor forced `New = []`, so this state was previously unrepresentable.
+-/
+def sat_done_atom_new :
+    Sat (sig := sig1) .empty
+      (StableCtx.snoc .empty (.atom ⟨0, Nat.zero_lt_one⟩))
+      (.atom ⟨0, Nat.zero_lt_one⟩) :=
+  .done (.atom .here)
 
 /-- No-observation saturation entered as a positive goal. -/
-def sinv_satPos_up :
+def sinv_satPos_done :
     SInv (sig := sig0) .empty .empty .empty (.pos (.shift .one)) :=
-  .satPos sat_up
+  .satPos sat_done
 
 /-- No-observation saturation entered as a negative-shift goal. -/
-def sinv_satShift_up :
+def sinv_satShift_done :
     SInv (sig := sig0) .empty .empty .empty (.neg (.shift (.shift .one))) :=
-  .satShift sat_up
+  .satShift sat_done
 
 /--
 Nonempty atomic batch: one observation `↓0` in `old ++ new`, body aborts under
@@ -378,8 +392,11 @@ def sinv_batch_one :
 theorem foc_letShift_invert :
     (Foc.asLetShift foc_letShift).isSome = true := rfl
 
-theorem sat_up_invert :
-    (Sat.asUp sat_up).isSome = true := rfl
+theorem sat_done_invert :
+    (Sat.asDone sat_done).isSome = true := rfl
+
+theorem sat_done_atom_new_invert :
+    (Sat.asDone sat_done_atom_new).isSome = true := rfl
 
 theorem inv_focusShift_invert :
     Inv.asFocusShift inv_focusShift = foc_up_shift := rfl

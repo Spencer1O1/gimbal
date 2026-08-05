@@ -154,7 +154,7 @@ def batchSubstLookup {Γ : StableCtx sig} {selected : Pending sig}
 
 def Sat.erase {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Tm (Old.append New).erase P.erase
-  | .up v => SPosNeu.erase v
+  | .done v => SPosNeu.erase v
   | .batch obs body =>
       subst (fun {_} x => batchSubstLookup obs x) (SInv.erase body)
 
@@ -220,11 +220,11 @@ def erase_case_zero_sum :
       (Goal.neg (.one : Neg sig0.nBases)).erase :=
   Inv.erase inv_case_zero_sum
 
-def erase_sat_up :
+def erase_sat_done :
     Tm (sig := sig0)
       (StableCtx.append (.empty : StableCtx sig0) .empty).erase
       (Pos.shift (.one : Neg sig0.nBases)).erase :=
-  Sat.erase sat_up
+  Sat.erase sat_done
 
 def erase_batch_one :
     Tm (sig := sig0)
@@ -251,8 +251,8 @@ theorem erase_unit_eq :
     Inv.erase (inv_unit : Inv (sig := sig0) .empty .empty (.neg .one)) =
       (Tm.unit : Tm (sig := sig0) .empty .unit) := rfl
 
-theorem erase_sat_up_eq :
-    Sat.erase (sat_up : Sat (sig := sig0) .empty .empty (.shift .one)) =
+theorem erase_sat_done_eq :
+    Sat.erase (sat_done : Sat (sig := sig0) .empty .empty (.shift .one)) =
       (Tm.unit : Tm (sig := sig0) .empty .unit) := rfl
 
 end EraseFixtures
