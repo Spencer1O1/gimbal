@@ -10,6 +10,7 @@
 import Gimbal.Equality.Abstract
 import Gimbal.Equality.Focus
 import Gimbal.Equality.Reachability
+import Gimbal.Equality.ReconstructCore
 
 namespace Gimbal
 namespace Equality
@@ -49,34 +50,7 @@ def scheduleFor (Γ : ReachCtx sig.nBases) (goal : Object sig.nBases) :
 def scheduleSize (s : Schedule sig.nBases) : Nat :=
   s.size
 
-/-! ### Witness reconstruction -/
-
-/-- Find a hypothesis with exact type `A` (oldest wins). -/
-def findHypVar (hyps : Array (Object sig.nBases)) (A : Object sig.nBases) :
-    Option (Var (Ctx.ofHyps hyps) A) :=
-  Id.run do
-    for i in [:hyps.size] do
-      match Ctx.varOldest hyps i with
-      | some ⟨B, x⟩ =>
-        if h : B = A then
-          return some (h ▸ x)
-        else
-          pure ()
-      | none => pure ()
-    return none
-
-inductive ReconstructCmd (sig : Signature) where
-  | neuOf (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-  | witness (hyps : Array (Object sig.nBases)) (w : Witness)
-  | invOf (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-
-inductive ReconstructVal (sig : Signature) where
-  | neu (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-      (n : NegNeu (Ctx.ofHyps hyps) A) : ReconstructVal sig
-  | wit (hyps : Array (Object sig.nBases))
-      (p : (A : Object sig.nBases) × NegNeu (Ctx.ofHyps hyps) A) : ReconstructVal sig
-  | inv (hyps : Array (Object sig.nBases)) (A : Object sig.nBases)
-      (t : InvTm (Ctx.ofHyps hyps) A) : ReconstructVal sig
+/-! ### Witness reconstruction (fueled — superseded by `ReconstructWF`) -/
 
 /-- Fueled witness reconstruction (single recursive worker). -/
 def reconstructGo (fuel : Nat) (σ : ReachState sig.nBases) :
