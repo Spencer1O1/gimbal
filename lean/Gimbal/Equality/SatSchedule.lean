@@ -73,31 +73,34 @@ meaning of the continuation, so they meet in the middle. Permutation and
 repetition are the special cases the saturation calculus needs.
 -/
 theorem tmEq_applyPairObs_congr {fuel₁ fuel₂ : Nat}
-    {σ₁ σ₂ : ReachState sig.nBases} {hyps : Array (Object sig.nBases)}
+    {σ₁ : ReachState sig.nBases} {cert₁ : ReachRankCert σ₁}
+    {σ₂ : ReachState sig.nBases} {cert₂ : ReachRankCert σ₂}
+    {hyps : Array (Object sig.nBases)}
     {entries₁ entries₂ : Array (PairEntry sig hyps)} {A : Object sig.nBases}
     {cont t₁ t₂ : InvTm (Ctx.ofHyps hyps) A}
-    (h₁ : applyPairObs fuel₁ σ₁ hyps entries₁ cont = .ok t₁)
-    (h₂ : applyPairObs fuel₂ σ₂ hyps entries₂ cont = .ok t₂) :
+    (h₁ : applyPairObs fuel₁ cert₁ hyps entries₁ cont = .ok t₁)
+    (h₂ : applyPairObs fuel₂ cert₂ hyps entries₂ cont = .ok t₂) :
     TmEq t₁.erase t₂.erase :=
   (tmEq_applyPairObs _ _ _ _ h₁).trans (tmEq_applyPairObs _ _ _ _ h₂).symm
 
 /-- Permuting the schedule does not change the meaning of the saturated form. -/
 theorem tmEq_applyPairObs_perm {fuel : Nat} {σ : ReachState sig.nBases}
-    {hyps : Array (Object sig.nBases)}
+    {cert : ReachRankCert σ} {hyps : Array (Object sig.nBases)}
     {entries₁ entries₂ : Array (PairEntry sig hyps)} {A : Object sig.nBases}
     {cont t₁ t₂ : InvTm (Ctx.ofHyps hyps) A}
     (_hp : entries₁.toList.Perm entries₂.toList)
-    (h₁ : applyPairObs fuel σ hyps entries₁ cont = .ok t₁)
-    (h₂ : applyPairObs fuel σ hyps entries₂ cont = .ok t₂) :
+    (h₁ : applyPairObs fuel cert hyps entries₁ cont = .ok t₁)
+    (h₂ : applyPairObs fuel cert hyps entries₂ cont = .ok t₂) :
     TmEq t₁.erase t₂.erase :=
   tmEq_applyPairObs_congr h₁ h₂
 
 /-- Repeating an observation does not change the meaning of the saturated form. -/
 theorem tmEq_applyPairObs_dup {fuel : Nat} {σ : ReachState sig.nBases}
-    {hyps : Array (Object sig.nBases)} {entries : Array (PairEntry sig hyps)}
+    {cert : ReachRankCert σ} {hyps : Array (Object sig.nBases)}
+    {entries : Array (PairEntry sig hyps)}
     {A : Object sig.nBases} {cont t₁ t₂ : InvTm (Ctx.ofHyps hyps) A}
-    (h₁ : applyPairObs fuel σ hyps entries cont = .ok t₁)
-    (h₂ : applyPairObs fuel σ hyps (entries ++ entries) cont = .ok t₂) :
+    (h₁ : applyPairObs fuel cert hyps entries cont = .ok t₁)
+    (h₂ : applyPairObs fuel cert hyps (entries ++ entries) cont = .ok t₂) :
     TmEq t₁.erase t₂.erase :=
   tmEq_applyPairObs_congr h₁ h₂
 
@@ -106,13 +109,13 @@ Reordering an admissible schedule is inert: the saturated form is still well
 focused and still means what the continuation meant.
 -/
 theorem applyPairObs_perm_ok {fuel : Nat} {σ : ReachState sig.nBases}
-    {hyps : Array (Object sig.nBases)}
+    {cert : ReachRankCert σ} {hyps : Array (Object sig.nBases)}
     {entries₁ entries₂ : Array (PairEntry sig hyps)} {A : Object sig.nBases}
     {cont t₁ t₂ : InvTm (Ctx.ofHyps hyps) A}
     (hp : entries₁.toList.Perm entries₂.toList)
     (hentries : WellEntries entries₁.toList) (hcont : WellInv cont)
-    (h₁ : applyPairObs fuel σ hyps entries₁ cont = .ok t₁)
-    (h₂ : applyPairObs fuel σ hyps entries₂ cont = .ok t₂) :
+    (h₁ : applyPairObs fuel cert hyps entries₁ cont = .ok t₁)
+    (h₂ : applyPairObs fuel cert hyps entries₂ cont = .ok t₂) :
     WellInv t₁ ∧ WellInv t₂ ∧ TmEq t₁.erase t₂.erase :=
   ⟨wellInv_applyPairObs _ _ _ _ hentries hcont h₁,
     wellInv_applyPairObs _ _ _ _ (wellEntries_perm hp hentries) hcont h₂,
@@ -120,11 +123,12 @@ theorem applyPairObs_perm_ok {fuel : Nat} {σ : ReachState sig.nBases}
 
 /-- Repeating observations is inert in the same sense. -/
 theorem applyPairObs_dup_ok {fuel : Nat} {σ : ReachState sig.nBases}
-    {hyps : Array (Object sig.nBases)} {entries : Array (PairEntry sig hyps)}
+    {cert : ReachRankCert σ} {hyps : Array (Object sig.nBases)}
+    {entries : Array (PairEntry sig hyps)}
     {A : Object sig.nBases} {cont t₁ t₂ : InvTm (Ctx.ofHyps hyps) A}
     (hentries : WellEntries entries.toList) (hcont : WellInv cont)
-    (h₁ : applyPairObs fuel σ hyps entries cont = .ok t₁)
-    (h₂ : applyPairObs fuel σ hyps (entries ++ entries) cont = .ok t₂) :
+    (h₁ : applyPairObs fuel cert hyps entries cont = .ok t₁)
+    (h₂ : applyPairObs fuel cert hyps (entries ++ entries) cont = .ok t₂) :
     WellInv t₁ ∧ WellInv t₂ ∧ TmEq t₁.erase t₂.erase := by
   refine ⟨wellInv_applyPairObs _ _ _ _ hentries hcont h₁, ?_,
     tmEq_applyPairObs_congr h₁ h₂⟩

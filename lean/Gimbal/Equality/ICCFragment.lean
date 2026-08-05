@@ -64,8 +64,8 @@ def RawReferenceProduced {hyps : Array (Object sig.nBases)} {A : Object sig.nBas
       WellInv t₀ ∧
       WellInv u₀ ∧
       pairObs ⟨hyps, newFrom⟩ goal t₀ u₀ = .ok entries c ∧
-      (applyPairObs (saturationBudget fuel entries.size) c.state hyps entries t₀ = .ok t' ∨
-        applyPairObs (saturationBudget fuel entries.size) c.state hyps entries u₀ = .ok t')
+      (applyPairObs (saturationBudget fuel entries.size) c.cert hyps entries t₀ = .ok t' ∨
+        applyPairObs (saturationBudget fuel entries.size) c.cert hyps entries u₀ = .ok t')
 
 /--
 Raw production plus encode alignment of the schedule result.
@@ -160,7 +160,7 @@ theorem rawReferenceProduced_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBas
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
     (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
+    (h : applyPairObs (saturationBudget fuel entries.size) c.cert Γ.hyps entries t =
       .ok t') :
     RawReferenceProduced t' :=
   ⟨Γ.newFrom, goal, fuel, entries, c, t, u, hinv, ht, hu, hobs, Or.inl h⟩
@@ -176,7 +176,7 @@ theorem validEncodeFragment_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBase
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
     (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
+    (h : applyPairObs (saturationBudget fuel entries.size) c.cert Γ.hyps entries t =
       .ok t')
     (hready' : PhaseEncodeReady t') :
     ValidEncodeFragment t' :=
@@ -203,7 +203,7 @@ theorem rawReferenceProduced_referencePhase_right (fuel : Nat)
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
     (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries u =
+    (h : applyPairObs (saturationBudget fuel entries.size) c.cert Γ.hyps entries u =
       .ok u') :
     RawReferenceProduced u' :=
   ⟨Γ.newFrom, goal, fuel, entries, c, t, u, hinv, ht, hu, hobs, Or.inr h⟩
@@ -217,7 +217,7 @@ theorem validEncodeFragment_referencePhase_right (fuel : Nat)
     (hinv : checkOldInvariant Γ.oldPrefix goal = true)
     (ht : WellInv t) (hu : WellInv u)
     (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries u =
+    (h : applyPairObs (saturationBudget fuel entries.size) c.cert Γ.hyps entries u =
       .ok u')
     (hready' : PhaseEncodeReady u') :
     ValidEncodeFragment u' :=
@@ -233,7 +233,7 @@ theorem wellInv_canonicalize_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBas
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (ht : WellInv t) (hu : WellInv u)
     (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs (saturationBudget fuel entries.size) c.state Γ.hyps entries t =
+    (h : applyPairObs (saturationBudget fuel entries.size) c.cert Γ.hyps entries t =
       .ok t') :
     WellInv (canonicalize t') :=
   wellInv_referencePhase (saturationBudget fuel entries.size) ht hu hobs h

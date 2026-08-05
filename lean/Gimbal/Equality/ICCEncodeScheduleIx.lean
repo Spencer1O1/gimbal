@@ -894,37 +894,44 @@ Resolve a consistency witness to an `IxExactEntry` when reconstruction succeeds.
 No readiness or encodability premise. Returns `none` when reconstruction fails
 or the recovered type mismatches `P` — totality is **not** assumed (8D).
 -/
-def ixExactEntry_of_consistencyWitness (fuel : Nat) (σ : ReachState sig.nBases)
+def ixExactEntry_of_consistencyWitness {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (P : Object sig.nBases) (w : Witness) :
     Option (IxExactEntry (Ctx.ofHyps (sig := sig) hyps)) :=
-  match reconstructWitness fuel σ hyps w with
-  | some ⟨P', n⟩ =>
-      if hP : P' = P then
-        some ⟨P, hP ▸ n⟩
-      else
-        none
+  match σ.findTypeIdx P with
   | none => none
+  | some i =>
+    match reconstructWitnessWF_ofCell cert i hyps w with
+    | some ⟨P', n⟩ =>
+        if hP : P' = P then
+          some ⟨P, hP ▸ n⟩
+        else
+          none
+    | none => none
 
 /--
 Conditional correctness: successful reconstruction yields a well-phased neutral
 of type `P`. Does not prove reconstruction always succeeds.
 -/
-theorem ixExactEntry_of_consistencyWitness_correct (fuel : Nat)
-    (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+theorem ixExactEntry_of_consistencyWitness_correct {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
     (P : Object sig.nBases) (w : Witness)
     {e : IxExactEntry (Ctx.ofHyps (sig := sig) hyps)}
-    (h : ixExactEntry_of_consistencyWitness (sig := sig) fuel σ hyps P w = some e) :
+    (h : ixExactEntry_of_consistencyWitness (sig := sig) cert hyps P w = some e) :
     e.P = P ∧ WellNeg e.neu := by
   simp only [ixExactEntry_of_consistencyWitness] at h
   split at h
-  · next P' n hrec =>
-      split at h
-      · next hP =>
-          cases h
-          subst hP
-          exact ⟨rfl, wellNeg_reconstructWitness fuel σ hyps w hrec⟩
-      · cases h
   · cases h
+  · next i _ =>
+      split at h
+      · next P' n hrec =>
+          split at h
+          · next hP =>
+              cases h
+              subst hP
+              exact ⟨rfl, wellNeg_reconstructWitnessWF_ofCell cert i hyps w hrec⟩
+          · cases h
+      · cases h
 
 /-!
 8D reconstruction totality is landed as `ReconstructTotalityPackage` (WF).
@@ -1618,20 +1625,23 @@ def neverIxReachCtx : ReachCtx NeverIxSig.nBases where
   hyps := neverIxInconsistHyps
   newFrom := 0
 
+def neverIxCertified : CertifiedReachResult NeverIxSig.nBases :=
+  certifiedRunReachability neverIxReachCtx NeverIxGoal
+
 def neverIxReachState : ReachState NeverIxSig.nBases :=
-  runReachability neverIxReachCtx NeverIxGoal
+  neverIxCertified.state
 
 theorem neverIxReach_inconsistent :
     neverIxReachState.inconsistent = true := by
   native_decide
 
 theorem neverIx_neuOfType_some :
-    (neuOfType (sig := NeverIxSig) 32 neverIxReachState neverIxInconsistHyps
+    (neuOfTypeWF (sig := NeverIxSig) neverIxCertified.cert neverIxInconsistHyps
       (.never : Object NeverIxSig.nBases)).isSome = true := by
   native_decide
 
 def neverIxInconsistentNeu : NegNeu neverIxInconsistΓ .never :=
-  (neuOfType (sig := NeverIxSig) 32 neverIxReachState neverIxInconsistHyps
+  (neuOfTypeWF (sig := NeverIxSig) neverIxCertified.cert neverIxInconsistHyps
     (.never : Object NeverIxSig.nBases)).get neverIx_neuOfType_some
 
 /-- Inconsistent reachability → same exact-never core (entries ignored). -/
@@ -1671,29 +1681,32 @@ theorem consistAtom_forcedRule :
     forcedRule (sig := consistAtomIxSig) consistAtomEntry.ws ConsistAtom = .focus := by
   simp [forcedRule, consistAtomEntry]
 
+def consistAtomCertified : CertifiedReachResult consistAtomIxSig.nBases :=
+  certifiedRunReachability ⟨consistAtomHyps, 0⟩ ConsistAtom
+
 def consistAtomReach : ReachState consistAtomIxSig.nBases :=
-  runReachability ⟨consistAtomHyps, 0⟩ ConsistAtom
+  consistAtomCertified.state
 
 theorem consistAtom_resolve_some :
-    (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
-      consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)).isSome = true := by
+    (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig)
+      consistAtomCertified.cert consistAtomHyps ConsistAtom (.ctxVar 0)).isSome = true := by
   native_decide
 
 def consistAtomEntryResolved : IxExactEntry consistAtomΓ :=
-  (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
-    consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)).get
+  (ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig)
+    consistAtomCertified.cert consistAtomHyps ConsistAtom (.ctxVar 0)).get
     consistAtom_resolve_some
 
 theorem consistAtom_resolve_eq :
-    ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig) 8
-      consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0) =
+    ixExactEntry_of_consistencyWitness (sig := consistAtomIxSig)
+      consistAtomCertified.cert consistAtomHyps ConsistAtom (.ctxVar 0) =
       some consistAtomEntryResolved :=
   (Option.some_get consistAtom_resolve_some).symm
 
 theorem consistAtom_resolve_correct :
     consistAtomEntryResolved.P = ConsistAtom ∧ WellNeg consistAtomEntryResolved.neu :=
-  ixExactEntry_of_consistencyWitness_correct (sig := consistAtomIxSig) 8
-    consistAtomReach consistAtomHyps ConsistAtom (.ctxVar 0)
+  ixExactEntry_of_consistencyWitness_correct (sig := consistAtomIxSig)
+    consistAtomCertified.cert consistAtomHyps ConsistAtom (.ctxVar 0)
     consistAtom_resolve_eq
 
 /-- Reconstructed atom neutral (definitionally `.var .here` for `ctxVar 0`). -/
@@ -1761,29 +1774,33 @@ theorem consistCoprod_forcedRule :
     forcedRule (sig := consistCoprodIxSig) consistCoprodEntry.ws ConsistSum = .focus := by
   simp [forcedRule, consistCoprodEntry]
 
+def consistCoprodCertified : CertifiedReachResult consistCoprodIxSig.nBases :=
+  certifiedRunReachability ⟨consistCoprodHyps, 0⟩ ConsistSum
+
 def consistCoprodReach : ReachState consistCoprodIxSig.nBases :=
-  runReachability ⟨consistCoprodHyps, 0⟩ ConsistSum
+  consistCoprodCertified.state
 
 theorem consistCoprod_resolve_some :
-    (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
-      consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)).isSome = true := by
+    (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig)
+      consistCoprodCertified.cert consistCoprodHyps ConsistSum (.ctxVar 0)).isSome =
+      true := by
   native_decide
 
 def consistCoprodEntryResolved : IxExactEntry consistCoprodΓ :=
-  (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
-    consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)).get
+  (ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig)
+    consistCoprodCertified.cert consistCoprodHyps ConsistSum (.ctxVar 0)).get
     consistCoprod_resolve_some
 
 theorem consistCoprod_resolve_eq :
-    ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig) 8
-      consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0) =
+    ixExactEntry_of_consistencyWitness (sig := consistCoprodIxSig)
+      consistCoprodCertified.cert consistCoprodHyps ConsistSum (.ctxVar 0) =
       some consistCoprodEntryResolved :=
   (Option.some_get consistCoprod_resolve_some).symm
 
 theorem consistCoprod_resolve_correct :
     consistCoprodEntryResolved.P = ConsistSum ∧ WellNeg consistCoprodEntryResolved.neu :=
-  ixExactEntry_of_consistencyWitness_correct (sig := consistCoprodIxSig) 8
-    consistCoprodReach consistCoprodHyps ConsistSum (.ctxVar 0)
+  ixExactEntry_of_consistencyWitness_correct (sig := consistCoprodIxSig)
+    consistCoprodCertified.cert consistCoprodHyps ConsistSum (.ctxVar 0)
     consistCoprod_resolve_eq
 
 def consistCoprodNeu : NegNeu consistCoprodΓ ConsistSum := .var .here

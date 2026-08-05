@@ -91,23 +91,25 @@ Applying one observation, and applying a whole schedule, both return a term
 with the same meaning as the continuation they were given.
 -/
 theorem tmEq_applySchedule : ∀ fuel : Nat,
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (P : Object sig.nBases) (nP : NegNeu (Ctx.ofHyps hyps) P)
         (rest : List (PairEntry sig hyps)) {A : Object sig.nBases}
         {cont t' : InvTm (Ctx.ofHyps hyps) A},
-        applyObsNeu fuel σ hyps P nP rest cont = .ok t' →
+        applyObsNeu fuel cert hyps P nP rest cont = .ok t' →
         TmEq t'.erase cont.erase) ∧
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (entries : List (PairEntry sig hyps)) {A : Object sig.nBases}
         {cont t' : InvTm (Ctx.ofHyps hyps) A},
-        applyPairObsGo fuel σ hyps entries cont = .ok t' →
+        applyPairObsGo fuel cert hyps entries cont = .ok t' →
         TmEq t'.erase cont.erase)
   | 0 => by
-      constructor <;> intro σ hyps <;> intros <;> simp_all [applyObsNeu, applyPairObsGo]
+      constructor <;> intros <;> simp_all [applyObsNeu, applyPairObsGo]
   | fuel + 1 => by
       obtain ⟨ihObs, ihGo⟩ := tmEq_applySchedule fuel
       constructor
-      · intro σ hyps P nP rest A cont t' h
+      · intro σ cert hyps P nP rest A cont t' h
         rw [applyObsNeu] at h
         dsimp only at h
         split at h
@@ -136,7 +138,7 @@ theorem tmEq_applySchedule : ∀ fuel : Nat,
                 (InvTm.tmEq_castCtx_left _ (ihGo _ _ _ heqB)) (.refl _)) ?_
               exact .of_eq (erase_letPos_abstr nP cont)
             all_goals exact absurd h (by simp)
-      · intro σ hyps entries A cont t' h
+      · intro σ cert hyps entries A cont t' h
         rw [applyPairObsGo.eq_def] at h
         dsimp only at h
         split at h
@@ -146,15 +148,18 @@ theorem tmEq_applySchedule : ∀ fuel : Nat,
           · split at h
             · exact absurd h (by simp)
             · split at h
-              · exact ihObs _ _ _ _ _ h
               · exact absurd h (by simp)
+              · split at h
+                · exact ihObs _ _ _ _ _ h
+                · exact absurd h (by simp)
           · exact ihObs _ _ _ _ _ h
 
 /-- Top-level schedule application preserves meaning. -/
-theorem tmEq_applyPairObs (fuel : Nat) (σ : ReachState sig.nBases)
+theorem tmEq_applyPairObs (fuel : Nat) {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (entries : Array (PairEntry sig hyps))
     {A : Object sig.nBases} {cont t' : InvTm (Ctx.ofHyps hyps) A}
-    (h : applyPairObs fuel σ hyps entries cont = .ok t') :
+    (h : applyPairObs fuel cert hyps entries cont = .ok t') :
     TmEq t'.erase cont.erase := by
   rw [applyPairObs] at h
   split at h

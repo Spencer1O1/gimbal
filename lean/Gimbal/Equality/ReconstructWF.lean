@@ -1088,6 +1088,55 @@ def invOfTypeWF {σ : ReachState sig.nBases}
     else none
   | _ => none
 
+/-- Reconstructed neutrals from `neuOfTypeWF` respect phase discipline. -/
+theorem wellNeg_neuOfTypeWF {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (hyps : Array (Object sig.nBases))
+    (A : Object sig.nBases) {n : NegNeu (Ctx.ofHyps hyps) A}
+    (h : neuOfTypeWF cert hyps A = some n) : WellNeg n := by
+  dsimp [neuOfTypeWF] at h
+  split at h
+  · rename_i hyps' A' m hw
+    have hwWell := well_reconstructGoWF cert _ (.neuOf hyps A) hw
+    split at h
+    · split at h
+      · cases h
+        exact wellNeg_cast _ (wellNeg_castHyps _ hwWell)
+      · cases h
+    · cases h
+  · cases h
+
+/-- Reconstructed neutrals from `reconstructWitnessWF` respect phase discipline. -/
+theorem wellNeg_reconstructWitnessWF {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (i : Nat) (b : SlotNew)
+    (hyps : Array (Object sig.nBases)) (w : Witness)
+    {A : Object sig.nBases} {n : NegNeu (Ctx.ofHyps hyps) A}
+    (h : reconstructWitnessWF cert i b hyps w = some ⟨A, n⟩) : WellNeg n := by
+  dsimp [reconstructWitnessWF] at h
+  split at h
+  · cases h
+  · rename_i r _
+    split at h
+    · rename_i hyps' A' m hw
+      have hwWell := well_reconstructGoWF cert r (.witness hyps w) hw
+      split at h
+      · cases h
+        exact wellNeg_castHyps _ hwWell
+      · cases h
+    · cases h
+
+/-- Cell-entry reconstruction respects phase discipline. -/
+theorem wellNeg_reconstructWitnessWF_ofCell {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ) (i : Nat)
+    (hyps : Array (Object sig.nBases)) (w : Witness)
+    {A : Object sig.nBases} {n : NegNeu (Ctx.ofHyps hyps) A}
+    (h : reconstructWitnessWF_ofCell cert i hyps w = some ⟨A, n⟩) : WellNeg n := by
+  dsimp [reconstructWitnessWF_ofCell] at h
+  split at h
+  · exact wellNeg_reconstructWitnessWF cert i true hyps w h
+  · split at h
+    · exact wellNeg_reconstructWitnessWF cert i false hyps w h
+    · cases h
+
 /-! ## Domain predicates -/
 
 /-- Stored neutral witness at a ranked provenance slot. -/

@@ -25,7 +25,7 @@ theorem wellInv_referencePhase (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {entries : Array (PairEntry sig Γ.hyps)} {c : CertifiedReachResult sig.nBases}
     {t' : InvTm (Ctx.ofHyps Γ.hyps) A}
     (ht : WellInv t) (hu : WellInv u) (hobs : pairObs Γ goal t u = .ok entries c)
-    (h : applyPairObs fuel c.state Γ.hyps entries t = .ok t') :
+    (h : applyPairObs fuel c.cert Γ.hyps entries t = .ok t') :
     WellInv (canonicalize t') :=
   wellInv_canonicalize (wellInv_saturate_pairObs fuel ht hu hobs ht h)
 

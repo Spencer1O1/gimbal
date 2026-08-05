@@ -4,9 +4,9 @@
   The saturated form is built from three kinds of material: the continuation it
   was handed, the observations in the schedule, and the binders it introduces
   for them. The first two are legal by hypothesis (and, for consistency
-  observations, by `wellNeg_reconstructWitness`); this module supplies the
-  third, i.e. that abstraction, the coproduct branches, and the schedule
-  remapping all preserve phase legality.
+  observations, by `wellNeg_reconstructWitnessWF_ofCell`); this module
+  supplies the third, i.e. that abstraction, the coproduct branches, and the
+  schedule remapping all preserve phase legality.
 -/
 
 import Gimbal.Equality.ExactObs
@@ -150,8 +150,8 @@ theorem wellNeg_weaken {Γ : Ctx sig} {A B : Object sig.nBases} {n : NegNeu Γ A
 /--
 An entry is admissible when it observes a positive type, and (for an exact
 demand) the neutral it observes is a legal spine. Consistency entries carry a
-witness rather than a neutral; `wellNeg_reconstructWitness` supplies legality
-for those.
+witness rather than a neutral; `wellNeg_reconstructWitnessWF_ofCell` supplies
+legality for those.
 -/
 inductive WellEntry {hyps : Array (Object sig.nBases)} :
     PairEntry sig hyps → Prop where
@@ -165,11 +165,12 @@ def WellEntries {hyps : Array (Object sig.nBases)}
     (entries : List (PairEntry sig hyps)) : Prop :=
   ∀ e ∈ entries, WellEntry e
 
-theorem wellEntry_mapRestAbstractAtom (fuel : Nat) (σ : ReachState sig.nBases)
+theorem wellEntry_mapRestAbstractAtom {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
     (hctx : Ctx.ofHyps (hyps.push P) = Ctx.ofHyps hyps ▻ P) (target : RawNeu)
     {e : PairEntry sig hyps} (he : WellEntry e) :
-    WellEntry (mapRestAbstractAtom fuel σ hyps P hctx target e) := by
+    WellEntry (mapRestAbstractAtom cert hyps P hctx target e) := by
   cases he with
   | exact hpol hn =>
       exact .exact hpol
@@ -178,19 +179,22 @@ theorem wellEntry_mapRestAbstractAtom (fuel : Nat) (σ : ReachState sig.nBases)
       rw [mapRestAbstractAtom]
       split
       · split
-        · rename_i hRec hQ
-          cases hQ
-          exact .exact hpol
-            (wellNeg_castCtx _ (wellNeg_abstractAtom _ _ (wellNeg_weaken
-              (wellNeg_reconstructWitness fuel σ hyps _ hRec))))
+        · split
+          · rename_i hRec hQ
+            cases hQ
+            exact .exact hpol
+              (wellNeg_castCtx _ (wellNeg_abstractAtom _ _ (wellNeg_weaken
+                (wellNeg_reconstructWitnessWF_ofCell cert _ hyps _ hRec))))
+          · exact .consistency hpol
         · exact .consistency hpol
       · exact .consistency hpol
 
-theorem wellEntry_mapRestAbstractSumInl (fuel : Nat) (σ : ReachState sig.nBases)
+theorem wellEntry_mapRestAbstractSumInl {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases)
     (hL : Ctx.ofHyps (hyps.push L) = Ctx.ofHyps hyps ▻ L) (target : RawNeu)
     {e : PairEntry sig hyps} (he : WellEntry e) :
-    WellEntry (mapRestAbstractSumInl fuel σ hyps L R hL target e) := by
+    WellEntry (mapRestAbstractSumInl cert hyps L R hL target e) := by
   cases he with
   | exact hpol hn =>
       exact .exact hpol
@@ -199,19 +203,22 @@ theorem wellEntry_mapRestAbstractSumInl (fuel : Nat) (σ : ReachState sig.nBases
       rw [mapRestAbstractSumInl]
       split
       · split
-        · rename_i hRec hQ
-          cases hQ
-          exact .exact hpol
-            (wellNeg_castCtx _ (wellNeg_abstractSum _ _ (wellNeg_weaken
-              (wellNeg_reconstructWitness fuel σ hyps _ hRec))))
+        · split
+          · rename_i hRec hQ
+            cases hQ
+            exact .exact hpol
+              (wellNeg_castCtx _ (wellNeg_abstractSum _ _ (wellNeg_weaken
+                (wellNeg_reconstructWitnessWF_ofCell cert _ hyps _ hRec))))
+          · exact .consistency hpol
         · exact .consistency hpol
       · exact .consistency hpol
 
-theorem wellEntry_mapRestAbstractSumInr (fuel : Nat) (σ : ReachState sig.nBases)
+theorem wellEntry_mapRestAbstractSumInr {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (L R : Object sig.nBases)
     (hR : Ctx.ofHyps (hyps.push R) = Ctx.ofHyps hyps ▻ R) (target : RawNeu)
     {e : PairEntry sig hyps} (he : WellEntry e) :
-    WellEntry (mapRestAbstractSumInr fuel σ hyps L R hR target e) := by
+    WellEntry (mapRestAbstractSumInr cert hyps L R hR target e) := by
   cases he with
   | exact hpol hn =>
       exact .exact hpol
@@ -220,11 +227,13 @@ theorem wellEntry_mapRestAbstractSumInr (fuel : Nat) (σ : ReachState sig.nBases
       rw [mapRestAbstractSumInr]
       split
       · split
-        · rename_i hRec hQ
-          cases hQ
-          exact .exact hpol
-            (wellNeg_castCtx _ (wellNeg_abstractSum _ _ (wellNeg_weaken
-              (wellNeg_reconstructWitness fuel σ hyps _ hRec))))
+        · split
+          · rename_i hRec hQ
+            cases hQ
+            exact .exact hpol
+              (wellNeg_castCtx _ (wellNeg_abstractSum _ _ (wellNeg_weaken
+                (wellNeg_reconstructWitnessWF_ofCell cert _ hyps _ hRec))))
+          · exact .consistency hpol
         · exact .consistency hpol
       · exact .consistency hpol
 
@@ -456,24 +465,26 @@ Applying one observation, and applying a whole admissible schedule, return a
 well-focused term whenever the continuation was one.
 -/
 theorem wellInv_applySchedule : ∀ fuel : Nat,
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (P : Object sig.nBases) (nP : NegNeu (Ctx.ofHyps hyps) P)
         (rest : List (PairEntry sig hyps)) {A : Object sig.nBases}
         {cont t' : InvTm (Ctx.ofHyps hyps) A},
         objectPolarity P = .pos → WellNeg nP → WellEntries rest → WellInv cont →
-        applyObsNeu fuel σ hyps P nP rest cont = .ok t' → WellInv t') ∧
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+        applyObsNeu fuel cert hyps P nP rest cont = .ok t' → WellInv t') ∧
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (entries : List (PairEntry sig hyps)) {A : Object sig.nBases}
         {cont t' : InvTm (Ctx.ofHyps hyps) A},
         WellEntries entries → WellInv cont →
-        applyPairObsGo fuel σ hyps entries cont = .ok t' → WellInv t')
+        applyPairObsGo fuel cert hyps entries cont = .ok t' → WellInv t')
   | 0 => by
-      constructor <;> intro σ hyps <;> intros <;>
+      constructor <;> intros <;>
         simp_all [applyObsNeu, applyPairObsGo]
   | fuel + 1 => by
       obtain ⟨ihObs, ihGo⟩ := wellInv_applySchedule fuel
       constructor
-      · intro σ hyps P nP rest A cont t' hpol hnP hrest hcont h
+      · intro σ cert hyps P nP rest A cont t' hpol hnP hrest hcont h
         rw [applyObsNeu] at h
         dsimp only at h
         split at h
@@ -492,7 +503,7 @@ theorem wellInv_applySchedule : ∀ fuel : Nat,
               refine .case hnP (wellInv_castCtx _ ?_) (wellInv_castCtx _ ?_)
               · exact ihGo _ _ _
                   (wellEntries_map _
-                    (fun _ he => wellEntry_mapRestAbstractSumInl _ _ _ _ _ _ _ he)
+                    (fun _ he => wellEntry_mapRestAbstractSumInl _ _ _ _ _ _ he)
                     hrest)
                   (wellInv_castCtx _
                     (wellInv_hsubstInv (wellInv_rename _ hbody)
@@ -500,7 +511,7 @@ theorem wellInv_applySchedule : ∀ fuel : Nat,
                   (by assumption)
               · exact ihGo _ _ _
                   (wellEntries_map _
-                    (fun _ he => wellEntry_mapRestAbstractSumInr _ _ _ _ _ _ _ he)
+                    (fun _ he => wellEntry_mapRestAbstractSumInr _ _ _ _ _ _ he)
                     hrest)
                   (wellInv_castCtx _
                     (wellInv_hsubstInv (wellInv_rename _ hbody)
@@ -514,13 +525,13 @@ theorem wellInv_applySchedule : ∀ fuel : Nat,
               refine .foc (.letPos hpol hnP (wellInv_castCtx _ ?_))
               exact ihGo _ _ _
                 (wellEntries_map _
-                  (fun _ he => wellEntry_mapRestAbstractAtom _ _ _ _ _ _ he)
+                  (fun _ he => wellEntry_mapRestAbstractAtom _ _ _ _ _ he)
                   hrest)
                 (wellInv_castCtx _
                   (wellInv_abstr _ _ (wellInv_weaken hcont)))
                 (by assumption)
             all_goals exact absurd h (by simp)
-      · intro σ hyps entries A cont t' hentries hcont h
+      · intro σ cert hyps entries A cont t' hentries hcont h
         rw [applyPairObsGo.eq_def] at h
         dsimp only at h
         split at h
@@ -534,28 +545,32 @@ theorem wellInv_applySchedule : ∀ fuel : Nat,
             split at h
             · exact absurd h (by simp)
             · split at h
-              · rename_i hRec hQ
-                cases hQ
-                cases he with
-                | consistency hpol =>
-                    exact ihObs _ _ _ _ _ hpol
-                      (wellNeg_reconstructWitness _ _ _ _ hRec) hrest hcont h
               · exact absurd h (by simp)
+              · split at h
+                · rename_i hRec hQ
+                  cases hQ
+                  cases he with
+                  | consistency hpol =>
+                      exact ihObs _ _ _ _ _ hpol
+                        (wellNeg_reconstructWitnessWF_ofCell _ _ _ _ hRec)
+                        hrest hcont h
+                · exact absurd h (by simp)
           · -- exact demand: observe the recorded neutral
             cases he with
             | exact hpol hn => exact ihObs _ _ _ _ _ hpol hn hrest hcont h
 
 /-- The saturated form of a well-focused term is well focused. -/
-theorem wellInv_applyPairObs (fuel : Nat) (σ : ReachState sig.nBases)
+theorem wellInv_applyPairObs (fuel : Nat) {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (entries : Array (PairEntry sig hyps))
     {A : Object sig.nBases} {cont t' : InvTm (Ctx.ofHyps hyps) A}
     (hentries : WellEntries entries.toList) (hcont : WellInv cont)
-    (h : applyPairObs fuel σ hyps entries cont = .ok t') : WellInv t' := by
+    (h : applyPairObs fuel cert hyps entries cont = .ok t') : WellInv t' := by
   rw [applyPairObs] at h
   split at h
   · split at h
     · cases h
-      exact .abort (wellNeg_neuOfType _ _ _ _ (by assumption))
+      exact .abort (wellNeg_neuOfTypeWF _ _ _ (by assumption))
     · exact absurd h (by simp)
   · exact (wellInv_applySchedule fuel).2 _ _ _ hentries hcont h
 
@@ -569,8 +584,8 @@ theorem wellInv_saturate_pairObs (fuel : Nat) {Γ : ReachCtx sig.nBases}
     {B : Object sig.nBases} {cont t' : InvTm (Ctx.ofHyps Γ.hyps) B}
     (ht : WellInv t) (hu : WellInv u) (hobs : pairObs Γ goal t u = .ok entries c)
     (hcont : WellInv cont)
-    (h : applyPairObs fuel c.state Γ.hyps entries cont = .ok t') : WellInv t' :=
-  wellInv_applyPairObs fuel c.state Γ.hyps entries (wellEntries_pairObs ht hu hobs) hcont h
+    (h : applyPairObs fuel c.cert Γ.hyps entries cont = .ok t') : WellInv t' :=
+  wellInv_applyPairObs fuel c.cert Γ.hyps entries (wellEntries_pairObs ht hu hobs) hcont h
 
 /--
 An inconsistent context collapses to the canonical absurd branch: saturation
@@ -578,12 +593,13 @@ either finds the discovered proof of `0` and aborts on it, or reports the
 invariant failure that a missing reconstruction is.
 -/
 theorem applyPairObs_absurd_of_inconsistent (fuel : Nat)
-    (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+    (hyps : Array (Object sig.nBases))
     (entries : Array (PairEntry sig hyps)) {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) (hinc : σ.inconsistent = true) :
     (∃ n : NegNeu (Ctx.ofHyps hyps) .never,
-        applyPairObs fuel σ hyps entries cont = .ok (.abort n)) ∨
-      applyPairObs fuel σ hyps entries cont = .invariantFailure := by
+        applyPairObs fuel cert hyps entries cont = .ok (.abort n)) ∨
+      applyPairObs fuel cert hyps entries cont = .invariantFailure := by
   rw [applyPairObs, if_pos hinc]
   split
   · exact .inl ⟨_, rfl⟩

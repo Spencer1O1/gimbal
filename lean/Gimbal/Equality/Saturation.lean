@@ -1140,7 +1140,7 @@ Map a remaining schedule entry under a new binder, abstracting the observed
 neutral. Consistency witnesses are reconstructed at the old context, weakened,
 abstracted, and stored as exact entries when possible.
 -/
-def mapRestAbstractAtom (fuel : Nat) (σ : ReachState sig.nBases)
+def mapRestAbstractAtom {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (P : Object sig.nBases)
     (hctx : Ctx.ofHyps (hyps.push P) = Ctx.ofHyps hyps ▻ P)
     (targetRaw : RawNeu) :
@@ -1149,16 +1149,20 @@ def mapRestAbstractAtom (fuel : Nat) (σ : ReachState sig.nBases)
       let nA := NegNeu.abstractAtom (P := P) .here targetRaw (NegNeu.weaken (B := P) n)
       .exact Q (NegNeu.castCtx hctx.symm nA)
   | .consistency Q w =>
-      match reconstructWitness fuel σ hyps w with
-      | some ⟨Q', n⟩ =>
-        if h : Q' = Q then
-          let nA := NegNeu.abstractAtom (P := P) .here targetRaw (NegNeu.weaken (B := P) (h ▸ n))
-          .exact Q (NegNeu.castCtx hctx.symm nA)
-        else
-          .consistency (hyps := hyps.push P) Q w
+      match σ.findTypeIdx Q with
+      | some i =>
+        match reconstructWitnessWF_ofCell cert i hyps w with
+        | some ⟨Q', n⟩ =>
+          if h : Q' = Q then
+            let nA := NegNeu.abstractAtom (P := P) .here targetRaw
+              (NegNeu.weaken (B := P) (h ▸ n))
+            .exact Q (NegNeu.castCtx hctx.symm nA)
+          else
+            .consistency (hyps := hyps.push P) Q w
+        | none => .consistency (hyps := hyps.push P) Q w
       | none => .consistency (hyps := hyps.push P) Q w
 
-def mapRestAbstractSumInl (fuel : Nat) (σ : ReachState sig.nBases)
+def mapRestAbstractSumInl {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (L _R : Object sig.nBases)
     (hL : Ctx.ofHyps (hyps.push L) = Ctx.ofHyps hyps ▻ L)
     (targetRaw : RawNeu) :
@@ -1167,16 +1171,20 @@ def mapRestAbstractSumInl (fuel : Nat) (σ : ReachState sig.nBases)
       let nA := NegNeu.abstractSum (B := L) .here targetRaw (NegNeu.weaken (B := L) n)
       .exact Q (NegNeu.castCtx hL.symm nA)
   | .consistency Q w =>
-      match reconstructWitness fuel σ hyps w with
-      | some ⟨Q', n⟩ =>
-        if h : Q' = Q then
-          let nA := NegNeu.abstractSum (B := L) .here targetRaw (NegNeu.weaken (B := L) (h ▸ n))
-          .exact Q (NegNeu.castCtx hL.symm nA)
-        else
-          .consistency (hyps := hyps.push L) Q w
+      match σ.findTypeIdx Q with
+      | some i =>
+        match reconstructWitnessWF_ofCell cert i hyps w with
+        | some ⟨Q', n⟩ =>
+          if h : Q' = Q then
+            let nA := NegNeu.abstractSum (B := L) .here targetRaw
+              (NegNeu.weaken (B := L) (h ▸ n))
+            .exact Q (NegNeu.castCtx hL.symm nA)
+          else
+            .consistency (hyps := hyps.push L) Q w
+        | none => .consistency (hyps := hyps.push L) Q w
       | none => .consistency (hyps := hyps.push L) Q w
 
-def mapRestAbstractSumInr (fuel : Nat) (σ : ReachState sig.nBases)
+def mapRestAbstractSumInr {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (_L R : Object sig.nBases)
     (hR : Ctx.ofHyps (hyps.push R) = Ctx.ofHyps hyps ▻ R)
     (targetRaw : RawNeu) :
@@ -1185,13 +1193,17 @@ def mapRestAbstractSumInr (fuel : Nat) (σ : ReachState sig.nBases)
       let nA := NegNeu.abstractSum (B := R) .here targetRaw (NegNeu.weaken (B := R) n)
       .exact Q (NegNeu.castCtx hR.symm nA)
   | .consistency Q w =>
-      match reconstructWitness fuel σ hyps w with
-      | some ⟨Q', n⟩ =>
-        if h : Q' = Q then
-          let nA := NegNeu.abstractSum (B := R) .here targetRaw (NegNeu.weaken (B := R) (h ▸ n))
-          .exact Q (NegNeu.castCtx hR.symm nA)
-        else
-          .consistency (hyps := hyps.push R) Q w
+      match σ.findTypeIdx Q with
+      | some i =>
+        match reconstructWitnessWF_ofCell cert i hyps w with
+        | some ⟨Q', n⟩ =>
+          if h : Q' = Q then
+            let nA := NegNeu.abstractSum (B := R) .here targetRaw
+              (NegNeu.weaken (B := R) (h ▸ n))
+            .exact Q (NegNeu.castCtx hR.symm nA)
+          else
+            .consistency (hyps := hyps.push R) Q w
+        | none => .consistency (hyps := hyps.push R) Q w
       | none => .consistency (hyps := hyps.push R) Q w
 
 mutual
@@ -1199,7 +1211,7 @@ mutual
 Apply one positive observation `nP`, then continue with `rest` under the
 extended context. Uses strong positive cut (neutral abstraction).
 -/
-def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
+def applyObsNeu (fuel : Nat) {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases))
     (P : Object sig.nBases)
     (nP : NegNeu (Ctx.ofHyps hyps) P)
@@ -1225,8 +1237,8 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
             Ctx.ofHyps_push hyps R
           let targetL := NegNeu.toRaw (NegNeu.weaken (B := L) nSum)
           let targetR := NegNeu.toRaw (NegNeu.weaken (B := R) nSum)
-          let restL := rest.map (mapRestAbstractSumInl fuel σ hyps L R hL targetL)
-          let restR := rest.map (mapRestAbstractSumInr fuel σ hyps L R hR targetR)
+          let restL := rest.map (mapRestAbstractSumInl cert hyps L R hL targetL)
+          let restR := rest.map (mapRestAbstractSumInr cert hyps L R hR targetR)
           -- Abstract the observation once, then commit the fresh binder to each
           -- injection: the branch bodies are instances of one common body, which
           -- is what makes the split meaning-preserving (strong sum η).
@@ -1238,8 +1250,8 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
           let contR : InvTm (Ctx.ofHyps hypsR) A :=
             InvTm.castCtx hR.symm
               (hsubstInv (InvTm.rename Rename.skip1 body) (InvTm.etaInr L R))
-          match applyPairObsGo fuel σ hypsL restL contL,
-                applyPairObsGo fuel σ hypsR restR contR with
+          match applyPairObsGo fuel cert hypsL restL contL,
+                applyPairObsGo fuel cert hypsR restR contR with
           | .ok bodyL', .ok bodyR' =>
               .ok (.case nSum
                 (InvTm.castCtx hL bodyL')
@@ -1251,21 +1263,21 @@ def applyObsNeu (fuel : Nat) (σ : ReachState sig.nBases)
           have hctx : Ctx.ofHyps hyps' = Ctx.ofHyps hyps ▻ P₀ :=
             Ctx.ofHyps_push hyps P₀
           let targetRaw := NegNeu.toRaw (NegNeu.weaken (B := P₀) n₀)
-          let rest' := rest.map (mapRestAbstractAtom fuel σ hyps P₀ hctx targetRaw)
+          let rest' := rest.map (mapRestAbstractAtom cert hyps P₀ hctx targetRaw)
           -- Typed abstraction: occurrences are recognised by `NegNeu.beq`, whose
           -- soundness lemma is what makes the cut erasure-preserving.
           let cont' : InvTm (Ctx.ofHyps hyps') A :=
             InvTm.castCtx hctx.symm
               (InvTm.abstr (P := P₀) .here (NegNeu.weaken (B := P₀) n₀)
                 (InvTm.weaken (B := P₀) cont))
-          match applyPairObsGo fuel σ hyps' rest' cont' with
+          match applyPairObsGo fuel cert hyps' rest' cont' with
           | .ok body' =>
               .ok (.foc (.letPos n₀ (InvTm.castCtx hctx body')))
           | .exhausted => .exhausted
           | .invariantFailure => .invariantFailure
 
 /-- Apply pair-directed observations (exact ∪ consistency). -/
-def applyPairObsGo (fuel : Nat) (σ : ReachState sig.nBases)
+def applyPairObsGo (fuel : Nat) {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases))
     (entries : List (PairEntry sig hyps))
     {A : Object sig.nBases}
@@ -1278,43 +1290,47 @@ def applyPairObsGo (fuel : Nat) (σ : ReachState sig.nBases)
     | e :: rest =>
       match e with
       | .consistency P w =>
-          match reconstructWitness fuel σ hyps w with
+          match σ.findTypeIdx P with
           | none => .invariantFailure
-          | some ⟨P', n⟩ =>
-            if hP : P' = P then
-              applyObsNeu fuel σ hyps P (hP ▸ n) rest cont
-            else
-              .invariantFailure
+          | some i =>
+            match reconstructWitnessWF_ofCell cert i hyps w with
+            | none => .invariantFailure
+            | some ⟨P', n⟩ =>
+              if hP : P' = P then
+                applyObsNeu fuel cert hyps P (hP ▸ n) rest cont
+              else
+                .invariantFailure
       | .exact P n =>
-          applyObsNeu fuel σ hyps P n rest cont
+          applyObsNeu fuel cert hyps P n rest cont
 end
 
 /-- Top-level pair-obs application (handles inconsistency). -/
-def applyPairObs (fuel : Nat) (σ : ReachState sig.nBases)
+def applyPairObs (fuel : Nat) {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases))
     (entries : Array (PairEntry sig hyps))
     {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) :
     SaturateResult (Ctx.ofHyps hyps) A :=
   if σ.inconsistent then
-    match neuOfType fuel σ hyps (.never : Object sig.nBases) with
+    match neuOfTypeWF cert hyps (.never : Object sig.nBases) with
     | some n => .ok (.abort n)
     | none => .invariantFailure
   else
-    applyPairObsGo fuel σ hyps entries.toList cont
+    applyPairObsGo fuel cert hyps entries.toList cont
 
 /--
 Apply schedule entries oldest-first. Positive types are inverted:
 `never` collapses to `abort`; coproducts case-split; atoms bind via `letPos`.
 -/
-def applyScheduleEntries (fuel : Nat) (σ : ReachState sig.nBases)
+def applyScheduleEntries (fuel : Nat) {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases))
     (entries : List (Object sig.nBases × Witness))
     {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) : SaturateResult (Ctx.ofHyps hyps) A :=
   let pairEntries : List (PairEntry sig hyps) :=
     entries.map fun e => .consistency e.1 e.2
-  applyPairObsGo fuel σ hyps pairEntries cont
+  applyPairObsGo fuel cert hyps pairEntries cont
 
 /--
 Saturation invariant on `Γold`: every positive type simply deducible from the
@@ -1341,17 +1357,18 @@ def checkOldInvariant (Γold : ReachCtx sig.nBases) (goal : Object sig.nBases) :
 If `0` is deducible, collapse through `abort`; otherwise apply the given
 schedule to the continuation.
 -/
-def applyFixedSchedule (fuel : Nat) (σ : ReachState sig.nBases)
+def applyFixedSchedule (fuel : Nat) {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (sched : Schedule sig.nBases)
     {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) :
     SaturateResult (Ctx.ofHyps hyps) A :=
   if σ.inconsistent then
-    match neuOfType fuel σ hyps (.never : Object sig.nBases) with
+    match neuOfTypeWF cert hyps (.never : Object sig.nBases) with
     | some n => .ok (.abort n)
     | none => .invariantFailure
   else
-    applyScheduleEntries fuel σ hyps sched.entries.toList cont
+    applyScheduleEntries fuel cert hyps sched.entries.toList cont
 
 /--
 If `0` is deducible, collapse through `abort`; otherwise apply the consistency
@@ -1361,8 +1378,8 @@ def applySchedule (fuel : Nat) (Γ : ReachCtx sig.nBases)
     (goal : Object sig.nBases) {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps Γ.hyps) A) :
     SaturateResult (Ctx.ofHyps Γ.hyps) A :=
-  let σ := runReachability Γ goal
-  applyFixedSchedule fuel σ Γ.hyps (buildSchedule σ) cont
+  let c := certifiedRunReachability Γ goal
+  applyFixedSchedule fuel c.cert Γ.hyps (buildSchedule c.state) cont
 
 /-- Saturate a continuation under a reachability context / goal. -/
 def saturateApply (fuel : Nat) (Γ : ReachCtx sig.nBases)

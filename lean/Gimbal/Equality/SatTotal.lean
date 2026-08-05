@@ -31,22 +31,24 @@ Applying one observation, and applying a whole schedule, cannot exhaust a
 budget that covers two units per entry.
 -/
 theorem applyObs_ne_exhausted : ∀ fuel : Nat,
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (P : Object sig.nBases) (nP : NegNeu (Ctx.ofHyps hyps) P)
         (rest : List (PairEntry sig hyps)) {A : Object sig.nBases}
         (cont : InvTm (Ctx.ofHyps hyps) A),
         2 * rest.length + 1 < fuel →
-        applyObsNeu fuel σ hyps P nP rest cont ≠ .exhausted) ∧
-    (∀ (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+        applyObsNeu fuel cert hyps P nP rest cont ≠ .exhausted) ∧
+    (∀ {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+        (hyps : Array (Object sig.nBases))
         (entries : List (PairEntry sig hyps)) {A : Object sig.nBases}
         (cont : InvTm (Ctx.ofHyps hyps) A),
         2 * entries.length < fuel →
-        applyPairObsGo fuel σ hyps entries cont ≠ .exhausted)
+        applyPairObsGo fuel cert hyps entries cont ≠ .exhausted)
   | 0 => by constructor <;> intros <;> omega
   | fuel + 1 => by
       obtain ⟨ihObs, ihGo⟩ := applyObs_ne_exhausted fuel
       constructor
-      · intro σ hyps P nP rest A cont hlen
+      · intro σ cert hyps P nP rest A cont hlen
         rw [applyObsNeu.eq_def]
         dsimp only
         split
@@ -55,15 +57,15 @@ theorem applyObs_ne_exhausted : ∀ fuel : Nat,
           have hgo : ∀ (hyps' : Array (Object sig.nBases))
               (l : List (PairEntry sig hyps')) {B : Object sig.nBases}
               (c : InvTm (Ctx.ofHyps hyps') B), l.length = rest.length →
-              applyPairObsGo fuel σ hyps' l c ≠ .exhausted := by
+              applyPairObsGo fuel cert hyps' l c ≠ .exhausted := by
             intro hyps' l B c hl
-            exact ihGo σ hyps' l c (by omega)
+            exact ihGo cert hyps' l c (by omega)
           split <;> split <;>
             first
               | (rename_i h; exact absurd h (hgo _ _ _ (by simp)))
               | (rename_i h _; exact absurd h (hgo _ _ _ (by simp)))
               | simp
-      · intro σ hyps entries A cont hlen
+      · intro σ cert hyps entries A cont hlen
         rw [applyPairObsGo.eq_def]
         dsimp only
         cases entries with
@@ -78,20 +80,24 @@ theorem applyObs_ne_exhausted : ∀ fuel : Nat,
             split
             · simp
             · split
-              · exact ihObs σ hyps _ _ rest cont hlen'
               · simp
-          | exact P n => exact ihObs σ hyps _ _ rest cont hlen'
+              · split
+                · exact ihObs cert hyps _ _ rest cont hlen'
+                · simp
+          | exact P n => exact ihObs cert hyps _ _ rest cont hlen'
 
 /-- The schedule application in the reference pipeline never reports exhaustion. -/
-theorem applyPairObs_ne_exhausted (fuel : Nat) (σ : ReachState sig.nBases)
+theorem applyPairObs_ne_exhausted (fuel : Nat) {σ : ReachState sig.nBases}
+    (cert : ReachRankCert σ)
     (hyps : Array (Object sig.nBases)) (entries : Array (PairEntry sig hyps))
     {A : Object sig.nBases} (cont : InvTm (Ctx.ofHyps hyps) A)
     (hfuel : 2 * entries.size < fuel) :
-    applyPairObs fuel σ hyps entries cont ≠ .exhausted := by
+    applyPairObs fuel cert hyps entries cont ≠ .exhausted := by
   rw [applyPairObs]
   split
   · split <;> simp
-  · exact (applyObs_ne_exhausted fuel).2 σ hyps entries.toList cont (by simpa using hfuel)
+  · exact (applyObs_ne_exhausted fuel).2 cert hyps entries.toList cont
+      (by simpa using hfuel)
 
 /--
 The saturation stage of the reference comparator is exhaustion-free by
@@ -99,12 +105,14 @@ construction: it is called with `saturationBudget`, which always covers the
 schedule it is handed.
 -/
 theorem applyPairObs_saturationBudget_ne_exhausted (fuel : Nat)
-    (σ : ReachState sig.nBases) (hyps : Array (Object sig.nBases))
+    {σ : ReachState sig.nBases} (cert : ReachRankCert σ)
+    (hyps : Array (Object sig.nBases))
     (entries : Array (PairEntry sig hyps)) {A : Object sig.nBases}
     (cont : InvTm (Ctx.ofHyps hyps) A) :
-    applyPairObs (saturationBudget fuel entries.size) σ hyps entries cont
+    applyPairObs (saturationBudget fuel entries.size) cert hyps entries cont
       ≠ .exhausted :=
-  applyPairObs_ne_exhausted _ σ hyps entries cont (lt_saturationBudget fuel entries.size)
+  applyPairObs_ne_exhausted _ cert hyps entries cont
+    (lt_saturationBudget fuel entries.size)
 
 end Equality
 end Gimbal

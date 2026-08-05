@@ -1451,7 +1451,7 @@ def auditAbstractionReplacesNeutral : Bool :=
     match pairObs (sig := Sig1) Γ (.base 0) t t with
     | .invariantFailure => false
     | .ok entries c =>
-      match applyPairObs (sig := Sig1) 64 c.state hyps entries t with
+      match applyPairObs (sig := Sig1) 64 c.cert hyps entries t with
       | .ok t' =>
         match InvTm.toRaw t' with
         | .letPos _ body => body == .pos (.neu (.var 0))

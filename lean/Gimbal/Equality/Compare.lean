@@ -75,8 +75,8 @@ def compareSatRec (fuel : Nat) (Γ : ReachCtx sig.nBases)
       match pairObs Γ goal t u with
       | .invariantFailure => .invariantFailure
       | .ok entries c =>
-        match applyPairObs fuel c.state Γ.hyps entries t,
-              applyPairObs fuel c.state Γ.hyps entries u with
+        match applyPairObs fuel c.cert Γ.hyps entries t,
+              applyPairObs fuel c.cert Γ.hyps entries u with
         | .exhausted, _ | _, .exhausted => .exhausted .saturate
         | .invariantFailure, _ | _, .invariantFailure => .invariantFailure
         | .ok t', .ok u' =>
