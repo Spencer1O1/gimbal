@@ -112,10 +112,6 @@ def ReconstructTotalityPackage (sig : Signature) : Prop :=
     InvertibleArgTotalWF sig ∧
     RequestedNeutralTotalWF sig
 
-theorem InconsistentNeverTotalWF_of_package {sig : Signature}
-    (h : ReconstructTotalityPackage sig) : InconsistentNeverTotalWF sig :=
-  h.2.2.1
-
 /-! ## Leaf reconstruction from `WitnessReconShape` -/
 
 theorem reconstructGoWF_ctxVar {σ : ReachState sig.nBases}
@@ -341,84 +337,6 @@ theorem reconstructGoWF_appTy {σ : ReachState sig.nBases}
       subst hwr
       simp [hn, ht, NegNeu.castHyps, NegNeu.castCtx, NegNeu.cast,
         InvTm.castHyps, InvTm.castCtx, InvTm.castTy]
-
-/-! ## InvertibleArgDomain boundary fixtures -/
-
-private abbrev Sig1 : Signature := ⟨1, #[]⟩
-private abbrev Sig2b : Signature := ⟨2, #[]⟩
-
-private def bareBaseΓ : ReachCtx 1 := ⟨#[], 0⟩
-private def bareBaseC : CertifiedComplete (sig := Sig1) bareBaseΓ (.base 0) :=
-  certifiedComplete (sig := Sig1) bareBaseΓ (.base 0)
-
-/-- Bare positive base: no hyp, not unit, not simply deducible → outside domain. -/
-theorem invertibleArg_bareBase_outside :
-    ¬ InvertibleArgDomain bareBaseC.result.cert 0 bareBaseΓ.hyps (.base 0) := by
-  have hproj : bareBaseC.result.state = runReachability bareBaseΓ (.base 0) :=
-    bareBaseC.soundFor
-  have hhyp : (findHypVar (sig := Sig1) bareBaseΓ.hyps (.base 0)).isSome = false := by
-    native_decide
-  refine InvertibleArgDomain.not_of_unsupported bareBaseC.result.cert 0 bareBaseΓ.hyps
-    (.base 0) hhyp (by decide) ?_
-  intro i hfind
-  have hfind' : (runReachability bareBaseΓ (.base 0)).findTypeIdx (.base 0) = some i := by
-    rwa [← hproj]
-  have hsd : isSimplyDeducible (runReachability bareBaseΓ (.base 0)) (.base 0) = false := by
-    native_decide
-  simp only [isSimplyDeducible, hfind'] at hsd
-  simpa [hproj] using hsd
-
-private def neverΓ : ReachCtx 1 := ⟨#[], 0⟩
-private def neverC : CertifiedComplete (sig := Sig1) neverΓ (.never) :=
-  certifiedComplete (sig := Sig1) neverΓ (.never)
-
-/-- `.never` with no hyp/rank support is outside the domain. -/
-theorem invertibleArg_never_outside :
-    ¬ InvertibleArgDomain neverC.result.cert 0 neverΓ.hyps (.never : Object 1) := by
-  have hproj : neverC.result.state = runReachability neverΓ (.never) :=
-    neverC.soundFor
-  have hhyp : (findHypVar (sig := Sig1) neverΓ.hyps (.never : Object 1)).isSome = false := by
-    native_decide
-  refine InvertibleArgDomain.not_of_unsupported neverC.result.cert 0 neverΓ.hyps
-    (.never : Object 1) hhyp (by decide) ?_
-  intro i hfind
-  have hfind' : (runReachability neverΓ (.never)).findTypeIdx (.never : Object 1) = some i := by
-    rwa [← hproj]
-  have hsd :
-      (match (runReachability neverΓ (.never)).findTypeIdx (.never : Object 1) with
-       | some j => ((runReachability neverΓ (.never)).getCell j).simplyDeducible
-       | none => false) = false := by
-    native_decide
-  simp only [hfind'] at hsd
-  simpa [hproj] using hsd
-
-/-- `.unit` is always inside the domain. -/
-theorem invertibleArg_unit_inside {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (ambientRank : Nat)
-    (hyps : Array (Object sig.nBases)) :
-    InvertibleArgDomain cert ambientRank hyps .unit :=
-  InvertibleArgDomain.of_unit cert ambientRank hyps
-
-/-- A negative hypothesis is inside via `findHypVar`. -/
-theorem invertibleArg_negHyp_inside :
-    let hyps : Array (Object 2) := #[.prod (.base 0) (.base 1)]
-    let cert := ReachRankCert.emptyTable (n := 2) hyps
-    InvertibleArgDomain (sig := Sig2b) cert 0 hyps (.prod (.base 0) (.base 1)) := by
-  apply InvertibleArgDomain.of_hyp
-  native_decide
-
-/--
-η-constructed product argument: ranked intro at the product cell puts `Arg` in
-domain below a strictly larger ambient (as in `hypApp` / `RankedParents.freshRank`).
--/
-theorem invertibleArg_etaProd_inside_of_ranked {σ : ReachState sig.nBases}
-    (cert : ReachRankCert σ) (ambientRank : Nat)
-    (hyps : Array (Object sig.nBases)) (pIdx : Nat) {b : SlotNew} {r : Nat}
-    {L R : Object sig.nBases}
-    (hfind : σ.findTypeIdx (.prod L R) = some pIdx)
-    (hr : cert.rank pIdx b = some r) (hlt : r < ambientRank) :
-    InvertibleArgDomain cert ambientRank hyps (.prod L R) :=
-  InvertibleArgDomain.of_ranked_lt cert ambientRank hyps (.prod L R) hfind hr hlt
 
 /-! ## Bridge lemmas for WF totality -/
 
@@ -2624,11 +2542,6 @@ theorem reconstructTotalityPackage : ReconstructTotalityPackage sig :=
   ⟨reconstructWitnessTotalWF_inst, consistencyWitnessTotalWF_inst,
     inconsistentNeverTotalWF_inst, invertibleArgTotalWF_inst,
     requestedNeutralTotalWF_inst⟩
-
-/-! ## Status
-
-`ReconstructTotalityPackage` inhabited via Dom induction.
--/
 
 end Equality
 end Gimbal
