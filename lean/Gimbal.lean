@@ -31,6 +31,7 @@ import Gimbal.Equality.Scherer.TmAlgebra
 import Gimbal.Equality.Scherer.Renaming
 import Gimbal.Equality.Scherer.EraseComm
 import Gimbal.Equality.Scherer.StrongRetrieval
+import Gimbal.Equality.Scherer.Freshness
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
