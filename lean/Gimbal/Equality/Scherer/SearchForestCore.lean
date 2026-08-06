@@ -2,8 +2,8 @@
   Scherer-core generic path-local search forest foundation.
 
   Defines alternative systems, nodup search paths, abstract derivations, and
-  path-local Success/Blocked/Failure/Outcome certificates. No saturation
-  policy, executable search, or global visited set.
+  intrinsically typed path-local Success / Failure / Blocked / Outcome
+  certificates. No saturation policy, executable search, or global visited set.
 -/
 
 import Mathlib.Data.Fintype.Basic
@@ -115,83 +115,52 @@ inductive AbstractDeriv {K : Type} (sys : AlternativeSystem K) : K → Type wher
         AbstractDeriv sys ((sys.deps a).get ⟨i.val, i.isLt⟩)) :
       AbstractDeriv sys k
 
-/-! ### Path-local certificates -/
+/-! ### Path-local certificates (intrinsic) -/
 
 /--
-Unified path-local forest certificate.
-
-* `success` — `k` not on path; one alternative; every occurrence succeeds under
-  exactly `path.push k`.
-* `blockedLoop` — `k` already on this path (loop marker; not a Failure).
-* `failure` — `k` not on path; every alternative has ≥1 dependency occurrence
-  certificate under exactly `path.push k` (intended blocked; see `isBlocked`).
+Path-local success: `k` not on path; one alternative; every dependency
+occurrence succeeds under exactly `path.push k`.
 -/
-inductive ForestCert {K : Type} [DecidableEq K]
-    (sys : AlternativeSystem K) : SearchPath K → K → Type where
-  | success {path : SearchPath K} {k : K}
+inductive Success {K : Type} [DecidableEq K] (sys : AlternativeSystem K) :
+    SearchPath K → K → Type where
+  | intro {path : SearchPath K} {k : K}
       (hnotin : k ∉ path.keys)
-      (a : sys.Alt k)
-      (children : ∀ i : Fin (sys.deps a).length,
-        ForestCert sys (path.push k hnotin)
-          ((sys.deps a).get ⟨i.val, i.isLt⟩)) :
-      ForestCert sys path k
-  | blockedLoop {path : SearchPath K} {k : K}
-      (hin : k ∈ path.keys) :
-      ForestCert sys path k
-  | failure {path : SearchPath K} {k : K}
+      (alt : sys.Alt k)
+      (children : ∀ i : Fin (sys.deps alt).length,
+        Success sys (path.push k hnotin)
+          ((sys.deps alt).get ⟨i.val, i.isLt⟩)) :
+      Success sys path k
+
+/-!
+Path-local failure and blocked certificates.
+
+* `Failure` — `k` not on path; every alternative has a blocked dependency
+  occurrence under exactly `path.push k`.
+* `Blocked` — loop (`k` already on path) or an embedded `Failure`.
+-/
+mutual
+/-- Path-local failure: every alternative has a blocked dependency witness. -/
+inductive Failure {K : Type} [DecidableEq K] (sys : AlternativeSystem K) :
+    SearchPath K → K → Type where
+  | intro {path : SearchPath K} {k : K}
       (hnotin : k ∉ path.keys)
       (chooseIdx : sys.Alt k → Nat)
       (chooseIdx_lt : ∀ a, chooseIdx a < (sys.deps a).length)
       (child : ∀ a : sys.Alt k,
-        ForestCert sys (path.push k hnotin)
+        Blocked sys (path.push k hnotin)
           ((sys.deps a).get ⟨chooseIdx a, chooseIdx_lt a⟩)) :
-      ForestCert sys path k
+      Failure sys path k
 
-namespace ForestCert
-
-variable {K : Type} [DecidableEq K] {sys : AlternativeSystem K}
-
-/-- Loop or failure (not success). -/
-def isBlocked {path : SearchPath K} {k : K} : ForestCert sys path k → Prop
-  | .success _ _ _ => False
-  | .blockedLoop _ => True
-  | .failure _ _ _ _ => True
-
-def rank {path : SearchPath K} {k : K} : ForestCert sys path k → Nat
-  | .success _ a children =>
-      let childRanks :=
-        (List.finRange (sys.deps a).length).map fun i =>
-          rank (children ⟨i.val, i.isLt⟩)
-      1 + childRanks.max?.getD 0
-  | .blockedLoop _ => 0
-  | .failure _ _ _ _ => 0
-
-end ForestCert
-
-/-- Success package. -/
-structure Success {K : Type} [DecidableEq K]
-    (sys : AlternativeSystem K) (path : SearchPath K) (k : K) where
-  hnotin : k ∉ path.keys
-  alt : sys.Alt k
-  children : ∀ i : Fin (sys.deps alt).length,
-    ForestCert sys (path.push k hnotin) ((sys.deps alt).get ⟨i.val, i.isLt⟩)
-
-/-- Blocked package (loop or failure). -/
-structure Blocked {K : Type} [DecidableEq K]
-    (sys : AlternativeSystem K) (path : SearchPath K) (k : K) where
-  cert : ForestCert sys path k
-  blocked : ForestCert.isBlocked cert
-
-/-- Failure package with blocked dependency witnesses. -/
-structure Failure {K : Type} [DecidableEq K]
-    (sys : AlternativeSystem K) (path : SearchPath K) (k : K) where
-  hnotin : k ∉ path.keys
-  chooseIdx : sys.Alt k → Nat
-  chooseIdx_lt : ∀ a, chooseIdx a < (sys.deps a).length
-  child : ∀ a : sys.Alt k,
-    ForestCert sys (path.push k hnotin)
-      ((sys.deps a).get ⟨chooseIdx a, chooseIdx_lt a⟩)
-  child_blocked : ∀ a, ForestCert.isBlocked (child a)
+/-- Loop marker or embedded failure. -/
+inductive Blocked {K : Type} [DecidableEq K] (sys : AlternativeSystem K) :
+    SearchPath K → K → Type where
+  | loop {path : SearchPath K} {k : K}
+      (hin : k ∈ path.keys) :
+      Blocked sys path k
+  | fail {path : SearchPath K} {k : K}
+      (f : Failure sys path k) :
+      Blocked sys path k
+end
 
 /-- Outcome: success, failure, or loop. -/
 inductive Outcome {K : Type} [DecidableEq K]
@@ -204,35 +173,78 @@ namespace Success
 
 variable {K : Type} [DecidableEq K] {sys : AlternativeSystem K}
 
-/-- Erase path-local success to an abstract derivation given occurrence children. -/
-def toAbstractDeriv {path : SearchPath K} {k : K}
-    (s : Success sys path k)
-    (nested : ∀ i : Fin (sys.deps s.alt).length,
-      AbstractDeriv sys ((sys.deps s.alt).get ⟨i.val, i.isLt⟩)) :
-    AbstractDeriv sys k :=
-  .choose s.alt nested
+/-- Project the not-on-path witness. -/
+theorem hnotin {path : SearchPath K} {k : K} :
+    Success sys path k → k ∉ path.keys
+  | .intro h _ _ => h
 
-def rank {path : SearchPath K} {k : K} (s : Success sys path k) : Nat :=
-  ForestCert.rank (.success s.hnotin s.alt s.children)
+/-- Project the chosen alternative. -/
+def alt {path : SearchPath K} {k : K} :
+    Success sys path k → sys.Alt k
+  | .intro _ a _ => a
+
+/-- Project occurrence-indexed successful children (intrinsically `Success`). -/
+def children {path : SearchPath K} {k : K} :
+    (s : Success sys path k) →
+      ∀ i : Fin (sys.deps s.alt).length,
+        Success sys (path.push k s.hnotin)
+          ((sys.deps s.alt).get ⟨i.val, i.isLt⟩)
+  | .intro _hnotin _alt ch => ch
+
+/-- Recursively erase path-local success to an abstract derivation. -/
+def toAbstractDeriv {path : SearchPath K} {k : K} :
+    Success sys path k → AbstractDeriv sys k
+  | .intro _hnotin a ch =>
+      AbstractDeriv.choose a fun i => toAbstractDeriv (ch i)
+
+def rank {path : SearchPath K} {k : K} : Success sys path k → Nat
+  | .intro _hnotin a ch =>
+      let childRanks :=
+        (List.finRange (sys.deps a).length).map fun i =>
+          rank (ch ⟨i.val, i.isLt⟩)
+      1 + childRanks.max?.getD 0
 
 theorem immediate_dependency_rank_lt {path : SearchPath K} {k : K}
     (s : Success sys path k) (i : Fin (sys.deps s.alt).length) :
-    ForestCert.rank (s.children i) < s.rank := by
-  simp only [rank, ForestCert.rank]
-  set childRanks :=
-    (List.finRange (sys.deps s.alt).length).map fun j =>
-      ForestCert.rank (s.children ⟨j.val, j.isLt⟩)
-  have hmem : ForestCert.rank (s.children i) ∈ childRanks :=
-    List.mem_map.mpr ⟨⟨i.val, i.isLt⟩, List.mem_finRange _, rfl⟩
-  cases hmax : childRanks.max? with
-  | none =>
-      have : childRanks = [] := List.max?_eq_none_iff.mp hmax
-      simp [this] at hmem
-  | some m =>
-      have hle : ForestCert.rank (s.children i) ≤ m :=
-        (List.max?_eq_some_iff (α := Nat)).mp hmax |>.2 _ hmem
-      change _ < 1 + m
-      omega
+    (s.children i).rank < s.rank := by
+  cases s with
+  | intro hnotin a ch =>
+      change rank (ch i) <
+        1 + ((List.finRange (sys.deps a).length).map fun j =>
+          rank (ch ⟨j.val, j.isLt⟩)).max?.getD 0
+      set childRanks :=
+        (List.finRange (sys.deps a).length).map fun j =>
+          rank (ch ⟨j.val, j.isLt⟩)
+      have hmem : rank (ch i) ∈ childRanks := by
+        refine List.mem_map.mpr ⟨⟨i.val, i.isLt⟩, List.mem_finRange _, ?_⟩
+        simp only [Fin.eta]
+      cases hmax : childRanks.max? with
+      | none =>
+          have : childRanks = [] := List.max?_eq_none_iff.mp hmax
+          simp [this] at hmem
+      | some m =>
+          have hle : rank (ch i) ≤ m :=
+            (List.max?_eq_some_iff (α := Nat)).mp hmax |>.2 _ hmem
+          change _ < 1 + m
+          omega
+
+/-- Constructor-level type barrier: every child slot is a `Success`. -/
+theorem children_are_success {path : SearchPath K} {k : K}
+    (s : Success sys path k) (i : Fin (sys.deps s.alt).length) :
+    ∃ s' : Success sys (path.push k s.hnotin)
+        ((sys.deps s.alt).get ⟨i.val, i.isLt⟩),
+      s.children i = s' :=
+  ⟨s.children i, rfl⟩
+
+/--
+Success-with-failed-child is unrepresentable: a `Failure` cannot inhabit the
+same Outcome constructor as a `Success` child, and child indices are typed
+as `Success` (see `children` / `children_are_success`).
+-/
+theorem success_ne_failure_outcome {path : SearchPath K} {k : K}
+    (s : Success sys path k) (f : Failure sys path k) :
+    Outcome.success s ≠ Outcome.failure f := by
+  intro h; cases h
 
 end Success
 
@@ -266,15 +278,6 @@ theorem remaining_decreases_on_push {K : Type} [DecidableEq K] [Fintype K]
     {path : SearchPath K} {k : K} (hnotin : k ∉ path.keys) :
     (path.push k hnotin).remaining < path.remaining :=
   SearchPath.remaining_push_lt path k hnotin
-
-/-- Constructor-level `Success.toAbstractDeriv` gate. -/
-def Success.toAbstractDeriv_ofChildren {K : Type} [DecidableEq K]
-    {sys : AlternativeSystem K} {k : K}
-    (a : sys.Alt k)
-    (children : ∀ i : Fin (sys.deps a).length,
-      AbstractDeriv sys ((sys.deps a).get ⟨i.val, i.isLt⟩)) :
-    AbstractDeriv sys k :=
-  .choose a children
 
 /-! ### Adversarial fixture: pair(unit,unit) -/
 
@@ -322,19 +325,17 @@ private theorem not_unit_after_pair :
       (SearchPath.empty.push PairUnitKey.pair not_pair_in_empty).keys := by
   simp [SearchPath.push, SearchPath.empty]
 
-private def unitSuccessCert (path : SearchPath PairUnitKey)
+private def unitSuccess (path : SearchPath PairUnitKey)
     (h : PairUnitKey.unit ∉ path.keys) :
-    ForestCert pairUnitSystem path .unit :=
-  .success h PairUnitAlt.leaf (fun j => nomatch j)
+    Success pairUnitSystem path .unit :=
+  .intro h PairUnitAlt.leaf (fun j => nomatch j)
 
 /-- Both identical unit occurrences succeed under the same parent-extended path. -/
-def pairUnitUnitSuccess : Success pairUnitSystem .empty .pair where
-  hnotin := not_pair_in_empty
-  alt := PairUnitAlt.pairUU
-  children := fun i =>
+def pairUnitUnitSuccess : Success pairUnitSystem .empty .pair :=
+  .intro not_pair_in_empty PairUnitAlt.pairUU fun i =>
     match i with
-    | ⟨0, _⟩ => unitSuccessCert _ not_unit_after_pair
-    | ⟨1, _⟩ => unitSuccessCert _ not_unit_after_pair
+    | ⟨0, _⟩ => unitSuccess _ not_unit_after_pair
+    | ⟨1, _⟩ => unitSuccess _ not_unit_after_pair
     | ⟨n + 2, hn⟩ =>
         False.elim (Nat.not_lt_zero n (by
           have : n + 2 < 2 := by
@@ -345,9 +346,19 @@ theorem pair_unit_unit_both_succeed_path_local :
     let s := pairUnitUnitSuccess
     let path1 := SearchPath.empty.push PairUnitKey.pair not_pair_in_empty
     pairUnitSystem.deps s.alt = [PairUnitKey.unit, PairUnitKey.unit] ∧
-      s.children ⟨0, by decide⟩ = unitSuccessCert path1 not_unit_after_pair ∧
-        s.children ⟨1, by decide⟩ = unitSuccessCert path1 not_unit_after_pair :=
+      s.children ⟨0, by decide⟩ = unitSuccess path1 not_unit_after_pair ∧
+        s.children ⟨1, by decide⟩ = unitSuccess path1 not_unit_after_pair :=
   ⟨rfl, rfl, rfl⟩
+
+/-- Sibling children are intrinsic `Success` certificates (not Failure). -/
+theorem pair_unit_unit_children_are_success :
+    let s := pairUnitUnitSuccess
+    ∀ i : Fin (pairUnitSystem.deps s.alt).length,
+      ∃ s' : Success pairUnitSystem
+          (SearchPath.empty.push PairUnitKey.pair not_pair_in_empty)
+          ((pairUnitSystem.deps s.alt).get ⟨i.val, i.isLt⟩),
+        s.children i = s' :=
+  fun i => Success.children_are_success pairUnitUnitSuccess i
 
 theorem pair_unit_unit_deps_two_occurrences :
     pairUnitSystem.deps (k := .pair) PairUnitAlt.pairUU =

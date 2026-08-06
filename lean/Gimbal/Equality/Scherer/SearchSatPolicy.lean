@@ -435,6 +435,36 @@ theorem exact_strong_blocks_obs {parent obs : SearchKey U O B L}
   right
   simpa [hDep] using StrongAt.decideB_of_strong parent.state hStrong
 
+/--
+Old `StrongAt` at a distinct support does not block: `obsValidB` tests
+exact candidate support `Knew`, not a prior `Kold`.
+-/
+theorem obsValidB_of_exact_candidate_support {parent obs : SearchKey U O B L}
+    {Q : Pos sig.nBases} {N : UNeg U} {Kold Knew : DepSupport O}
+    (_hOld : StrongAt parent.state Q Kold)
+    (_hne : Kold ≠ Knew)
+    (hDep : obs.depSupport = Knew)
+    (hJudg : obs.judgment = .sNeg N)
+    (hN : N.val = .shift Q)
+    (hQ : Q ∈ U.pos)
+    (hState : obs.state = parent.state)
+    (hCov : obs.coverage = parent.coverage)
+    (hUses : obs.usesCurrent = true)
+    (hObl : (⟨⟨Q, hQ⟩, Knew⟩ : Obligation U O) ∉ parent.coverage)
+    (hNotStrong : ¬ StrongAt parent.state Q Knew) :
+    obsValidB parent obs = true := by
+  have hDec : StrongAt.decideB parent.state Q Knew = false := by
+    rw [Bool.eq_false_iff, Ne, StrongAt.decideB_iff]
+    exact hNotStrong
+  unfold obsValidB
+  simp only [hJudg, hN, hQ, dite_true, hDep]
+  have hSt : decide (obs.state = parent.state) = true := decide_eq_true hState
+  have hCv : decide (obs.coverage = parent.coverage) = true := decide_eq_true hCov
+  have hOb : decide
+      ((⟨⟨Q, hQ⟩, Knew⟩ : Obligation U O) ∉ parent.coverage) = true :=
+    decide_eq_true hObl
+  simp only [hSt, hCv, hUses, hOb, hDec, Bool.not_false, Bool.and_self]
+
 theorem batch_body_reset {n : Nat} {parent : SearchKey U O B L} {P : UPos U}
     {obs : Fin (n + 1) → SearchKey U O B L} {body : SearchKey U O B L}
     (hb : bodyValidB parent P obs body = true) :
