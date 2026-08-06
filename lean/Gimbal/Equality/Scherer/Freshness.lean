@@ -145,8 +145,8 @@ end
 mutual
 /--
 Structural validity: every nested `Sat.batch` observation uses that batch's
-current `New` (via `newMask`). Does not assume root `New = []` implies
-batch-free.
+current `New` (via `newMask`), and every observation itself is recursively
+fresh-valid. Does not assume root `New = []` implies batch-free.
 -/
 def SNegNeu.freshValid {Γ : StableCtx sig} {N : Neg sig.nBases} :
     SNegNeu Γ N → Bool
@@ -162,11 +162,18 @@ def SPosNeu.freshValid {Γ : StableCtx sig} {P : Pos sig.nBases} :
   | .inr p => SPosNeu.freshValid p
   | .shift t => SInv.freshValid t
 
+/-- Recursively check `SNegNeu.freshValid` on every batch observation. -/
+def NonemptyBatchObs.allFreshValid {Γ : StableCtx sig} {ps : Pending sig} :
+    NonemptyBatchObs Γ ps → Bool
+  | .one n => SNegNeu.freshValid n
+  | .cons n rest => SNegNeu.freshValid n && NonemptyBatchObs.allFreshValid rest
+
 def Sat.freshValid {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Bool
   | .done v => SPosNeu.freshValid v
   | .batch obs body =>
       NonemptyBatchObs.allUses (newMask Old New) obs &&
+        NonemptyBatchObs.allFreshValid obs &&
         SInv.freshValid body
 
 def SInv.freshValid {Old New : StableCtx sig} {ps : Pending sig}
@@ -314,17 +321,11 @@ theorem all_entries_use_newMask {Old New : StableCtx sig} :
 /-- Every packed observation carries nested-batch validity. -/
 theorem all_entries_freshValid {Old New : StableCtx sig} :
     ∀ {ps : Pending sig} (b : SelectedBatch Old New ps),
-      (match toNonemptyBatchObs b with
-        | .one n => n.freshValid = true
-        | .cons n rest =>
-            n.freshValid = true ∧
-              NonemptyBatchObs.allUses (newMask Old New)
-                (.cons n rest) = true)
+      NonemptyBatchObs.allFreshValid (toNonemptyBatchObs b) = true
   | _, .one o => o.valid
   | _, .cons o rest => by
-      refine ⟨o.valid, ?_⟩
-      simp only [NonemptyBatchObs.allUses, o.usesNew,
-        all_entries_use_newMask rest, Bool.true_and]
+      simp only [toNonemptyBatchObs, NonemptyBatchObs.allFreshValid, o.valid,
+        all_entries_freshValid rest, Bool.true_and]
 
 end SelectedBatch
 
@@ -441,6 +442,50 @@ def raw_oldOnly_batch :
 
 theorem raw_oldOnly_batch_freshValid_false :
     raw_oldOnly_batch.freshValid = false := by
+  native_decide
+
+/--
+Outer observation uses a New function head, so `allUses` holds, but a shifted
+application argument embeds an old-only nested batch. That nested batch fails
+`freshValid`, so `allFreshValid` and the outer `Sat.freshValid` are false.
+-/
+def usesNew_but_nested_oldOnly_invalid_obs :
+    NonemptyBatchObs (sig := sig0)
+      (StableCtx.append
+        (StableCtx.snoc .empty (.neg (.shift .zero)))
+        (StableCtx.snoc .empty
+          (.neg (.arr (.shift (.shift (.shift .one))) (.shift .zero)))))
+      (.cons (.zero : Pos 0) .empty) :=
+  .one
+    (.app (.var .here)
+      (.shift
+        (.satShift
+          (.batch (.one (.var (.there .here))) .abort))))
+
+def usesNew_but_nested_oldOnly_invalid :
+    Sat (sig := sig0)
+      (StableCtx.snoc .empty (.neg (.shift .zero)))
+      (StableCtx.snoc .empty
+        (.neg (.arr (.shift (.shift (.shift .one))) (.shift .zero))))
+      (.shift .one) :=
+  .batch usesNew_but_nested_oldOnly_invalid_obs .abort
+
+theorem usesNew_but_nested_oldOnly_invalid_allUses :
+    NonemptyBatchObs.allUses
+      (newMask
+        (StableCtx.snoc (.empty : StableCtx sig0) (.neg (.shift .zero)))
+        (StableCtx.snoc .empty
+          (.neg (.arr (.shift (.shift (.shift .one))) (.shift .zero)))))
+      usesNew_but_nested_oldOnly_invalid_obs = true := by
+  native_decide
+
+theorem usesNew_but_nested_oldOnly_invalid_allFreshValid_false :
+    NonemptyBatchObs.allFreshValid usesNew_but_nested_oldOnly_invalid_obs =
+      false := by
+  native_decide
+
+theorem usesNew_but_nested_oldOnly_invalid_freshValid_false :
+    usesNew_but_nested_oldOnly_invalid.freshValid = false := by
   native_decide
 
 /-- Selected packing of a New-side observation. -/
