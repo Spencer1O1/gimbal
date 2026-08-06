@@ -39,6 +39,7 @@ import Gimbal.Equality.Scherer.UPlus
 import Gimbal.Equality.Scherer.SearchUniverse
 import Gimbal.Equality.Scherer.ResolvedSupport
 import Gimbal.Equality.Scherer.ResolvedRealize
+import Gimbal.Equality.Scherer.SearchBounds
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
