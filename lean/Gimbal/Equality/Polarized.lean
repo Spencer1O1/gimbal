@@ -54,6 +54,8 @@ inductive Neg (n : Nat) : Type where
   | shift : Pos n → Neg n
 end
 
+deriving instance DecidableEq for Pos, Neg
+
 mutual
 /-- Forget positive polarization (shifts erase). -/
 def Pos.erase {n : Nat} : Pos n → Object n

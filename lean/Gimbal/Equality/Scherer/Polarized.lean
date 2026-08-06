@@ -67,6 +67,7 @@ the stable atomic case; use `StableTy.atom q` for that.
 inductive StableTy (n : Nat) : Type where
   | neg : Neg n → StableTy n
   | atom : Fin n → StableTy n
+  deriving DecidableEq
 
 /-- Erase a stable formula to a Gimbal object. -/
 def StableTy.erase {n : Nat} : StableTy n → Object n

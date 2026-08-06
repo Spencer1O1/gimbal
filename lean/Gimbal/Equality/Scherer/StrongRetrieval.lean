@@ -13,13 +13,9 @@
 
 import Gimbal.Equality.Scherer.Focused
 
-deriving instance DecidableEq for Gimbal.Equality.Pos, Gimbal.Equality.Neg
-
 namespace Gimbal.Equality.Scherer
 
 variable {sig : Signature}
-
-deriving instance DecidableEq for StableTy
 
 /-! ### Strong positive patterns -/
 
