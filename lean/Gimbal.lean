@@ -33,6 +33,7 @@ import Gimbal.Equality.Scherer.EraseComm
 import Gimbal.Equality.Scherer.StrongRetrieval
 import Gimbal.Equality.Scherer.Freshness
 import Gimbal.Equality.Scherer.RawSupport
+import Gimbal.Equality.Scherer.ScopedFresh
 import Gimbal.Equality.Scherer.SearchState
 import Gimbal.Equality.Scherer.UPlus
 import Gimbal.Equality.Scherer.SearchUniverse
