@@ -34,6 +34,7 @@ import Gimbal.Equality.Scherer.StrongRetrieval
 import Gimbal.Equality.Scherer.Freshness
 import Gimbal.Equality.Scherer.SearchState
 import Gimbal.Equality.Scherer.UPlus
+import Gimbal.Equality.Scherer.SearchUniverse
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
