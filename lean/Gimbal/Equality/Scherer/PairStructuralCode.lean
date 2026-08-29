@@ -187,12 +187,12 @@ theorem tail_scoped {E : CodePendingAssignment R Δ (.cons P ps)}
 end CodePendingAssignment
 
 /-- Embed the base context beneath all pending binders. -/
-def Pending.weakenBase (ps : Pending sig) (Δ : Ctx sig) :
+def Pending.weakenCodeBase (ps : Pending sig) (Δ : Ctx sig) :
     Rename sig Δ (Pending.eraseAux ps Δ) :=
   match ps with
   | .empty => Rename.id
   | .cons P rest => fun x =>
-      Pending.weakenBase rest (Δ.snoc P.erase) (Rename.weaken x)
+      Pending.weakenCodeBase rest (Δ.snoc P.erase) (Rename.weaken x)
 
 /-- Turn a pending occurrence into its locally bound erased variable. -/
 def PendingVar.eraseAux (Δ : Ctx sig) :
@@ -313,7 +313,7 @@ def Sat.toStructuralCode (supply : BatchResultSupply R)
   | .done v => .done (SPosNeu.toStructuralCode supply E v)
   | .batch (selected := selected) obs body =>
       let B := supply.results obs
-      let E' := E.rename (Pending.weakenBase selected Δ)
+      let E' := E.rename (Pending.weakenCodeBase selected Δ)
       let pending' := CodePendingAssignment.boundBatch B Δ
       .batch (NonemptyBatchObs.toStructuralCode supply E obs)
         (SInv.toStructuralCode (Old := Old.append New) (New := .empty)
@@ -511,7 +511,7 @@ theorem Sat.toStructuralCode_scoped (supply : BatchResultSupply R)
       rcases List.mem_append.mp ho with hobs | hbody
       · exact obs.toStructuralCode_scoped supply E hE o hobs
       · let B := supply.results obs
-        let E' := E.rename (Pending.weakenBase selected Δ)
+        let E' := E.rename (Pending.weakenCodeBase selected Δ)
         let pending' := CodePendingAssignment.boundBatch B Δ
         exact SInv.toStructuralCode_scoped (Old := Old.append New) (New := .empty)
           supply E' body pending'
