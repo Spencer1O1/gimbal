@@ -79,6 +79,7 @@ import Gimbal.Equality.Scherer.PairTraceExtension
 import Gimbal.Equality.Scherer.OccurrenceExact
 import Gimbal.Equality.Scherer.PairCode
 import Gimbal.Equality.Scherer.PairMismatch
+import Gimbal.Equality.Scherer.PairErasePath
 import Gimbal.Equality.Scherer.PairedSelected
 import Gimbal.Equality.Scherer.ConsistencyTransport
 import Gimbal.Equality.Scherer.ConsistencySpliceBoundary
