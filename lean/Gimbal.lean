@@ -57,6 +57,7 @@ import Gimbal.Equality.Scherer.SearchNormalQueryOracle
 import Gimbal.Equality.Scherer.FrameContraction
 import Gimbal.Equality.Scherer.ConsistencyQuery
 import Gimbal.Equality.Scherer.ConsistencyScope
+import Gimbal.Equality.Scherer.ConsistencyDeriv
 import Gimbal.Equality.Scherer.OrdinaryCutProto
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
