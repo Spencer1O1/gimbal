@@ -46,6 +46,7 @@ import Gimbal.Equality.Scherer.SearchForestCore
 import Gimbal.Equality.Scherer.SearchSatPolicy
 import Gimbal.Equality.Scherer.SearchLoopElim
 import Gimbal.Equality.Scherer.SearchForestRun
+import Gimbal.Equality.Scherer.SearchForestExec
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
