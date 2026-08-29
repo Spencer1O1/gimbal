@@ -54,6 +54,7 @@ import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
 import Gimbal.Equality.Scherer.SearchNormalQueryOracle
 import Gimbal.Equality.Scherer.FrameContraction
+import Gimbal.Equality.Scherer.ConsistencyQuery
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
