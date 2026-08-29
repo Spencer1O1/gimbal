@@ -56,6 +56,7 @@ import Gimbal.Equality.Scherer.ElimObligation
 import Gimbal.Equality.Scherer.CountTwo
 import Gimbal.Equality.Scherer.SearchBoundary
 import Gimbal.Equality.Scherer.RetainedCtx
+import Gimbal.Equality.Scherer.SplitFrame
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
 import Gimbal.Equality.Scherer.SearchNormalQueryOracle
