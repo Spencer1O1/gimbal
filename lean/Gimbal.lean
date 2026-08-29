@@ -52,6 +52,7 @@ import Gimbal.Equality.Scherer.SearchForestRun
 import Gimbal.Equality.Scherer.SearchForestExec
 import Gimbal.Equality.Scherer.SaturatedResolved
 import Gimbal.Equality.Scherer.TypeSelectionSpec
+import Gimbal.Equality.Scherer.ElimObligation
 import Gimbal.Equality.Scherer.CountTwo
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
