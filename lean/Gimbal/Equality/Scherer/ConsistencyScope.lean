@@ -63,6 +63,34 @@ def query (s : ConsistencyScope U O B Γ) (target : Obligation U O)
     (target : Obligation U O) (useSig : UseSig) :
     (s.query target useSig).query.useSig = useSig := rfl
 
+/-! ### Coverage replacement -/
+
+/-- Change only consumed coverage.  Realized state, environment, and masks are
+definitionally unchanged. -/
+def withCoverage (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) : ConsistencyScope U O B Γ :=
+  { s with coverage := coverage }
+
+@[simp] theorem withCoverage_state (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) :
+    (s.withCoverage coverage).state = s.state := rfl
+
+@[simp] theorem withCoverage_env (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) :
+    (s.withCoverage coverage).env = s.env := rfl
+
+@[simp] theorem withCoverage_outer (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) :
+    (s.withCoverage coverage).outer = s.outer := rfl
+
+@[simp] theorem withCoverage_current (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) :
+    (s.withCoverage coverage).current = s.current := rfl
+
+@[simp] theorem withCoverage_coverage (s : ConsistencyScope U O B Γ)
+    (coverage : Finset (Obligation U O)) :
+    (s.withCoverage coverage).coverage = coverage := rfl
+
 /-! ### Round reset -/
 
 /-- Reset preserves the explicit outer-provenance input pointwise. -/

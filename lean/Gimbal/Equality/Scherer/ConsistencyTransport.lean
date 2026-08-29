@@ -324,7 +324,8 @@ noncomputable def CPos.contract
       let tr' : ScopeTransport (StableRename.keepLeft ρ .empty)
           desc.resetRound ancestor.resetRound := by
         simpa [StableRename.keepLeft] using tr.resetRound
-      exact .shift (CInv.contract ρ tr' d)
+      exact .shift (CInv.contract ρ tr'
+        (SplitConsistencyScope.resetRound ancestor) d)
 
 noncomputable def CInv.contract
     {U : SearchUniverse sig} {O : Type} [DecidableEq O]
@@ -333,11 +334,13 @@ noncomputable def CInv.contract
     {ancestor : ConsistencyScope U O BΔ (Old'.append New)}
     (ρ : StableRename Old Old')
     (tr : ScopeTransport (StableRename.keepLeft ρ New) desc ancestor)
+    (split : SplitConsistencyScope Old' New ancestor)
     {pending : ResolvedPending U O} {G : Goal sig.nBases}
     {t : SInv Old New pending.erase G} :
     CInv desc pending t → CInv ancestor pending (t.rename ρ)
   | .caseSum dl dr =>
-      .caseSum (CInv.contract ρ tr dl) (CInv.contract ρ tr dr)
+      .caseSum (CInv.contract ρ tr split dl)
+        (CInv.contract ρ tr split dr)
   | @CInv.abort _ _ _ _ _ _ _ _ _ hZero K rest G =>
       @CInv.abort sig U O _ BΔ _ Old' New ancestor hZero K rest G
   | .storeAtom (q := q) (hStable := hStable) (K := K) hd d => by
@@ -349,7 +352,8 @@ noncomputable def CInv.contract
         simpa [StableRename.keepLeft] using
           (tr.pushResolved hd ⟨.atom q, hStable⟩ K)
       refine .storeAtom (hStable := hStable) hd' ?_
-      exact CInv.contract ρ tr' d
+      exact CInv.contract ρ tr'
+        (split.pushResolved hd' ⟨.atom q, hStable⟩ K) d
   | .storeShift (N := N) (hStable := hStable) (K := K) hd d => by
       let hd' := tr.target_capacity hd
       let tr' : ScopeTransport
@@ -359,12 +363,14 @@ noncomputable def CInv.contract
         simpa [StableRename.keepLeft] using
           (tr.pushResolved hd ⟨.neg N, hStable⟩ K)
       refine .storeShift (hStable := hStable) hd' ?_
-      exact CInv.contract ρ tr' d
+      exact CInv.contract ρ tr'
+        (split.pushResolved hd' ⟨.neg N, hStable⟩ K) d
   | .unit => .unit
-  | .pair dl dr => .pair (CInv.contract ρ tr dl) (CInv.contract ρ tr dr)
-  | .lam d => .lam (CInv.contract ρ tr d)
-  | .satShift d => .satShift (CSat.contract ρ tr d)
-  | .satPos d => .satPos (CSat.contract ρ tr d)
+  | .pair dl dr => .pair (CInv.contract ρ tr split dl)
+      (CInv.contract ρ tr split dr)
+  | .lam d => .lam (CInv.contract ρ tr split d)
+  | .satShift d => .satShift (CSat.contract ρ tr split d)
+  | .satPos d => .satPos (CSat.contract ρ tr split d)
 
 noncomputable def CSat.contract
     {U : SearchUniverse sig} {O : Type} [DecidableEq O]
@@ -373,6 +379,7 @@ noncomputable def CSat.contract
     {ancestor : ConsistencyScope U O BΔ (Old'.append New)}
     (ρ : StableRename Old Old')
     (tr : ScopeTransport (StableRename.keepLeft ρ New) desc ancestor)
+    (split : SplitConsistencyScope Old' New ancestor)
     {P : Pos sig.nBases} {sat : Sat Old New P} :
     CSat desc sat → CSat ancestor (sat.rename ρ)
   | .inconsistent request query =>
@@ -386,8 +393,12 @@ noncomputable def CSat.contract
           (ancestor.resetRound.withCoverage
             (ancestor.coverage ∪ xs.toFinset)) := by
         simpa [StableRename.keepLeft] using tr'
-      exact .batch (CBatch.contract ρ tr db)
-        (CInv.contract (StableRename.keepLeft ρ New) tr'' di)
+      let bodySplit : SplitConsistencyScope (Old'.append New) .empty
+          (ancestor.resetRound.withCoverage
+            (ancestor.coverage ∪ xs.toFinset)) :=
+        (SplitConsistencyScope.resetRound ancestor).withCoverage _
+      exact .batch (CBatch.contract ρ tr split db)
+        (CInv.contract (StableRename.keepLeft ρ New) tr'' bodySplit di)
 
 noncomputable def CBatch.contract
     {U : SearchUniverse sig} {O : Type} [DecidableEq O]
@@ -396,21 +407,16 @@ noncomputable def CBatch.contract
     {ancestor : ConsistencyScope U O BΔ (Old'.append New)}
     (ρ : StableRename Old Old')
     (tr : ScopeTransport (StableRename.keepLeft ρ New) desc ancestor)
+    (split : SplitConsistencyScope Old' New ancestor)
     {xs : List (Obligation U O)}
     {obs : NonemptyBatchObs (Old.append New) (obligationPending xs).erase} :
     CBatch desc xs obs →
       CBatch ancestor xs (obs.rename (StableRename.keepLeft ρ New))
-  | .one query request hUses =>
-      .one (CQuery.contract tr query) (request.contract tr)
-        ((SNegNeu.uses_rename (StableRename.keepLeft ρ New)
-          (newMask Old New) (newMask Old' New)
-          (StableRename.newMask_keepLeft ρ New) _).trans hUses)
-  | .cons query request hUses hNotMem rest =>
-      .cons (CQuery.contract tr query) (request.contract tr)
-        ((SNegNeu.uses_rename (StableRename.keepLeft ρ New)
-          (newMask Old New) (newMask Old' New)
-          (StableRename.newMask_keepLeft ρ New) _).trans hUses)
-        hNotMem (CBatch.contract ρ tr rest)
+  | .one query request _ =>
+      .one (CQuery.contract tr query) (request.contract tr) split
+  | .cons query request _ hNotMem rest =>
+      .cons (CQuery.contract tr query) (request.contract tr) split
+        hNotMem (CBatch.contract ρ tr split rest)
 
 noncomputable def CQuery.contract
     {U : SearchUniverse sig} {O : Type} [DecidableEq O]
@@ -429,6 +435,26 @@ noncomputable def CQuery.contract
           tr.current_preserves _).trans hUse)
 
 end
+
+/-! ### Split-aware query freshness transport -/
+
+/-- Once the target scope is tied to its syntax split, ordinary normalized
+scope transport preserves precisely the `usesNew` fact needed to rebuild a
+batch entry.  No Old/New data is added to `NormalQuery`. -/
+theorem CQuery.contract_usesNew
+    {U : SearchUniverse sig} {O : Type} [DecidableEq O]
+    {BΓ BΔ : Nat} {Γ Old New : StableCtx sig}
+    {desc : ConsistencyScope U O BΓ Γ}
+    {ancestor : ConsistencyScope U O BΔ (Old.append New)}
+    {ρ : StableRename Γ (Old.append New)}
+    {target : Obligation U O} {u : UseSig}
+    {n : SNegNeu Γ (.shift target.result.val)}
+    (tr : ScopeTransport ρ desc ancestor)
+    (query : CQuery desc target u n)
+    (request : FreshRequest desc target u)
+    (split : SplitConsistencyScope Old New ancestor) :
+    (n.rename ρ).uses (newMask Old New) = true :=
+  (CQuery.contract tr query).usesNew (request.contract tr) split
 
 /-! ### Packaged derivation transport -/
 
@@ -483,6 +509,21 @@ theorem contract_of_normalize_eq_nodeSize
   exact SNegNeu.nodeSize_rename
     ((desc.query target useSig).contractionTo
       (ancestor.query target useSig) hquery).rename d.neutral
+
+/-- The normalized contraction is immediately admissible at a split-aware
+target batch boundary; no extra proof about the replacement neutral is needed. -/
+theorem contract_of_normalize_eq_usesNew
+    {Old New : StableCtx sig}
+    {ancestor : ConsistencyScope U O BΔ (Old.append New)}
+    (hquery : (desc.query target useSig).normalize =
+      (ancestor.query target' useSig').normalize)
+    (hhead : BΓ - desc.state.depth ≤ BΔ - ancestor.state.depth)
+    (d : ConsistencyDeriv desc target useSig)
+    (request : FreshRequest ancestor target' useSig')
+    (split : SplitConsistencyScope Old New ancestor) :
+    (contract_of_normalize_eq hquery hhead d).neutral.uses
+      (newMask Old New) = true :=
+  (contract_of_normalize_eq hquery hhead d).query.usesNew request split
 
 private theorem witness_eq_of_neutral_eq
     {B : Nat} {Θ : StableCtx sig} {s : ConsistencyScope U O B Θ}
@@ -644,5 +685,71 @@ theorem shallow_capacity_transports : roomy.state.depth < 3 :=
   shallowToRoomy.target_capacity chd1
 
 end ScopeTransportFixtures
+
+namespace SplitConsistencyScopeFixtures
+
+open FrameContractionFixtures ScopeTransportFixtures
+
+def LastOnly : StableCtx sig0 := .snoc .empty S
+
+/-- Two identical realized labels can inhabit the same flattened context while
+different Old/New cuts disagree about whether the older occurrence is new.
+The flat scope and its normalized query cannot distinguish these cuts. -/
+theorem duplicate_labels_split_differ :
+    newMask (.empty : StableCtx sig0) CΓ2 S
+        (.there .here : StableVar CΓ2 S) = true ∧
+      newMask CΓ1 LastOnly S
+        (.there .here : StableVar (CΓ1.append LastOnly) S) = false ∧
+      full.current S (.there .here : StableVar CΓ2 S) = true := by
+  native_decide
+
+/-- Consequently the same flat scope is not split-realized by the cut that
+places only the newest duplicate in `New`. -/
+theorem full_not_lastOnly_split :
+    ¬ SplitConsistencyScope CΓ1 LastOnly full := by
+  intro split
+  have h := split.current_eq
+    (.there .here : StableVar (CΓ1.append LastOnly) S)
+  change true = false at h
+  exact Bool.noConfusion h
+
+theorem shallow_allNew_split :
+    SplitConsistencyScope (.empty : StableCtx sig0) CΓ1 shallow := by
+  constructor
+  intro T x
+  cases x with
+  | here => native_decide
+  | there x => nomatch x
+
+theorem roomy_allNew_split :
+    SplitConsistencyScope (.empty : StableCtx sig0) CΓ2 roomy := by
+  constructor
+  intro T x
+  cases x with
+  | here => native_decide
+  | there x =>
+      cases x with
+      | here => native_decide
+      | there x => nomatch x
+
+def sourceNeutral : SNegNeu CΓ1 (.shift (.zero : Pos 0)) := .var .here
+
+theorem sourceNeutral_uses_current :
+    sourceNeutral.uses shallow.current = true := by
+  native_decide
+
+/-- Positive split-aware fixture: the normalized-query contraction from the
+one-label scope to the roomy duplicate-label scope lands in syntax `New`,
+because the target's all-New split identifies `current` with `newMask`. -/
+theorem positive_split_aware_transport :
+    let tr := shallowToRoomy
+    (sourceNeutral.rename tr.forward.rename).uses
+      (newMask (.empty : StableCtx sig0) CΓ2) = true := by
+  intro tr
+  rw [← roomy_allNew_split.current_mask_eq]
+  exact (SNegNeu.uses_rename tr.forward.rename shallow.current roomy.current
+    tr.current_preserves sourceNeutral).trans sourceNeutral_uses_current
+
+end SplitConsistencyScopeFixtures
 
 end Gimbal.Equality.Scherer

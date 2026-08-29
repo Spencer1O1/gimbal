@@ -7,7 +7,7 @@
   generated query derivation and the exact local freshness side conditions.
 -/
 
-import Gimbal.Equality.Scherer.ConsistencyScope
+import Gimbal.Equality.Scherer.ConsistencySplitScope
 
 namespace Gimbal.Equality.Scherer
 
@@ -54,38 +54,6 @@ def obligationPending {U : SearchUniverse sig} {O : Type}
   | cons o rest ih =>
       change (obligationPending rest).length + 1 = rest.length + 1
       rw [ih]
-
-/-- Change only consumed coverage.  Realized state, environment, and masks are
-definitionally unchanged. -/
-def ConsistencyScope.withCoverage {U : SearchUniverse sig} {O : Type}
-    {B : Nat} {Γ : StableCtx sig} (s : ConsistencyScope U O B Γ)
-    (coverage : Finset (Obligation U O)) : ConsistencyScope U O B Γ :=
-  { s with coverage := coverage }
-
-@[simp] theorem ConsistencyScope.withCoverage_state
-    {U : SearchUniverse sig} {O : Type} {B : Nat} {Γ : StableCtx sig}
-    (s : ConsistencyScope U O B Γ) (coverage : Finset (Obligation U O)) :
-    (s.withCoverage coverage).state = s.state := rfl
-
-@[simp] theorem ConsistencyScope.withCoverage_env
-    {U : SearchUniverse sig} {O : Type} {B : Nat} {Γ : StableCtx sig}
-    (s : ConsistencyScope U O B Γ) (coverage : Finset (Obligation U O)) :
-    (s.withCoverage coverage).env = s.env := rfl
-
-@[simp] theorem ConsistencyScope.withCoverage_outer
-    {U : SearchUniverse sig} {O : Type} {B : Nat} {Γ : StableCtx sig}
-    (s : ConsistencyScope U O B Γ) (coverage : Finset (Obligation U O)) :
-    (s.withCoverage coverage).outer = s.outer := rfl
-
-@[simp] theorem ConsistencyScope.withCoverage_current
-    {U : SearchUniverse sig} {O : Type} {B : Nat} {Γ : StableCtx sig}
-    (s : ConsistencyScope U O B Γ) (coverage : Finset (Obligation U O)) :
-    (s.withCoverage coverage).current = s.current := rfl
-
-@[simp] theorem ConsistencyScope.withCoverage_coverage
-    {U : SearchUniverse sig} {O : Type} {B : Nat} {Γ : StableCtx sig}
-    (s : ConsistencyScope U O B Γ) (coverage : Finset (Obligation U O)) :
-    (s.withCoverage coverage).coverage = coverage := rfl
 
 /-! ### Generative work-free judgments -/
 
@@ -223,7 +191,7 @@ inductive CBatch {U : SearchUniverse sig} {O : Type} [DecidableEq O] {B : Nat} :
       {target : Obligation U O} {u : UseSig}
       {n : SNegNeu (Old.append New) (.shift target.result.val)} :
       CQuery s target u n → FreshRequest s target u →
-      n.uses (newMask Old New) = true →
+      SplitConsistencyScope Old New s →
       CBatch s [target] (.one n)
   | cons {Old New : StableCtx sig}
       {s : ConsistencyScope U O B (Old.append New)}
@@ -232,7 +200,7 @@ inductive CBatch {U : SearchUniverse sig} {O : Type} [DecidableEq O] {B : Nat} :
       {rest : List (Obligation U O)}
       {obs : NonemptyBatchObs (Old.append New) (obligationPending rest).erase} :
       CQuery s target u n → FreshRequest s target u →
-      n.uses (newMask Old New) = true → target ∉ rest →
+      SplitConsistencyScope Old New s → target ∉ rest →
       CBatch s rest obs → CBatch s (target :: rest) (.cons n obs)
 
 /-- Exact recursive query evidence used at every observation occurrence. -/
@@ -267,7 +235,24 @@ structure FreshEntry {U : SearchUniverse sig} {O : Type} [DecidableEq O]
   neutral : SNegNeu (Old.append New) (.shift target.result.val)
   query : CQuery s target useSig neutral
   request : FreshRequest s target useSig
-  usesNew : neutral.uses (newMask Old New) = true
+  split : SplitConsistencyScope Old New s
+
+namespace CQuery
+
+variable {U : SearchUniverse sig} {O : Type} [DecidableEq O] {B : Nat}
+  {Γ : StableCtx sig} {s : ConsistencyScope U O B Γ}
+  {target : Obligation U O} {useSig : UseSig}
+  {n : SNegNeu Γ (.shift target.result.val)}
+
+theorem usesCurrent (d : CQuery s target useSig n)
+    (request : FreshRequest s target useSig) :
+    n.uses s.current = true := by
+  cases d with
+  | intro _ _ hUse =>
+      have h := congrArg UseSig.usesCurrent hUse
+      exact h.trans request.currentUse
+
+end CQuery
 
 /-! ### Structural soundness -/
 
@@ -343,11 +328,16 @@ theorem CBatch.allUses {U : SearchUniverse sig} {O : Type} [DecidableEq O]
     {xs : List (Obligation U O)}
     {obs : NonemptyBatchObs (Old.append New) (obligationPending xs).erase} :
     CBatch s xs obs → NonemptyBatchObs.allUses (newMask Old New) obs = true
-  | .one _ _ hUses => hUses
-  | .cons _ _ hUses _ rest => by
+  | .one q request split => by
+      rw [← split.current_mask_eq]
+      exact q.usesCurrent request
+  | .cons q request split _ rest => by
       change (_ && _) = true
       exact Bool.and_eq_true_iff.mpr
-        ⟨hUses, CBatch.allUses (Old := Old) (New := New) (s := s) rest⟩
+        ⟨by
+            rw [← split.current_mask_eq]
+            exact q.usesCurrent request,
+          CBatch.allUses (Old := Old) (New := New) (s := s) rest⟩
 
 /-- Every generated batch entry is itself recursively fresh-valid. -/
 theorem CBatch.allFreshValid {U : SearchUniverse sig} {O : Type} [DecidableEq O]
@@ -391,11 +381,18 @@ theorem useSig_eq (d : CQuery s target useSig n) :
   cases d with
   | intro _ _ hUse => exact hUse
 
-theorem usesCurrent (d : CQuery s target useSig n)
-    (request : FreshRequest s target useSig) :
-    n.uses s.current = true := by
-  have h := congrArg UseSig.usesCurrent d.useSig_eq
-  exact h.trans request.currentUse
+/-- A split-aware query turns semantic current-round use into the exact
+syntax-level freshness obligation required by a batch entry. -/
+theorem usesNew {Old New : StableCtx sig}
+    {s : ConsistencyScope U O B (Old.append New)}
+    {target : Obligation U O} {useSig : UseSig}
+    {n : SNegNeu (Old.append New) (.shift target.result.val)}
+    (d : CQuery s target useSig n)
+    (request : FreshRequest s target useSig)
+    (split : SplitConsistencyScope Old New s) :
+    n.uses (newMask Old New) = true := by
+  rw [← split.current_mask_eq]
+  exact d.usesCurrent request
 
 end CQuery
 
@@ -417,17 +414,17 @@ theorem freshValid (d : ConsistencyDeriv s target useSig) :
     d.neutral.freshValid = true :=
   d.query.freshValid
 
-/-- A generated query neutral with syntax-split use evidence is a `FreshObs`.
-The extra premise is intentional: the flat realized scope does not identify
-its current mask with an arbitrary `Old.append New` split. -/
+/-- A generated query in a split-realized scope is a `FreshObs`; callers no
+longer supply a syntax-indexed `usesNew` proof separately. -/
 def toFreshObs {Old New : StableCtx sig}
     {s : ConsistencyScope U O B (Old.append New)}
     {target : Obligation U O} {useSig : UseSig}
     (d : ConsistencyDeriv s target useSig)
-    (usesNew : d.neutral.uses (newMask Old New) = true) :
+    (request : FreshRequest s target useSig)
+    (split : SplitConsistencyScope Old New s) :
     FreshObs Old New target.result.val where
   neu := d.neutral
-  usesNew := usesNew
+  usesNew := d.query.usesNew request split
   valid := d.query.freshValid
 
 end ConsistencyDeriv
@@ -445,7 +442,11 @@ def toDeriv (e : FreshEntry Old New s target) :
 
 def toFreshObs (e : FreshEntry Old New s target) :
     FreshObs Old New target.result.val :=
-  e.toDeriv.toFreshObs e.usesNew
+  e.toDeriv.toFreshObs e.request e.split
+
+theorem usesNew (e : FreshEntry Old New s target) :
+    e.neutral.uses (newMask Old New) = true :=
+  e.query.usesNew e.request e.split
 
 theorem usesCurrent (e : FreshEntry Old New s target) :
     e.neutral.uses s.current = true :=
@@ -496,13 +497,13 @@ freshness carrier. -/
 def toSelectedBatch {xs : List (Obligation U O)}
     {obs : NonemptyBatchObs (Old.append New) (obligationPending xs).erase} :
     (d : CBatch s xs obs) → SelectedBatch Old New (obligationPending xs).erase
-  | .one q _ hUses =>
+  | .one q request split =>
       .one { neu := _
-             usesNew := hUses
+             usesNew := q.usesNew request split
              valid := q.freshValid }
-  | .cons q _ hUses _ rest =>
+  | .cons q request split _ rest =>
       .cons { neu := _
-              usesNew := hUses
+              usesNew := q.usesNew request split
               valid := q.freshValid }
         (toSelectedBatch rest)
 
