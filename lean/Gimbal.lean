@@ -13,6 +13,7 @@ import Gimbal.Term
 import Gimbal.Typing
 import Gimbal.Morphism
 import Gimbal.DefinitionalEquality
+import Gimbal.FiniteSemantics
 import Gimbal.SyntacticCategory
 import Gimbal.SyntacticCategory.BicartesianClosed
 import Gimbal.Equality.IntrinsicMorphism
