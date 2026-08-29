@@ -108,11 +108,6 @@ def popRaw (st : ResolvedState U O B) (_h : st.depth < B)
 
 end ResolvedState
 
-/-- Depth-erased raw support levels (for Bool comparisons across equal depths). -/
-def rawVals {U : SearchUniverse sig} {O : Type} {B : Nat}
-    {st : ResolvedState U O B} (s : Finset (Fin st.depth)) : Finset Nat :=
-  s.image Fin.val
-
 namespace Structural
 
 variable {U : SearchUniverse sig} {O : Type} {B L : Nat}

@@ -7,7 +7,6 @@
 -/
 
 import Gimbal.Equality.Scherer.ResolvedRealize
-import Gimbal.Equality.Scherer.SearchStructural
 
 namespace Gimbal.Equality.Scherer
 

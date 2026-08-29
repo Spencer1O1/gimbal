@@ -13,6 +13,18 @@ namespace Gimbal.Equality.Scherer
 
 variable {sig : Signature}
 
+/-! ### Exact abstract raw support -/
+
+/-- Exact raw fact-support at a resolved state: finite set of live levels. -/
+abbrev RawFactSupport {U : SearchUniverse sig} {O : Type} {B : Nat}
+    (st : ResolvedState U O B) : Type :=
+  Finset (Fin st.depth)
+
+/-- Depth-erased raw support levels, comparable across equal depths. -/
+def rawVals {U : SearchUniverse sig} {O : Type} {B : Nat}
+    {st : ResolvedState U O B} (s : RawFactSupport st) : Finset Nat :=
+  s.image Fin.val
+
 /-! ### Resolved environments -/
 
 /-- Assign resolved dependency support to every intrinsic stable variable. -/

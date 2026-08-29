@@ -6,33 +6,10 @@
   No ordering is manufactured from a `Finset`: list order is input data.
 -/
 
+import Gimbal.Equality.Scherer.CanonicalEnum
 import Gimbal.Equality.Scherer.SearchForestRun
 
 namespace Gimbal.Equality.Scherer
-
-/-! ### Explicit finite enumerations -/
-
-/-- An explicit duplicate-free list containing every value of `α`. -/
-structure CanonicalEnum (α : Type) where
-  elems : List α
-  nodup : elems.Nodup
-  complete : ∀ x : α, x ∈ elems
-
-namespace CanonicalEnum
-
-variable {α : Type}
-
-/-- Constructive `Fintype` data derived from the explicit list. -/
-@[reducible] def toFintype [DecidableEq α] (e : CanonicalEnum α) : Fintype α where
-  elems := e.elems.toFinset
-  complete x := List.mem_toFinset.mpr (e.complete x)
-
-@[simp] theorem card_toFintype [DecidableEq α] (e : CanonicalEnum α) :
-    @Fintype.card α e.toFintype = e.elems.length := by
-  change e.elems.toFinset.card = e.elems.length
-  exact List.toFinset_card_of_nodup e.nodup
-
-end CanonicalEnum
 
 /--
 An alternative system whose runtime enumeration is explicit. Dependency lists

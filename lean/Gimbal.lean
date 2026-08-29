@@ -37,8 +37,10 @@ import Gimbal.Equality.Scherer.ScopedFresh
 import Gimbal.Equality.Scherer.SearchState
 import Gimbal.Equality.Scherer.UPlus
 import Gimbal.Equality.Scherer.SearchUniverse
+import Gimbal.Equality.Scherer.CanonicalEnum
 import Gimbal.Equality.Scherer.ResolvedSupport
 import Gimbal.Equality.Scherer.ResolvedRealize
+import Gimbal.Equality.Scherer.SearchObligation
 import Gimbal.Equality.Scherer.SearchBounds
 import Gimbal.Equality.Scherer.SearchKey
 import Gimbal.Equality.Scherer.SearchStructural
@@ -50,6 +52,7 @@ import Gimbal.Equality.Scherer.SearchForestExec
 import Gimbal.Equality.Scherer.SaturatedResolved
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
+import Gimbal.Equality.Scherer.SearchNormalQueryOracle
 import Gimbal.Equality.Scherer.FrameContraction
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary

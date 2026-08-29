@@ -14,6 +14,7 @@ import Mathlib.Data.Fintype.Prod
 import Mathlib.Data.Fintype.Sigma
 import Mathlib.Data.Fintype.Sum
 import Gimbal.Equality.Scherer.SearchBounds
+import Gimbal.Equality.Scherer.ResolvedRealize
 
 namespace Gimbal.Equality.Scherer
 
@@ -116,13 +117,6 @@ instance [Fintype O] : Finite (SearchJudgment U O L) := by
   infer_instance
 
 end SearchJudgment
-
-/-! ### Exact raw fact-support -/
-
-/-- Exact raw fact-support at a resolved state: finite set of live levels. -/
-abbrev RawFactSupport {U : SearchUniverse sig} {O : Type} {B : Nat}
-    (st : ResolvedState U O B) : Type :=
-  Finset (Fin st.depth)
 
 /-! ### Search keys -/
 
