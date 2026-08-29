@@ -316,9 +316,195 @@ def LocalBatchSource.exactKeys
       | .here => n.exactKey
       | .there x => rest.exactKeys.keyAt x⟩
 
+/-! ### Recursive occurrence exactness -/
+
+mutual
+
+def LocalNegSource.Exact
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {N : Neg sig.nBases}
+    {n : SNegNeu Γ N} : LocalNegSource R T D E n → Prop
+  | .var _ => True
+  | .fst n | .snd n => n.Exact
+  | .app n p => n.Exact ∧ p.Exact
+termination_by structural s => s
+
+def LocalPosSource.Exact
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {P : Pos sig.nBases}
+    {p : SPosNeu Γ P} : LocalPosSource R T D E p → Prop
+  | .atom _ => True
+  | .inl p | .inr p => p.Exact
+  | .shift t => t.Exact
+termination_by structural s => s
+
+def LocalInvSource.Exact
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig} {ps : Pending sig}
+    {G : Goal sig.nBases} {E : CodeOriginAssignment R Δ (Old.append New)}
+    {pending : CodePendingAssignment R Δ ps} {t : SInv Old New ps G} :
+    LocalInvSource R T D E pending t → Prop
+  | .caseSum _ _ _ _ left right => left.Exact ∧ right.Exact
+  | .abort => True
+  | .storeAtom child | .storeShift child => child.Exact
+  | .unit => True
+  | .pair left right => left.Exact ∧ right.Exact
+  | .lam _ body => body.Exact
+  | .satShift s | .satPos s => s.Exact
+termination_by structural s => s
+
+def LocalSatSource.Exact
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig}
+    {E : CodeOriginAssignment R Δ (Old.append New)} {P : Pos sig.nBases}
+    {sat : Sat Old New P} : LocalSatSource R T D E sat → Prop
+  | .inconsistent z => z.Exact
+  | .done p => p.Exact
+  | .batch obsSource keys _ _ _ _ bodySource =>
+      obsSource.Exact ∧ bodySource.Exact ∧
+        ∀ {Q} (x : PendingVar _ Q),
+          keys.keyAt x = obsSource.exactKeys.keyAt x
+termination_by structural s => s
+
+def LocalBatchSource.Exact
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {selected : Pending sig}
+    {obs : NonemptyBatchObs Γ selected} : LocalBatchSource R T D E obs → Prop
+  | .one n => n.Exact
+  | .cons n rest => n.Exact ∧ rest.Exact
+termination_by structural s => s
+
+end
+
+/-- The occurrence-local data retained when an exact saturated source is a
+literal batch.  This dependent record is the later layer's existential view;
+it preserves the exact batch, its address proof, and its owned extension. -/
+structure LocalExactBatchView (R : AliasResolver sig)
+    {Δ : Ctx sig} (T : ExactTraceAt R) (D : BoundOrigins R Δ)
+    {Γ : StableCtx sig} (E : CodeOriginAssignment R Δ Γ)
+    {selected : Pending sig} {P : Pos sig.nBases}
+    (obs : NonemptyBatchObs Γ selected)
+    (body : SInv Γ .empty selected (.pos P)) where
+  obsSource : LocalBatchSource R T D E obs
+  obsExact : obsSource.Exact
+  keys : BatchExactKeys R selected
+  batch : LocalExactBatch R obs keys
+  addr : LocalAddr
+  addressed : batch.Addressed addr
+  extension : batch.Extension T
+  bodySource : LocalInvSource R (Old := Γ) (New := .empty) extension.next
+    (D.pushPending extension.results.resolved)
+    (E.rename (Pending.weakenCodeBase selected Δ))
+    (CodePendingAssignment.boundBatch extension.results Δ) body
+  bodyExact : bodySource.Exact
+  keys_eq : ∀ {Q} (x : PendingVar selected Q),
+    keys.keyAt x = obsSource.exactKeys.keyAt x
+
+def LocalSatSource.Exact.toBatchView
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig}
+    {E : CodeOriginAssignment R Δ (Old.append New)}
+    {selected : Pending sig} {P : Pos sig.nBases}
+    {obs : NonemptyBatchObs (Old.append New) selected}
+    {body : SInv (Old.append New) .empty selected (.pos P)}
+    {source : LocalSatSource R T D E (.batch obs body)}
+    (h : source.Exact) : LocalExactBatchView R T D E obs body :=
+  match source with
+  | .batch obsSource keys B addr addressed X bodySource =>
+      ⟨obsSource, h.1, keys, B, addr, addressed, X, bodySource, h.2.1, h.2.2⟩
+
+/-! ### Fresh values with exact occurrence sources -/
+
+structure SourcedFreshSNeg (R : AliasResolver sig)
+    {Δ : Ctx sig} (T : ExactTraceAt R) (D : BoundOrigins R Δ)
+    {Γ : StableCtx sig} (E : CodeOriginAssignment R Δ Γ)
+    {N : Neg sig.nBases} (fresh : FreshSNeg Γ N) where
+  source : LocalNegSource R T D E fresh.neutral
+  exact : source.Exact
+
+structure SourcedFreshSPos (R : AliasResolver sig)
+    {Δ : Ctx sig} (T : ExactTraceAt R) (D : BoundOrigins R Δ)
+    {Γ : StableCtx sig} (E : CodeOriginAssignment R Δ Γ)
+    {P : Pos sig.nBases} (fresh : FreshSPos Γ P) where
+  source : LocalPosSource R T D E fresh.neutral
+  exact : source.Exact
+
+structure SourcedFreshSInv (R : AliasResolver sig)
+    {Δ : Ctx sig} (T : ExactTraceAt R) (D : BoundOrigins R Δ)
+    {Old New : StableCtx sig} {ps : Pending sig} {G : Goal sig.nBases}
+    (E : CodeOriginAssignment R Δ (Old.append New))
+    (pending : CodePendingAssignment R Δ ps)
+    (fresh : FreshSInv Old New ps G) where
+  source : LocalInvSource R T D E pending fresh.proof
+  exact : source.Exact
+
+structure SourcedFreshSat (R : AliasResolver sig)
+    {Δ : Ctx sig} (T : ExactTraceAt R) (D : BoundOrigins R Δ)
+    {Old New : StableCtx sig} (E : CodeOriginAssignment R Δ (Old.append New))
+    {P : Pos sig.nBases} (fresh : FreshSat Old New P) where
+  source : LocalSatSource R T D E fresh.proof
+  exact : source.Exact
+
+def SourcedFreshSNeg.forget
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {N : Neg sig.nBases}
+    {fresh : FreshSNeg Γ N} (_ : SourcedFreshSNeg R T D E fresh) : FreshSNeg Γ N :=
+  fresh
+
+def SourcedFreshSPos.forget
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {P : Pos sig.nBases}
+    {fresh : FreshSPos Γ P} (_ : SourcedFreshSPos R T D E fresh) : FreshSPos Γ P :=
+  fresh
+
+def SourcedFreshSInv.forget
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig} {ps : Pending sig}
+    {G : Goal sig.nBases} {E : CodeOriginAssignment R Δ (Old.append New)}
+    {pending : CodePendingAssignment R Δ ps} {fresh : FreshSInv Old New ps G}
+    (_ : SourcedFreshSInv R T D E pending fresh) : FreshSInv Old New ps G := fresh
+
+def SourcedFreshSat.forget
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig}
+    {E : CodeOriginAssignment R Δ (Old.append New)} {P : Pos sig.nBases}
+    {fresh : FreshSat Old New P} (_ : SourcedFreshSat R T D E fresh) :
+    FreshSat Old New P := fresh
+
+@[simp] theorem SourcedFreshSNeg.forget_eq (s : SourcedFreshSNeg R T D E fresh) :
+    s.forget = fresh := rfl
+
+@[simp] theorem SourcedFreshSPos.forget_eq (s : SourcedFreshSPos R T D E fresh) :
+    s.forget = fresh := rfl
+
+@[simp] theorem SourcedFreshSInv.forget_eq
+    (s : SourcedFreshSInv R T D E pending fresh) : s.forget = fresh := rfl
+
+@[simp] theorem SourcedFreshSat.forget_eq (s : SourcedFreshSat R T D E fresh) :
+    s.forget = fresh := rfl
+
 /-! ### Boundary fixtures -/
 
 namespace LocalSourceTreeFixtures
+
+theorem exact_free_negative
+    {R : AliasResolver sig} (T : ExactTraceAt R)
+    (E : OriginAssignment R Γ) {N : Neg sig.nBases}
+    (x : StableVar Γ (.neg N)) :
+    (LocalNegSource.var (T := T) (D := BoundOrigins.empty R)
+      (E := CodeOriginAssignment.ofOrigin E) x).Exact := trivial
+
+theorem exact_free_atom
+    {R : AliasResolver sig} (T : ExactTraceAt R)
+    (E : OriginAssignment R Γ) {q : Fin sig.nBases}
+    (x : StableVar Γ (.atom q)) :
+    (LocalPosSource.atom (T := T) (D := BoundOrigins.empty R)
+      (E := CodeOriginAssignment.ofOrigin E) x).Exact := trivial
 
 theorem free_atom_terminal_coding
     {R : AliasResolver sig} {Δ Ξ : Ctx sig} {T : ExactTraceAt R}
@@ -384,6 +570,30 @@ theorem lambda_uses_bound_local_code
         (CodePendingAssignment.cons (.bound .here)
           (cp.rename (Rename.weaken (A := A.erase))))) := rfl
 
+theorem exact_store_atom
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig} {q : Fin sig.nBases}
+    {ps : Pending sig} {G : Goal sig.nBases}
+    {E : CodeOriginAssignment R Δ (Old.append New)}
+    {pending : CodePendingAssignment R Δ (.cons (.atom q) ps)}
+    {t : SInv Old (New.snoc (.atom q)) ps G}
+    (child : LocalInvSource R (Old := Old) (New := New.snoc (.atom q)) T D
+      (E.snoc (S := .atom q) (pending.ref .here)) pending.tail t)
+    (h : child.Exact) : (LocalInvSource.storeAtom child).Exact := h
+
+theorem exact_lambda
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig} {A : Pos sig.nBases}
+    {B : Neg sig.nBases} {E : CodeOriginAssignment R Δ (Old.append New)}
+    {pending : CodePendingAssignment R Δ .empty}
+    {body : SInv Old New (.cons A .empty) (.neg B)}
+    (source : ResolvedRef R A.erase)
+    (bodySource : LocalInvSource R T (D.snoc source)
+      (E.rename (Rename.weaken (A := A.erase)))
+      (CodePendingAssignment.cons (.bound .here)
+        (pending.rename (Rename.weaken (A := A.erase)))) body)
+    (h : bodySource.Exact) : (LocalInvSource.lam source bodySource).Exact := h
+
 theorem case_children_keep_separate_fork_traces
     {R : AliasResolver sig} {T : ExactTraceAt R} {A B : Object sig.nBases}
     {parent : ResolvedRef R (.coprod A B)} (fork : SplitFork T parent) :
@@ -408,6 +618,92 @@ theorem two_batch_code_preserves_order_and_duplicates
     (C : CodeOriginAssignment R Ξ Γ) :
     (LocalBatchSource.cons source (LocalBatchSource.one source)).toStructuralCode C =
       .cons (source.toStructuralCode C) (.one (source.toStructuralCode C)) := rfl
+
+theorem exact_one_literal_batch
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {Q : Pos sig.nBases}
+    {n : SNegNeu Γ (.shift Q)} (source : LocalNegSource R T D E n)
+    (h : source.Exact) : (LocalBatchSource.one source).Exact := h
+
+theorem exact_two_literal_batch
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {Q : Pos sig.nBases}
+    {n : SNegNeu Γ (.shift Q)} (source : LocalNegSource R T D E n)
+    (h : source.Exact) :
+    (LocalBatchSource.cons source (LocalBatchSource.one source)).Exact := ⟨h, h⟩
+
+theorem exact_one_two_literal_key_equality
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {Q : Pos sig.nBases}
+    {n : SNegNeu Γ (.shift Q)} (source : LocalNegSource R T D E n) :
+    (LocalBatchSource.one source).exactKeys.keyAt .here = source.exactKey ∧
+      (LocalBatchSource.cons source (LocalBatchSource.one source)).exactKeys.keyAt .here =
+        source.exactKey ∧
+      (LocalBatchSource.cons source (LocalBatchSource.one source)).exactKeys.keyAt
+          (.there .here) = source.exactKey :=
+  ⟨rfl, rfl, rfl⟩
+
+def nested_batch_exact_view
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Γ : StableCtx sig}
+    {E : CodeOriginAssignment R Δ Γ} {selected : Pending sig}
+    {P : Pos sig.nBases} {obs : NonemptyBatchObs Γ selected}
+    {body : SInv Γ .empty selected (.pos P)}
+    (obsSource : LocalBatchSource R T D E obs) (hobs : obsSource.Exact)
+    (keys : BatchExactKeys R selected) (B : LocalExactBatch R obs keys)
+    (addr : LocalAddr) (addressed : B.Addressed addr) (X : B.Extension T)
+    (bodySource : LocalInvSource R (Old := Γ) (New := .empty) X.next
+      (D.pushPending X.results.resolved)
+      (E.rename (Pending.weakenCodeBase selected Δ))
+      (CodePendingAssignment.boundBatch X.results Δ) body)
+    (hbody : bodySource.Exact)
+    (hkeys : ∀ {Q} (x : PendingVar selected Q),
+      keys.keyAt x = obsSource.exactKeys.keyAt x) :
+    LocalExactBatchView R T D E obs body := by
+  let source : LocalSatSource R (Old := Γ) (New := .empty) T D E
+      (.batch obs body) :=
+    .batch obsSource keys B addr addressed X bodySource
+  have hexact : source.Exact := by
+    change obsSource.Exact ∧ bodySource.Exact ∧ _
+    exact ⟨hobs, hbody, hkeys⟩
+  exact hexact.toBatchView
+
+theorem sourced_fresh_forget_is_original
+    (s : SourcedFreshSat R T D E fresh) : s.forget = fresh := rfl
+
+theorem no_sourcedFreshSat_of_invalid
+    {R : AliasResolver sig} {Δ : Ctx sig} {T : ExactTraceAt R}
+    {D : BoundOrigins R Δ} {Old New : StableCtx sig}
+    {E : CodeOriginAssignment R Δ (Old.append New)} {P : Pos sig.nBases}
+    {sat : Sat Old New P} (hbad : sat.freshValid = false) :
+    ¬ ∃ (fresh : FreshSat Old New P), fresh.proof = sat ∧
+      Nonempty (SourcedFreshSat R T D E fresh) := by
+  rintro ⟨fresh, hproof, _⟩
+  have hvalid := fresh.valid
+  rw [hproof, hbad] at hvalid
+  exact Bool.noConfusion hvalid
+
+abbrev InvalidOld : StableCtx Fixtures.sig0 :=
+  StableCtx.snoc .empty (.neg (.shift .zero))
+
+abbrev InvalidNew : StableCtx Fixtures.sig0 :=
+  StableCtx.snoc .empty
+    (.neg (.arr (.shift (.shift (.shift .one))) (.shift .zero)))
+
+/-- The regression uses only equality of the underlying fresh proof, not
+proof irrelevance for either freshness or exactness certificates. -/
+theorem recursively_invalid_nested_freshness_cannot_be_packaged
+    {R : AliasResolver Fixtures.sig0} {Δ : Ctx Fixtures.sig0}
+    {T : ExactTraceAt R} {D : BoundOrigins R Δ}
+    {E : CodeOriginAssignment R Δ (InvalidOld.append InvalidNew)} :
+    ¬ ∃ (fresh : FreshSat InvalidOld InvalidNew (.shift .one)),
+      fresh.proof = FreshnessFixtures.usesNew_but_nested_oldOnly_invalid ∧
+        Nonempty (SourcedFreshSat R T D E fresh) :=
+  no_sourcedFreshSat_of_invalid
+    FreshnessFixtures.usesNew_but_nested_oldOnly_invalid_freshValid_false
 
 /-- Even when an application argument contains a literal nested batch, its
 exact key is built from that occurrence's extension and never from a global
