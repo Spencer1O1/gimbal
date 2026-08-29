@@ -60,6 +60,7 @@ import Gimbal.Equality.Scherer.SplitFrame
 import Gimbal.Equality.Scherer.SearchLocalFoundation
 import Gimbal.Equality.Scherer.LocalSaturatedEval
 import Gimbal.Equality.Scherer.LiveSupport
+import Gimbal.Equality.Scherer.DataObj
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
 import Gimbal.Equality.Scherer.SearchNormalQueryOracle
