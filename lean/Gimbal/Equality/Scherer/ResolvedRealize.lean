@@ -176,6 +176,15 @@ theorem SplitRealizes.resetRound {U : SearchUniverse sig} {O : Type} {B : Nat}
     simp only [ResolvedState.resetRound]
     simpa [StableCtx.append_empty] using h.realizes.length_eq.symm
 
+/-- Resetting the round does not change the realized context or environment. -/
+theorem CtxRealizes.resetRound {U : SearchUniverse sig} {O : Type} {B : Nat}
+    {st : ResolvedState U O B} {Γ : StableCtx sig}
+    {env : ResolvedEnv Γ O} (h : CtxRealizes st Γ env) :
+    CtxRealizes st.resetRound Γ env where
+  length_eq := h.length_eq
+  ty_eq := h.ty_eq
+  dep_eq := h.dep_eq
+
 private theorem typeAtLevel_snoc_last (Γ : StableCtx sig) (S : StableTy sig.nBases) :
     (Γ.snoc S).typeAtLevel (Fin.last Γ.length) = S := by
   simp [StableCtx.typeAtLevel, Fin.val_last]
@@ -191,7 +200,8 @@ private theorem level_eqRec {Γ : StableCtx sig} {S S' : StableTy sig.nBases}
     StableVar.level (e ▸ x) = StableVar.level x := by
   cases e; rfl
 
-private theorem push_realizes {U : SearchUniverse sig} {O : Type} {B : Nat}
+/-- Extend a realized intrinsic context by one bounded resolved-state binder. -/
+theorem CtxRealizes.push {U : SearchUniverse sig} {O : Type} {B : Nat}
     {st : ResolvedState U O B} {Γ : StableCtx sig} {env : ResolvedEnv Γ O}
     (hR : CtxRealizes st Γ env) (hd : st.depth < B) (S : UStable U)
     (K : DepSupport O) :
@@ -251,7 +261,7 @@ theorem SplitRealizes.pushLexical {U : SearchUniverse sig} {O : Type} {B : Nat}
       (ResolvedEnv.extend (S := S.val) env ∅) where
   realizes := by
     simpa [ResolvedState.pushLexical, StableCtx.append_snoc] using
-      push_realizes h.realizes hd S ∅
+      CtxRealizes.push h.realizes hd S ∅
   round := by
     simp only [ResolvedState.pushLexical, ResolvedState.push_roundStart, h.round]
 
@@ -264,7 +274,7 @@ theorem SplitRealizes.pushResolved {U : SearchUniverse sig} {O : Type} {B : Nat}
       (ResolvedEnv.extend (S := S.val) env K) where
   realizes := by
     simpa [ResolvedState.pushResolved, StableCtx.append_snoc] using
-      push_realizes h.realizes hd S K
+      CtxRealizes.push h.realizes hd S K
   round := by
     simp only [ResolvedState.pushResolved, ResolvedState.push_roundStart, h.round]
 

@@ -255,14 +255,6 @@ theorem rawVals_liftRaw {st : ResolvedState U O B} {Γ : StableCtx sig}
   ext n
   simp [toLevel]
 
-/-- Resetting the round preserves the realized context and environment. -/
-theorem resetRound {st : ResolvedState U O B} {Γ : StableCtx sig}
-    {env : ResolvedEnv Γ O} (h : CtxRealizes st Γ env) :
-    CtxRealizes st.resetRound Γ env where
-  length_eq := h.length_eq
-  ty_eq := h.ty_eq
-  dep_eq := h.dep_eq
-
 /-- `resetRound` does not change the interpretation of raw levels. -/
 theorem liftRaw_resetRound {st : ResolvedState U O B} {Γ : StableCtx sig}
     {env : ResolvedEnv Γ O} (h : CtxRealizes st Γ env)

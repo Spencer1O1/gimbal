@@ -160,6 +160,18 @@ theorem push_new_current (st : ResolvedState U O B) (h : st.depth < B)
   simp only [push, Fin.val_last]
   exact st.round_le
 
+/-- Pushing preserves current-round membership of every pre-existing level. -/
+theorem push_old_current_iff (st : ResolvedState U O B) (h : st.depth < B)
+    (S : UStable U) (K : DepSupport O) (i : Fin st.depth) :
+    i.castSucc ∈ (st.push h S K).currentRaw ↔ i ∈ st.currentRaw := by
+  constructor
+  · intro hi
+    have hi' := (Finset.mem_filter.mp hi).2
+    exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, by simpa [push] using hi'⟩
+  · intro hi
+    have hi' := (Finset.mem_filter.mp hi).2
+    exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, by simpa [push] using hi'⟩
+
 @[simp] theorem pushLexical_new_support_empty (st : ResolvedState U O B)
     (h : st.depth < B) (S : UStable U) :
     (st.pushLexical h S).depAt (Fin.last st.depth) = ∅ :=
@@ -393,6 +405,8 @@ namespace StrongAt
 variable {U : SearchUniverse sig} {O : Type} {B : Nat}
   {st : ResolvedState U O B}
 
+/-! ### Introduction rules -/
+
 theorem of_negVar {N} (i : Fin st.depth)
     (hty : (st.tyAt i).val = .neg N) :
     StrongAt st (.shift N) (st.depAt i) :=
@@ -425,6 +439,71 @@ theorem distinct_supports {P : Pos sig.nBases} {K₁ K₂ : DepSupport O}
   rcases h₁ with ⟨⟨sp₁, hsl₁⟩⟩
   rcases h₂ with ⟨⟨sp₂, hsl₂⟩⟩
   exact ⟨sp₁, sp₂, hsl₁, hsl₂, by simp [hsl₁, hsl₂, hne]⟩
+
+/-! ### Executable exact-support retrieval -/
+
+/--
+Executable decision for exact-support strong retrieval.  This belongs with
+`StrongAt`, rather than the provisional saturation-policy layer: consistency
+search needs the decision without importing any forest or policy definitions.
+-/
+def decideB [DecidableEq O] (st : ResolvedState U O B) :
+    Pos sig.nBases → DepSupport O → Bool
+  | .shift N, K =>
+      decide (∃ i : Fin st.depth,
+        (st.tyAt i).val = .neg N ∧ st.depAt i = K)
+  | .atom q, K =>
+      decide (∃ i : Fin st.depth,
+        (st.tyAt i).val = .atom q ∧ st.depAt i = K)
+  | .sum A B, K => decideB st A K || decideB st B K
+  | .zero, _ => false
+
+theorem decideB_of_strong [DecidableEq O] (st : ResolvedState U O B)
+    {P : Pos sig.nBases} {K : DepSupport O} (h : StrongAt st P K) :
+    decideB st P K = true := by
+  rcases h with ⟨⟨sp, hsl⟩⟩
+  induction sp generalizing K with
+  | atomVar i hty => subst hsl; exact decide_eq_true ⟨i, hty, rfl⟩
+  | negVar i hty => subst hsl; exact decide_eq_true ⟨i, hty, rfl⟩
+  | inl sp ih => simp only [decideB, Bool.or_eq_true]; exact Or.inl (ih hsl)
+  | inr sp ih => simp only [decideB, Bool.or_eq_true]; exact Or.inr (ih hsl)
+
+theorem strong_of_decideB [DecidableEq O] (st : ResolvedState U O B) :
+    ∀ (P : Pos sig.nBases) (K : DepSupport O),
+      decideB st P K = true → StrongAt st P K
+  | .atom q, K, h => by
+      obtain ⟨i, hty, hdep⟩ := of_decide_eq_true h
+      exact (of_atomVar i hty).exact hdep
+  | .zero, _, h => by cases h
+  | .sum A B, K, h => by
+      simp only [decideB, Bool.or_eq_true] at h
+      cases h with
+      | inl hA => exact of_inl (strong_of_decideB st A K hA)
+      | inr hB => exact of_inr (strong_of_decideB st B K hB)
+  | .shift N, K, h => by
+      obtain ⟨i, hty, hdep⟩ := of_decide_eq_true h
+      exact (of_negVar i hty).exact hdep
+
+theorem decideB_iff [DecidableEq O] (st : ResolvedState U O B)
+    (P : Pos sig.nBases) (K : DepSupport O) :
+    decideB st P K = true ↔ StrongAt st P K :=
+  ⟨strong_of_decideB st P K, decideB_of_strong st⟩
+
+@[simp] theorem decideB_zero [DecidableEq O]
+    (st : ResolvedState U O B) (K : DepSupport O) :
+    decideB st (.zero : Pos sig.nBases) K = false :=
+  rfl
+
+theorem not_zero [DecidableEq O]
+    (st : ResolvedState U O B) (K : DepSupport O) :
+    ¬ StrongAt st (.zero : Pos sig.nBases) K := by
+  rw [← decideB_iff]
+  exact Bool.false_ne_true
+
+instance [DecidableEq O] (st : ResolvedState U O B)
+    (P : Pos sig.nBases) (K : DepSupport O) :
+    Decidable (StrongAt st P K) :=
+  decidable_of_iff _ (decideB_iff st P K)
 
 end StrongAt
 

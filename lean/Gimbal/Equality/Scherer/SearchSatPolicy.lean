@@ -21,67 +21,6 @@ namespace Gimbal.Equality.Scherer
 
 variable {sig : Signature}
 
-/-! ### Executable exact-support strong retrieval -/
-
-namespace StrongAt
-
-variable {U : SearchUniverse sig} {O : Type} {B : Nat} [DecidableEq O]
-
-def decideB (st : ResolvedState U O B) : Pos sig.nBases → DepSupport O → Bool
-  | .shift N, K =>
-      decide (∃ i : Fin st.depth,
-        (st.tyAt i).val = .neg N ∧ st.depAt i = K)
-  | .atom q, K =>
-      decide (∃ i : Fin st.depth,
-        (st.tyAt i).val = .atom q ∧ st.depAt i = K)
-  | .sum A B, K => decideB st A K || decideB st B K
-  | .zero, _ => false
-
-theorem decideB_of_strong (st : ResolvedState U O B) {P : Pos sig.nBases}
-    {K : DepSupport O} (h : StrongAt st P K) : decideB st P K = true := by
-  rcases h with ⟨⟨sp, hsl⟩⟩
-  induction sp generalizing K with
-  | atomVar i hty => subst hsl; exact decide_eq_true ⟨i, hty, rfl⟩
-  | negVar i hty => subst hsl; exact decide_eq_true ⟨i, hty, rfl⟩
-  | inl sp ih => simp only [decideB, Bool.or_eq_true]; exact Or.inl (ih hsl)
-  | inr sp ih => simp only [decideB, Bool.or_eq_true]; exact Or.inr (ih hsl)
-
-theorem strong_of_decideB (st : ResolvedState U O B) :
-    ∀ (P : Pos sig.nBases) (K : DepSupport O),
-      decideB st P K = true → StrongAt st P K
-  | .atom q, K, h => by
-      obtain ⟨i, hty, hdep⟩ := of_decide_eq_true h
-      exact (of_atomVar i hty).exact hdep
-  | .zero, _, h => by cases h
-  | .sum A B, K, h => by
-      simp only [decideB, Bool.or_eq_true] at h
-      cases h with
-      | inl hA => exact of_inl (strong_of_decideB st A K hA)
-      | inr hB => exact of_inr (strong_of_decideB st B K hB)
-  | .shift N, K, h => by
-      obtain ⟨i, hty, hdep⟩ := of_decide_eq_true h
-      exact (of_negVar i hty).exact hdep
-
-theorem decideB_iff (st : ResolvedState U O B) (P : Pos sig.nBases)
-    (K : DepSupport O) :
-    decideB st P K = true ↔ StrongAt st P K :=
-  ⟨strong_of_decideB st P K, decideB_of_strong st⟩
-
-@[simp] theorem decideB_zero (st : ResolvedState U O B) (K : DepSupport O) :
-    decideB st (.zero : Pos sig.nBases) K = false :=
-  rfl
-
-theorem not_zero (st : ResolvedState U O B) (K : DepSupport O) :
-    ¬ StrongAt st (.zero : Pos sig.nBases) K := by
-  rw [← decideB_iff]
-  exact Bool.false_ne_true
-
-instance (st : ResolvedState U O B) (P : Pos sig.nBases) (K : DepSupport O) :
-    Decidable (StrongAt st P K) :=
-  decidable_of_iff _ (decideB_iff st P K)
-
-end StrongAt
-
 /-! ### Saturated parents -/
 
 variable {U : SearchUniverse sig} {O : Type} {B L : Nat}
