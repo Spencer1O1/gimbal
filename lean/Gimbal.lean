@@ -76,6 +76,7 @@ import Gimbal.Equality.Scherer.OrdinaryCutProto
 import Gimbal.Equality.Scherer.OrdinaryCutPreserve
 import Gimbal.Equality.Scherer.FocusRoot
 import Gimbal.Equality.Scherer.FocusOpenPreserve
+import Gimbal.Equality.Scherer.FocusRootPreserve
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
