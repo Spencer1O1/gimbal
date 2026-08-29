@@ -301,7 +301,7 @@ decreasing_by
     (t.rename ρ).nodeSize = t.nodeSize :=
   renameSizeEval (.inv ρ t)
 
-private def composeShiftSized
+def composeShiftSized
     {P : Pos sig.nBases}
     (bound : Nat)
     (bind : ∀ {Γ : StableCtx sig} {qs : Pending sig} {G : Goal sig.nBases},
@@ -326,7 +326,7 @@ private def composeShiftSized
       .focusShift (.letShift n (bind d h k.pendingShiftToPos))
 
 /-- Every recursive principal-cut action, indexed by its result type. -/
-private inductive CutCall (sig : Signature) : Type 1 where
+inductive CutCall (sig : Signature) : Type 1 where
   | bind {Γ : StableCtx sig} {qs : Pending sig} {P : Pos sig.nBases}
       {G : Goal sig.nBases} (d : Inv Γ qs (.pos P))
       (k : Inv Γ (.cons P .empty) G)
@@ -342,7 +342,7 @@ private inductive CutCall (sig : Signature) : Type 1 where
       {G : Goal sig.nBases}
       (t : Inv (Γ.snoc (.neg Cut)) ps G) (v : Inv Γ .empty (.neg Cut))
 
-private def CutCall.Result : CutCall sig → Type
+def CutCall.Result : CutCall sig → Type
   | .bind (Γ := Γ) (qs := qs) (G := G) _ _ => Inv Γ qs G
   | .appValue (Γ := Γ) (N := N) _ _ => Inv Γ .empty (.neg N)
   | .neu (Γ := Γ) (Cut := Cut) (N := N) _ _ => NegSubstResult Γ Cut N
@@ -350,18 +350,18 @@ private def CutCall.Result : CutCall sig → Type
   | .foc (Γ := Γ) (P := P) _ _ => Inv Γ .empty (.pos P)
   | .inv (Γ := Γ) (ps := ps) (G := G) _ _ => Inv Γ ps G
 
-private def CutCall.rank : CutCall sig → Nat
+def CutCall.rank : CutCall sig → Nat
   | .bind (P := P) _ _ => posCutSize P
   | .appValue (A := A) (N := N) _ _ => negCutSize (.arr A N)
   | .neu (Cut := Cut) _ _ | .pos (Cut := Cut) _ _ |
       .foc (Cut := Cut) _ _ | .inv (Cut := Cut) _ _ => negCutSize Cut
 
-private def CutCall.phase : CutCall sig → Nat
+def CutCall.phase : CutCall sig → Nat
   | .neu .. | .pos .. | .foc .. | .inv .. => 2
   | .appValue .. => 1
   | .bind .. => 0
 
-private def CutCall.sourceSize : CutCall sig → Nat
+def CutCall.sourceSize : CutCall sig → Nat
   | .bind d _ => d.nodeSize
   | .appValue f _ => f.nodeSize
   | .neu n _ => n.nodeSize
@@ -369,10 +369,10 @@ private def CutCall.sourceSize : CutCall sig → Nat
   | .foc f _ => f.nodeSize
   | .inv t _ => t.nodeSize
 
-private def CutCall.rankPhase (c : CutCall sig) : Nat :=
+def CutCall.rankPhase (c : CutCall sig) : Nat :=
   3 * c.rank + c.phase
 
-private def cutEval : (c : CutCall sig) → c.Result
+def cutEval : (c : CutCall sig) → c.Result
   | .neu n v =>
       match n with
       | .var .here => .value v (Nat.le_refl _)
