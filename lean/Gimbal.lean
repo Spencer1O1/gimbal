@@ -78,6 +78,7 @@ import Gimbal.Equality.Scherer.PairRealize
 import Gimbal.Equality.Scherer.PairTraceExtension
 import Gimbal.Equality.Scherer.OccurrenceExact
 import Gimbal.Equality.Scherer.LocalSourceTree
+import Gimbal.Equality.Scherer.LocalSourcedEval
 import Gimbal.Equality.Scherer.OriginLedger
 import Gimbal.Equality.Scherer.PairCode
 import Gimbal.Equality.Scherer.PairMismatch
