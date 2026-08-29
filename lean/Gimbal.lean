@@ -60,6 +60,7 @@ import Gimbal.Equality.Scherer.ConsistencyScope
 import Gimbal.Equality.Scherer.ConsistencySplitScope
 import Gimbal.Equality.Scherer.ConsistencyDeriv
 import Gimbal.Equality.Scherer.PairTrace
+import Gimbal.Equality.Scherer.PairOrigin
 import Gimbal.Equality.Scherer.PairedSelected
 import Gimbal.Equality.Scherer.ConsistencyTransport
 import Gimbal.Equality.Scherer.OrdinaryCutProto
