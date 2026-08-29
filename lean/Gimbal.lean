@@ -50,6 +50,7 @@ import Gimbal.Equality.Scherer.SearchForestExec
 import Gimbal.Equality.Scherer.SaturatedResolved
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
+import Gimbal.Equality.Scherer.FrameContraction
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
