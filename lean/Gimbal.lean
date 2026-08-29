@@ -69,6 +69,7 @@ import Gimbal.Equality.Scherer.ConsistencyTransport
 import Gimbal.Equality.Scherer.ConsistencySpliceBoundary
 import Gimbal.Equality.Scherer.OrdinaryCutProto
 import Gimbal.Equality.Scherer.OrdinaryCutPreserve
+import Gimbal.Equality.Scherer.FocusRoot
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
 import Gimbal.Equality.Focus
