@@ -59,6 +59,7 @@ import Gimbal.Equality.Scherer.ConsistencyQuery
 import Gimbal.Equality.Scherer.ConsistencyScope
 import Gimbal.Equality.Scherer.ConsistencyDeriv
 import Gimbal.Equality.Scherer.PairTrace
+import Gimbal.Equality.Scherer.PairedSelected
 import Gimbal.Equality.Scherer.ConsistencyTransport
 import Gimbal.Equality.Scherer.OrdinaryCutProto
 import Gimbal.Equality.Focused
