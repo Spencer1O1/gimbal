@@ -51,6 +51,7 @@ import Gimbal.Equality.Scherer.SearchLoopElim
 import Gimbal.Equality.Scherer.SearchForestRun
 import Gimbal.Equality.Scherer.SearchForestExec
 import Gimbal.Equality.Scherer.SaturatedResolved
+import Gimbal.Equality.Scherer.TypeSelectionSpec
 import Gimbal.Equality.Scherer.SaturatedRenameFacts
 import Gimbal.Equality.Scherer.SearchNormalQuery
 import Gimbal.Equality.Scherer.SearchNormalQueryOracle
