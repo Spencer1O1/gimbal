@@ -276,57 +276,178 @@ inductive EvalEdge where
 
 abbrev EvalAddr := List EvalEdge
 
-/-- Local recursion names source sites; the caller supplies their resolved identities. -/
-structure PendingFlow (R : AliasResolver sig) where
-  lambdaSource : EvalAddr → (P : Pos sig.nBases) → ResolvedRef R P.erase
-  splitLeftSource : EvalAddr → {A B : Pos sig.nBases} →
-    ResolvedRef R (Pos.sum A B).erase → ResolvedRef R A.erase
-  splitRightSource : EvalAddr → {A B : Pos sig.nBases} →
-    ResolvedRef R (Pos.sum A B).erase → ResolvedRef R B.erase
+/-- One scheduled sum split.  The two payloads are chosen together and are
+strictly newer than the common resolved parent. -/
+structure SplitChoice (R : AliasResolver sig) {A B : Pos sig.nBases}
+    (parent : ResolvedRef R (Pos.sum A B).erase) where
+  leftOrigin : TypedOrigin sig A.erase
+  rightOrigin : TypedOrigin sig B.erase
+  leftRank : parent.origin.raw.introRank < leftOrigin.raw.introRank
+  rightRank : parent.origin.raw.introRank < rightOrigin.raw.introRank
+
+namespace SplitChoice
+
+def leftRef {A B : Pos sig.nBases}
+    {parent : ResolvedRef R (Pos.sum A B).erase}
+    (c : SplitChoice R parent) : ResolvedRef R A.erase :=
+  ResolvedRef.of R c.leftOrigin
+
+def rightRef {A B : Pos sig.nBases}
+    {parent : ResolvedRef R (Pos.sum A B).erase}
+    (c : SplitChoice R parent) : ResolvedRef R B.erase :=
+  ResolvedRef.of R c.rightOrigin
+
+theorem parent_before_left {A B : Pos sig.nBases}
+    {parent : ResolvedRef R (Pos.sum A B).erase}
+    (c : SplitChoice R parent) :
+    parent.origin.raw.introRank < c.leftOrigin.raw.introRank := c.leftRank
+
+theorem parent_before_right {A B : Pos sig.nBases}
+    {parent : ResolvedRef R (Pos.sum A B).erase}
+    (c : SplitChoice R parent) :
+    parent.origin.raw.introRank < c.rightOrigin.raw.introRank := c.rightRank
+
+end SplitChoice
+
+/--
+A finite-address, partial source schedule.  Every lookup is list-valued: an
+absent entry prunes the local branch, and repeated entries remain repeated.
+One split lookup returns both payloads, so sibling branches cannot silently
+choose incompatible sources.
+-/
+structure FinitePendingFlow (U : SearchUniverse sig) (R : AliasResolver sig) where
+  addresses : Finset EvalAddr
+  lambdaSources : EvalAddr → (P : UPos U) → List (ResolvedRef R P.1.erase)
+  splitChoices : EvalAddr → (A B : UPos U) →
+    (parent : ResolvedRef R (Pos.sum A.1 B.1).erase) →
+      List (SplitChoice R parent)
+  lambda_outside : ∀ {addr}, addr ∉ addresses → ∀ P, lambdaSources addr P = []
+  split_outside : ∀ {addr}, addr ∉ addresses → ∀ A B parent,
+    splitChoices addr A B parent = []
+
+namespace FinitePendingFlow
+
+def empty (U : SearchUniverse sig) (R : AliasResolver sig) :
+    FinitePendingFlow U R where
+  addresses := ∅
+  lambdaSources := fun _ _ => []
+  splitChoices := fun _ _ _ _ => []
+  lambda_outside := by simp
+  split_outside := by simp
+
+theorem lambdaSources_eq_nil_of_not_mem (flow : FinitePendingFlow U R)
+    {addr : EvalAddr} (haddr : addr ∉ flow.addresses) (P : UPos U) :
+    flow.lambdaSources addr P = [] :=
+  flow.lambda_outside haddr P
+
+theorem splitChoices_eq_nil_of_not_mem (flow : FinitePendingFlow U R)
+    {addr : EvalAddr} (haddr : addr ∉ flow.addresses) (A B : UPos U)
+    (parent : ResolvedRef R (Pos.sum A.1 B.1).erase) :
+    flow.splitChoices addr A B parent = [] :=
+  flow.split_outside haddr A B parent
+
+/-- Paired callers sharing one scheduler perform literally identical lookups. -/
+theorem lambda_lookup_shared (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (P : UPos U) :
+    flow.lambdaSources addr P = flow.lambdaSources addr P := rfl
+
+/-- Paired callers sharing one scheduler also share the whole split choice. -/
+theorem split_lookup_shared (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (A B : UPos U)
+    (parent : ResolvedRef R (Pos.sum A.1 B.1).erase) :
+    flow.splitChoices addr A B parent = flow.splitChoices addr A B parent := rfl
+
+end FinitePendingFlow
 
 namespace PendingInput
 
 def tail (I : PendingInput U R O (c :: rest)) : PendingInput U R O rest :=
   ⟨I.sources.dropHead⟩
 
-def sumLeft (flow : PendingFlow R) (addr : EvalAddr) (hA : A ∈ U.pos)
-    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    PendingInput U R O (⟨⟨A, hA⟩, K⟩ :: rest) :=
-  ⟨PendingAssignment.cons (flow.splitLeftSource addr (I.sources.ref .here))
-    I.sources.dropHead⟩
+def splitInputs (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (I.sources.ref .here)) :
+    PendingInput U R O (⟨⟨A, hA⟩, K⟩ :: rest) ×
+      PendingInput U R O (⟨⟨B, hB⟩, K⟩ :: rest) :=
+  (⟨PendingAssignment.cons choice.leftRef I.sources.dropHead⟩,
+    ⟨PendingAssignment.cons choice.rightRef I.sources.dropHead⟩)
 
-def sumRight (flow : PendingFlow R) (addr : EvalAddr) (hB : B ∈ U.pos)
+def splitChoices (flow : FinitePendingFlow U R) (addr : EvalAddr)
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
     (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    PendingInput U R O (⟨⟨B, hB⟩, K⟩ :: rest) :=
-  ⟨PendingAssignment.cons (flow.splitRightSource addr (I.sources.ref .here))
-    I.sources.dropHead⟩
+    List (PendingInput U R O (⟨⟨A, hA⟩, K⟩ :: rest) ×
+      PendingInput U R O (⟨⟨B, hB⟩, K⟩ :: rest)) :=
+  (flow.splitChoices addr ⟨A, hA⟩ ⟨B, hB⟩ (I.sources.ref .here)).map
+    (I.splitInputs hA hB)
 
-def lambda (flow : PendingFlow R) (addr : EvalAddr) (P : UPos U) :
+def lambdaInput {P : UPos U} (source : ResolvedRef R P.1.erase) :
     PendingInput U R O (ResolvedPending.lambdaPending P) :=
-  ⟨PendingAssignment.cons (flow.lambdaSource addr P.1) (PendingAssignment.empty R)⟩
+  ⟨PendingAssignment.cons source (PendingAssignment.empty R)⟩
 
-@[simp] theorem sumLeft_tail (flow : PendingFlow R) (addr : EvalAddr)
-    (hA : A ∈ U.pos)
+def lambdaChoices (flow : FinitePendingFlow U R) (addr : EvalAddr) (P : UPos U) :
+    List (PendingInput U R O (ResolvedPending.lambdaPending P)) :=
+  (flow.lambdaSources addr P).map lambdaInput
+
+theorem mem_lambdaChoices_iff (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (P : UPos U)
+    (input : PendingInput U R O (ResolvedPending.lambdaPending P)) :
+    input ∈ lambdaChoices (O := O) flow addr P ↔
+      ∃ source ∈ flow.lambdaSources addr P,
+        lambdaInput (U := U) (O := O) source = input := by
+  simp [lambdaChoices]
+
+theorem mem_splitChoices_iff (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (inputs : PendingInput U R O (⟨⟨A, hA⟩, K⟩ :: rest) ×
+      PendingInput U R O (⟨⟨B, hB⟩, K⟩ :: rest)) :
+    inputs ∈ I.splitChoices flow addr hA hB ↔
+      ∃ choice ∈ flow.splitChoices addr ⟨A, hA⟩ ⟨B, hB⟩
+          (I.sources.ref .here),
+        I.splitInputs hA hB choice = inputs := by
+  simp [splitChoices]
+
+@[simp] theorem splitInputs_left_tail
+    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (I.sources.ref .here)) :
+    (I.splitInputs hA hB choice).1.sources.dropHead = I.sources.dropHead := rfl
+
+@[simp] theorem splitInputs_right_tail
+    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (I.sources.ref .here)) :
+    (I.splitInputs hA hB choice).2.sources.dropHead = I.sources.dropHead := rfl
+
+@[simp] theorem splitInputs_left_support
+    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (I.sources.ref .here)) :
+    (I.splitInputs hA hB choice).1.deps.toList = K :: I.tail.deps.toList := rfl
+
+@[simp] theorem splitInputs_right_support
+    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (I.sources.ref .here)) :
+    (I.splitInputs hA hB choice).2.deps.toList = K :: I.tail.deps.toList := rfl
+
+@[simp] theorem lambdaInput_support {P : UPos U}
+    (source : ResolvedRef R P.1.erase) :
+    (lambdaInput (U := U) (O := O) source).deps.toList = [∅] := rfl
+
+@[simp] theorem lambdaChoices_length (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (P : UPos U) :
+    (lambdaChoices (O := O) flow addr P).length =
+      (flow.lambdaSources addr P).length := by
+  simp [lambdaChoices]
+
+@[simp] theorem splitChoices_length (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (hA : A ∈ U.pos) (hB : B ∈ U.pos)
     (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    (I.sumLeft flow addr hA).sources.dropHead = I.sources.dropHead := rfl
-
-@[simp] theorem sumRight_tail (flow : PendingFlow R) (addr : EvalAddr)
-    (hB : B ∈ U.pos)
-    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    (I.sumRight flow addr hB).sources.dropHead = I.sources.dropHead := rfl
-
-@[simp] theorem sumLeft_support (flow : PendingFlow R) (addr : EvalAddr)
-    (hA : A ∈ U.pos)
-    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    (I.sumLeft flow addr hA).deps.toList = K :: I.tail.deps.toList := rfl
-
-@[simp] theorem sumRight_support (flow : PendingFlow R) (addr : EvalAddr)
-    (hB : B ∈ U.pos)
-    (I : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    (I.sumRight flow addr hB).deps.toList = K :: I.tail.deps.toList := rfl
-
-@[simp] theorem lambda_support (flow : PendingFlow R) (addr : EvalAddr) (P : UPos U) :
-    (lambda (O := O) flow addr P).deps.toList = [∅] := rfl
+    (I.splitChoices flow addr hA hB).length =
+      (flow.splitChoices addr ⟨A, hA⟩ ⟨B, hB⟩
+        (I.sources.ref .here)).length := by
+  simp [splitChoices]
 
 end PendingInput
 
@@ -405,13 +526,58 @@ abbrev SatCallback (U : SearchUniverse sig) (R : AliasResolver sig) (O : Type)
 
 structure Control (U : SearchUniverse sig) (R : AliasResolver sig) (O : Type)
     (Base : Ctx2 U.toTypeUniverse) where
-  flow : PendingFlow R
+  flow : FinitePendingFlow U R
   saturate : SatCallback U R O Base
 
 namespace SearchLocalFoundationFixtures
 
 theorem case_addresses_distinct :
     ([.caseLeft] : EvalAddr) ≠ [.caseRight] := by decide
+
+theorem empty_flow_has_no_lambda_source (U : SearchUniverse sig)
+    (R : AliasResolver sig) (addr : EvalAddr) (P : UPos U) :
+    (FinitePendingFlow.empty U R).lambdaSources addr P = [] := rfl
+
+theorem empty_flow_has_no_split_choice (U : SearchUniverse sig)
+    (R : AliasResolver sig) (addr : EvalAddr) (A B : UPos U)
+    (parent : ResolvedRef R (Pos.sum A.1 B.1).erase) :
+    (FinitePendingFlow.empty U R).splitChoices addr A B parent = [] := rfl
+
+theorem two_lambda_sources_preserve_order (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (P : UPos U) (left right : ResolvedRef R P.1.erase)
+    (h : flow.lambdaSources addr P = [left, right]) :
+    PendingInput.lambdaChoices (O := O) flow addr P =
+      [PendingInput.lambdaInput (U := U) (O := O) left,
+        PendingInput.lambdaInput (U := U) (O := O) right] := by
+  simp [PendingInput.lambdaChoices, h]
+
+theorem duplicate_lambda_source_preserved (flow : FinitePendingFlow U R)
+    (addr : EvalAddr) (P : UPos U) (source : ResolvedRef R P.1.erase)
+    (h : flow.lambdaSources addr P = [source, source]) :
+    (PendingInput.lambdaChoices (O := O) flow addr P).length = 2 := by
+  simp [h]
+
+theorem shared_split_supplies_both_siblings
+    (input : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (hA : A ∈ U.pos) (hB : B ∈ U.pos)
+    (choice : SplitChoice R (input.sources.ref .here)) :
+    (input.splitInputs hA hB choice).1.sources.ref .here = choice.leftRef ∧
+      (input.splitInputs hA hB choice).2.sources.ref .here = choice.rightRef := by
+  exact ⟨rfl, rfl⟩
+
+theorem shared_split_has_strict_ranks
+    {parent : ResolvedRef R (Pos.sum A B).erase}
+    (choice : SplitChoice R parent) :
+    parent.origin.raw.introRank < choice.leftOrigin.raw.introRank ∧
+      parent.origin.raw.introRank < choice.rightOrigin.raw.introRank :=
+  ⟨choice.parent_before_left, choice.parent_before_right⟩
+
+theorem paired_calls_have_identical_source_lookups
+    (flow : FinitePendingFlow U R) (addr : EvalAddr) (P : UPos U)
+    (A B : UPos U) (parent : ResolvedRef R (Pos.sum A.1 B.1).erase) :
+    flow.lambdaSources addr P = flow.lambdaSources addr P ∧
+      flow.splitChoices addr A B parent = flow.splitChoices addr A B parent :=
+  ⟨flow.lambda_lookup_shared addr P, flow.split_lookup_shared addr A B parent⟩
 
 theorem reset_uses_after_as_base (f : SplitFrame U R O Old New) :
     (Segment.ofReset f).frame.before = f.after := (Segment.ofReset f).before_eq

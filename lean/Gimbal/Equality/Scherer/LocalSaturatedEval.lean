@@ -150,14 +150,14 @@ def runSInv {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
       (G : Goal sig.nBases) → G.InUniverse U →
       Results (FreshSInv Old New resolved.erase G)
   | _, _, seg, ⟨⟨.sum A B, hSum⟩, K⟩ :: rest, input, G, hG =>
-      (runSInv closed ctl (.caseLeft :: addr) seg
-        (⟨⟨A, closed.sum_left hSum⟩, K⟩ :: rest)
-        (input.sumLeft ctl.flow (.caseLeft :: addr) (closed.sum_left hSum)) G hG).flatMap
-        (fun l =>
-          (runSInv closed ctl (.caseRight :: addr) seg
-            (⟨⟨B, closed.sum_right hSum⟩, K⟩ :: rest)
-            (input.sumRight ctl.flow (.caseRight :: addr) (closed.sum_right hSum)) G hG).map
-            (FreshSInv.caseSum l))
+      (input.splitChoices ctl.flow addr (closed.sum_left hSum)
+        (closed.sum_right hSum)).flatMap (fun inputs =>
+          (runSInv closed ctl (.caseLeft :: addr) seg
+            (⟨⟨A, closed.sum_left hSum⟩, K⟩ :: rest) inputs.1 G hG).flatMap
+            (fun l =>
+              (runSInv closed ctl (.caseRight :: addr) seg
+                (⟨⟨B, closed.sum_right hSum⟩, K⟩ :: rest) inputs.2 G hG).map
+                (FreshSInv.caseSum l)))
   | _, _, _, ⟨⟨.zero, _⟩, _⟩ :: _, _, _, _ => [FreshSInv.abort]
   | _, _, seg, ⟨⟨.atom q, hq⟩, K⟩ :: rest, input, G, hG =>
       (runSInv closed ctl (.storeTail :: addr)
@@ -174,10 +174,11 @@ def runSInv {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
           (runSInv closed ctl (.pairRight :: addr) seg [] input (.neg B)
             (closed.prod_right hProd)).map (FreshSInv.pair l))
   | _, _, seg, [], _, .neg (.arr A B), hArr =>
-      (runSInv closed ctl (.lamBody :: addr) seg
-        (ResolvedPending.lambdaPending ⟨A, closed.arr_dom hArr⟩)
-        (PendingInput.lambda ctl.flow (.lamBody :: addr) ⟨A, closed.arr_dom hArr⟩)
-        (.neg B) (closed.arr_cod hArr)).map FreshSInv.lam
+      (PendingInput.lambdaChoices (O := O) ctl.flow (.lamBody :: addr)
+        ⟨A, closed.arr_dom hArr⟩).flatMap (fun input =>
+          (runSInv closed ctl (.lamBody :: addr) seg
+            (ResolvedPending.lambdaPending ⟨A, closed.arr_dom hArr⟩)
+            input (.neg B) (closed.arr_cod hArr)).map FreshSInv.lam)
   | _, _, seg, [], _, .neg (.shift P), hShift =>
       (ctl.saturate (.satShift :: addr) seg ⟨P, closed.neg_shift hShift⟩).map
         FreshSInv.satShift
@@ -301,27 +302,87 @@ theorem empty_lam {U : SearchUniverse sig} {R : AliasResolver sig}
     (seg : Segment U.toTypeUniverse R O Base Old New)
     (input : PendingInput U R O []) (hArr : Neg.arr A B ∈ U.neg) :
     runSInv closed ctl addr seg [] input (.neg (.arr A B)) hArr =
-      (runSInv closed ctl (.lamBody :: addr) seg
-        (ResolvedPending.lambdaPending ⟨A, closed.arr_dom hArr⟩)
-        (PendingInput.lambda ctl.flow (.lamBody :: addr)
-          ⟨A, closed.arr_dom hArr⟩)
-        (.neg B) (closed.arr_cod hArr)).map FreshSInv.lam := by simp [runSInv]
+      (PendingInput.lambdaChoices (O := O) ctl.flow (.lamBody :: addr)
+        ⟨A, closed.arr_dom hArr⟩).flatMap (fun bodyInput =>
+          (runSInv closed ctl (.lamBody :: addr) seg
+            (ResolvedPending.lambdaPending ⟨A, closed.arr_dom hArr⟩)
+            bodyInput (.neg B) (closed.arr_cod hArr)).map FreshSInv.lam) := by
+  simp [runSInv]
 
 theorem pending_sum_addresses :
     ([EvalEdge.caseLeft] : EvalAddr) ≠ [.caseRight] := by decide
 
 theorem pending_sum_preserves_tail_and_separates_sites
     {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
-    (flow : PendingFlow R) (addr : EvalAddr)
+    (addr : EvalAddr)
     (hSum : Pos.sum A B ∈ U.pos) (hA : A ∈ U.pos) (hB : B ∈ U.pos)
     (K : DepSupport O) (rest : ResolvedPending U O)
-    (input : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)) :
-    (input.sumLeft flow (.caseLeft :: addr) hA).sources.dropHead =
+    (input : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (choice : SplitChoice R (input.sources.ref .here)) :
+    (input.splitInputs hA hB choice).1.sources.dropHead =
         input.sources.dropHead ∧
-      (input.sumRight flow (.caseRight :: addr) hB).sources.dropHead =
+      (input.splitInputs hA hB choice).2.sources.dropHead =
         input.sources.dropHead ∧
       (.caseLeft :: addr : EvalAddr) ≠ .caseRight :: addr := by
   exact ⟨rfl, rfl, by simp⟩
+
+theorem missing_lambda_source_prunes
+    {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
+    {Base : Ctx2 U.toTypeUniverse} (closed : U.StructurallyClosed)
+    (ctl : Control U R O Base) (addr : EvalAddr)
+    (seg : Segment U.toTypeUniverse R O Base Old New)
+    (input : PendingInput U R O []) (hArr : Neg.arr A B ∈ U.neg)
+    (hmissing : ctl.flow.lambdaSources (.lamBody :: addr)
+      ⟨A, closed.arr_dom hArr⟩ = []) :
+    runSInv closed ctl addr seg [] input (.neg (.arr A B)) hArr = [] := by
+  simp [runSInv, PendingInput.lambdaChoices, hmissing]
+
+theorem two_lambda_sources_give_two_results
+    {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
+    {Base : Ctx2 U.toTypeUniverse} (closed : U.StructurallyClosed)
+    (ctl : Control U R O Base) (addr : EvalAddr)
+    (seg : Segment U.toTypeUniverse R O Base Old New)
+    (input : PendingInput U R O []) (hArr : Neg.arr .zero B ∈ U.neg)
+    (left right : ResolvedRef R Pos.zero.erase)
+    (hsources : ctl.flow.lambdaSources (.lamBody :: addr)
+      ⟨.zero, closed.arr_dom hArr⟩ = [left, right]) :
+    runSInv closed ctl addr seg [] input (.neg (.arr .zero B)) hArr =
+      [FreshSInv.lam FreshSInv.abort, FreshSInv.lam FreshSInv.abort] := by
+  simp [runSInv, PendingInput.lambdaChoices, hsources,
+    PendingInput.lambdaInput, ResolvedPending.lambdaPending]
+
+theorem missing_split_choice_prunes
+    {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
+    {Base : Ctx2 U.toTypeUniverse} (closed : U.StructurallyClosed)
+    (ctl : Control U R O Base) (addr : EvalAddr)
+    (seg : Segment U.toTypeUniverse R O Base Old New)
+    (hSum : Pos.sum A B ∈ U.pos) (K : DepSupport O)
+    (rest : ResolvedPending U O)
+    (input : PendingInput U R O (⟨⟨.sum A B, hSum⟩, K⟩ :: rest))
+    (G : Goal sig.nBases) (hG : G.InUniverse U)
+    (hmissing : ctl.flow.splitChoices addr
+      ⟨A, closed.sum_left hSum⟩ ⟨B, closed.sum_right hSum⟩
+      (input.sources.ref .here) = []) :
+    runSInv closed ctl addr seg (⟨⟨.sum A B, hSum⟩, K⟩ :: rest)
+      input G hG = [] := by
+  simp [runSInv, PendingInput.splitChoices, hmissing]
+
+theorem one_shared_split_gives_both_siblings
+    {U : SearchUniverse sig} {R : AliasResolver sig} {O : Type}
+    {Base : Ctx2 U.toTypeUniverse} (closed : U.StructurallyClosed)
+    (ctl : Control U R O Base) (addr : EvalAddr)
+    (seg : Segment U.toTypeUniverse R O Base Old New)
+    (hSum : Pos.sum .zero .zero ∈ U.pos) (K : DepSupport O)
+    (rest : ResolvedPending U O)
+    (input : PendingInput U R O (⟨⟨.sum .zero .zero, hSum⟩, K⟩ :: rest))
+    (G : Goal sig.nBases) (hG : G.InUniverse U)
+    (choice : SplitChoice R (input.sources.ref .here))
+    (hchoice : ctl.flow.splitChoices addr
+      ⟨.zero, closed.sum_left hSum⟩ ⟨.zero, closed.sum_right hSum⟩
+      (input.sources.ref .here) = [choice]) :
+    runSInv closed ctl addr seg (⟨⟨.sum .zero .zero, hSum⟩, K⟩ :: rest)
+      input G hG = [FreshSInv.caseSum FreshSInv.abort FreshSInv.abort] := by
+  simp [runSInv, PendingInput.splitChoices, PendingInput.splitInputs, hchoice]
 
 theorem shifted_positive {U : SearchUniverse sig} {R : AliasResolver sig}
     {O : Type} {Base : Ctx2 U.toTypeUniverse} (closed : U.StructurallyClosed)
