@@ -14,6 +14,7 @@
 import Mathlib.Data.Finset.Powerset
 import Mathlib.Data.List.Nodup
 import Gimbal.Equality.Scherer.SearchForestExec
+import Gimbal.Equality.Scherer.SaturatedRenameFacts
 
 namespace Gimbal.Equality.Scherer
 
@@ -278,12 +279,6 @@ theorem contractedFrame_outer_exact (st : ResolvedState U O B)
 end ResolvedState
 
 /-! ### Normal queries and their explicit finite enumeration -/
-
-/-- Exact outer/current usage of the query result itself. -/
-structure UseSig where
-  usesOuter : Bool
-  usesCurrent : Bool
-  deriving DecidableEq, Repr
 
 /-- The canonical four result-usage signatures. -/
 def useSigEnum : CanonicalEnum UseSig where

@@ -208,8 +208,8 @@ end
 /-! ### Two-bit output provenance -/
 
 structure UseSig where
-  outer : Bool
-  current : Bool
+  usesOuter : Bool
+  usesCurrent : Bool
   deriving DecidableEq, Repr
 
 def SNegNeu.useSig {Γ : StableCtx sig} {N : Neg sig.nBases}
