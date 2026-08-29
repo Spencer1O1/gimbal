@@ -68,6 +68,7 @@ import Gimbal.Equality.Scherer.PairOrigin
 import Gimbal.Equality.Scherer.PairStructuralCode
 import Gimbal.Equality.Scherer.ExactObsKey
 import Gimbal.Equality.Scherer.ExactTrace
+import Gimbal.Equality.Scherer.PairRealize
 import Gimbal.Equality.Scherer.PairedSelected
 import Gimbal.Equality.Scherer.ConsistencyTransport
 import Gimbal.Equality.Scherer.ConsistencySpliceBoundary
