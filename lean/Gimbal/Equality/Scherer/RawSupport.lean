@@ -306,6 +306,7 @@ def NonemptyBatchObs.rawSupport {Γ : StableCtx sig} {ps : Pending sig} :
 
 def Sat.rawSupport {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → RawSupport (Old.append New)
+  | .inconsistent z => SNegNeu.rawSupport z
   | .done v => SPosNeu.rawSupport v
   | .batch obs body =>
       NonemptyBatchObs.rawSupport obs ∪
@@ -406,6 +407,8 @@ theorem Sat.uses_rawSupport {Old New : StableCtx sig} {P : Pos sig.nBases}
     ∀ (s : Sat Old New P),
       Sat.uses (RawSupport.maskOf K) s =
         RawSupport.hits (Sat.rawSupport s) K
+  | .inconsistent z => by
+      simpa [Sat.uses, Sat.rawSupport] using SNegNeu.uses_rawSupport K z
   | .done v => by
       simpa [Sat.uses, Sat.rawSupport] using SPosNeu.uses_rawSupport K v
   | .batch obs body => by
@@ -522,6 +525,19 @@ theorem shift_preserves_outer_rawSupport :
 theorem newLevels_empty_regression (Old : StableCtx sig0) :
     newLevels Old (.empty : StableCtx sig0) = ∅ :=
   newLevels_empty Old
+
+theorem inconsistent_old_rawSupport {P : Pos 0} :
+    (sat_inconsistent_old (P := P)).rawSupport =
+      ({⟨0, by decide⟩} : RawSupport
+        (StableCtx.snoc (.empty : StableCtx sig0) (.neg (.shift .zero)))) :=
+  rfl
+
+theorem inconsistent_new_rawSupport {P : Pos 0} :
+    (sat_inconsistent_new (P := P)).rawSupport =
+      ({⟨0, by decide⟩} : RawSupport
+        (StableCtx.append (.empty : StableCtx sig0)
+          (StableCtx.snoc .empty (.neg (.shift .zero))))) :=
+  rfl
 
 /--
 Two-entry batch: Old=`[↓0]`, New=`[↓0]`.

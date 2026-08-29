@@ -137,6 +137,8 @@ def NonemptyBatchObs.rename {Γ Δ : StableCtx sig} {selected : Pending sig}
 
 def Sat.rename {Old Old' New : StableCtx sig} {P : Pos sig.nBases}
     (ρ : StableRename Old Old') : Sat Old New P → Sat Old' New P
+  | .inconsistent z =>
+      .inconsistent (SNegNeu.rename (StableRename.keepLeft ρ New) z)
   | .done v => .done (SPosNeu.rename (StableRename.keepLeft ρ New) v)
   | .batch obs body =>
       .batch
@@ -185,6 +187,19 @@ theorem rename_id_letShift_eq : rename_id_letShift = foc_letShift := rfl
 def weaken_sat_done :
     Sat (sig := sig0) (StableCtx.snoc .empty (.neg .one)) .empty (.shift .one) :=
   Sat.rename (StableRename.weaken (S := .neg .one)) sat_done
+
+def weaken_sat_inconsistent_old {P : Pos 0} :
+    Sat (sig := sig0)
+      (StableCtx.snoc
+        (StableCtx.snoc .empty (.neg (.shift .zero))) (.neg .one))
+      .empty P :=
+  Sat.rename (StableRename.weaken (S := .neg .one))
+    (sat_inconsistent_old (P := P))
+
+theorem rename_id_sat_inconsistent_old {P : Pos 0} :
+    Sat.rename StableRename.id (sat_inconsistent_old (P := P)) =
+      sat_inconsistent_old :=
+  rfl
 
 def weaken_batch_one :
     SInv (sig := sig0)

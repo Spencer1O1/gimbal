@@ -1,8 +1,9 @@
 /-
   Scherer-core fixed-policy saturation plans.
 
-  Finite support-exact provisional `done` / `batch` plans for saturated search
-  keys. Arbitrary `SatPolicy` is not certified, sound, canonical, or complete.
+  Finite support-exact provisional `inconsistent` / `done` / `batch` plans for
+  saturated search keys. Arbitrary `SatPolicy` is not certified, sound,
+  canonical, or complete.
   No intrinsic Sat materialization, checked-empty claims, executable search,
   global visited sets, canonical selection, or S4.
 -/
@@ -66,6 +67,15 @@ theorem decideB_iff (st : ResolvedState U O B) (P : Pos sig.nBases)
     decideB st P K = true ↔ StrongAt st P K :=
   ⟨strong_of_decideB st P K, decideB_of_strong st⟩
 
+@[simp] theorem decideB_zero (st : ResolvedState U O B) (K : DepSupport O) :
+    decideB st (.zero : Pos sig.nBases) K = false :=
+  rfl
+
+theorem not_zero (st : ResolvedState U O B) (K : DepSupport O) :
+    ¬ StrongAt st (.zero : Pos sig.nBases) K := by
+  rw [← decideB_iff]
+  exact Bool.false_ne_true
+
 instance (st : ResolvedState U O B) (P : Pos sig.nBases) (K : DepSupport O) :
     Decidable (StrongAt st P K) :=
   decidable_of_iff _ (decideB_iff st P K)
@@ -109,6 +119,7 @@ def SaturatedKey.focus (k : SaturatedKey U O B L) : UPos U :=
 /-! ### Finite plan carriers -/
 
 inductive SatPlanData (U : SearchUniverse sig) (O : Type) (B L : Nat) where
+  | inconsistent : SearchKey U O B L → SatPlanData U O B L
   | done : SearchKey U O B L → SatPlanData U O B L
   | batch {n : Nat} (hn : n < L)
       (obs : Fin (n + 1) → SearchKey U O B L)
@@ -118,16 +129,18 @@ inductive SatPlanData (U : SearchUniverse sig) (O : Type) (B L : Nat) where
 namespace SatPlanData
 
 abbrev Code (U : SearchUniverse sig) (O : Type) (B L : Nat) : Type :=
-  SearchKey U O B L ⊕
+  SearchKey U O B L ⊕ SearchKey U O B L ⊕
     (Σ n : Fin L, (Fin (n.val + 1) → SearchKey U O B L) × SearchKey U O B L)
 
 def ofCode : Code U O B L → SatPlanData U O B L
-  | .inl child => .done child
-  | .inr ⟨n, obs, body⟩ => .batch n.isLt obs body
+  | .inl child => .inconsistent child
+  | .inr (.inl child) => .done child
+  | .inr (.inr ⟨n, obs, body⟩) => .batch n.isLt obs body
 
 def toCode : SatPlanData U O B L → Code U O B L
-  | .done child => .inl child
-  | .batch hn obs body => .inr ⟨⟨_, hn⟩, obs, body⟩
+  | .inconsistent child => .inl child
+  | .done child => .inr (.inl child)
+  | .batch hn obs body => .inr (.inr ⟨⟨_, hn⟩, obs, body⟩)
 
 @[simp] theorem ofCode_toCode (d : SatPlanData U O B L) : ofCode (toCode d) = d := by
   cases d <;> rfl
@@ -144,11 +157,15 @@ instance : Fintype (SatPlanData U O B L) :=
 instance : Finite (SatPlanData U O B L) := inferInstance
 
 def deps : SatPlanData U O B L → List (SearchKey U O B L)
+  | .inconsistent child => [child]
   | .done child => [child]
   | .batch _ obs body => List.ofFn obs ++ [body]
 
 @[simp] theorem deps_done (c : SearchKey U O B L) :
     (done c : SatPlanData U O B L).deps = [c] := rfl
+
+@[simp] theorem deps_inconsistent (c : SearchKey U O B L) :
+    (inconsistent c : SatPlanData U O B L).deps = [c] := rfl
 
 end SatPlanData
 
@@ -177,7 +194,8 @@ def obsValidB (parent obs : SearchKey U O B L) : Bool :=
       | .shift Q =>
           if hQ : Q ∈ U.pos then
             let obl : Obligation U O := ⟨⟨Q, hQ⟩, obs.depSupport⟩
-            decide (obs.state = parent.state) &&
+            decide (Q ≠ .zero) &&
+              decide (obs.state = parent.state) &&
               decide (obs.coverage = parent.coverage) &&
                 obs.usesCurrent &&
                   decide (obl ∉ parent.coverage) &&
@@ -243,11 +261,21 @@ def doneValidB (parent child : SearchKey U O B L) : Bool :=
   | .sat P, .sPos P' => decide (P = P') && sameSupports parent child
   | _, _ => false
 
+def inconsistentValidB (parent child : SearchKey U O B L) : Bool :=
+  match parent.judgment, child.judgment with
+  | .sat _, .sNeg N =>
+      decide (N.val = Neg.shift (.zero : Pos sig.nBases)) && sameSupports parent child
+  | _, _ => false
+
 def allObsValidB {n : Nat} (parent : SearchKey U O B L)
     (obs : Fin (n + 1) → SearchKey U O B L) : Bool :=
   decide (∀ i : Fin (n + 1), obsValidB parent (obs i) = true)
 
 def validB (parent : SearchKey U O B L) : SatPlanData U O B L → Bool
+  | .inconsistent child =>
+      match parent.judgment with
+      | .sat _ => inconsistentValidB parent child
+      | .sNeg _ | .sPos _ | .sInv _ _ => false
   | .done child =>
       match parent.judgment with
       | .sat _ => doneValidB parent child
@@ -447,6 +475,7 @@ theorem obsValidB_of_exact_candidate_support {parent obs : SearchKey U O B L}
     (hJudg : obs.judgment = .sNeg N)
     (hN : N.val = .shift Q)
     (hQ : Q ∈ U.pos)
+    (hQ0 : Q ≠ .zero)
     (hState : obs.state = parent.state)
     (hCov : obs.coverage = parent.coverage)
     (hUses : obs.usesCurrent = true)
@@ -458,12 +487,68 @@ theorem obsValidB_of_exact_candidate_support {parent obs : SearchKey U O B L}
     exact hNotStrong
   unfold obsValidB
   simp only [hJudg, hN, hQ, dite_true, hDep]
+  have hNz : decide (Q ≠ .zero) = true := decide_eq_true hQ0
   have hSt : decide (obs.state = parent.state) = true := decide_eq_true hState
   have hCv : decide (obs.coverage = parent.coverage) = true := decide_eq_true hCov
   have hOb : decide
       ((⟨⟨Q, hQ⟩, Knew⟩ : Obligation U O) ∉ parent.coverage) = true :=
     decide_eq_true hObl
-  simp only [hSt, hCv, hUses, hOb, hDec, Bool.not_false, Bool.and_self]
+  simp only [hNz, hSt, hCv, hUses, hOb, hDec, Bool.not_false, Bool.and_self]
+
+theorem obsValidB_result_ne_zero {parent obs : SearchKey U O B L}
+    (h : obsValidB parent obs = true) :
+    ∃ Q : Pos sig.nBases, Q ∈ U.pos ∧ Q ≠ .zero ∧
+      ∃ N : UNeg U, obs.judgment = .sNeg N ∧ N.val = .shift Q := by
+  cases hj : obs.judgment with
+  | sNeg N =>
+      cases hN : N.val with
+      | shift Q =>
+          if hQ : Q ∈ U.pos then
+            have hall := h
+            simp [obsValidB, hj, hN, hQ, Bool.and_eq_true,
+              decide_eq_true_eq] at hall
+            exact ⟨Q, hQ, hall.1.1.1.1.1, N, rfl, hN⟩
+          else
+            simp [obsValidB, hj, hN, hQ] at h
+      | one | prod _ _ | arr _ _ =>
+          simp [obsValidB, hj, hN] at h
+  | sPos _ | sInv _ _ | sat _ =>
+      simp [obsValidB, hj] at h
+
+theorem inconsistent_one_zero_dependency {parent child : SearchKey U O B L}
+    (hv : validB parent (.inconsistent child) = true) :
+    (SatPlanData.inconsistent child : SatPlanData U O B L).deps = [child] ∧
+      (∃ P : UPos U, parent.judgment = .sat P) ∧
+      (∃ N : UNeg U, child.judgment = .sNeg N ∧
+        N.val = .shift (.zero : Pos sig.nBases)) ∧
+      sameSupports parent child = true := by
+  cases hp : parent.judgment with
+  | sat P =>
+      cases hc : child.judgment with
+      | sNeg N =>
+          simp [validB, inconsistentValidB, hp, hc, Bool.and_eq_true] at hv
+          exact ⟨rfl, ⟨P, rfl⟩, ⟨N, rfl, hv.1⟩, hv.2⟩
+      | sPos _ | sInv _ _ | sat _ =>
+          simp [validB, inconsistentValidB, hp, hc] at hv
+  | sNeg _ | sPos _ | sInv _ _ =>
+      simp [validB, hp] at hv
+
+theorem zero_observation_rejected {parent obs : SearchKey U O B L}
+    {N : UNeg U}
+    (hJudg : obs.judgment = .sNeg N)
+    (hN : N.val = .shift (.zero : Pos sig.nBases)) :
+    obsValidB parent obs = false := by
+  simp [obsValidB, hJudg, hN]
+
+theorem inconsistent_same_frame {parent child : SearchKey U O B L}
+    (hv : validB parent (.inconsistent child) = true) :
+    child.state = parent.state ∧
+      child.coverage = parent.coverage ∧
+      rawVals child.rawSupport = rawVals parent.rawSupport ∧
+      child.depSupport = parent.depSupport := by
+  obtain ⟨_, _, _, hsame⟩ := inconsistent_one_zero_dependency hv
+  simp [sameSupports, Bool.and_eq_true, decide_eq_true_eq] at hsame
+  exact ⟨hsame.1.1.1, hsame.1.1.2, hsame.1.2, hsame.2⟩
 
 theorem batch_body_reset {n : Nat} {parent : SearchKey U O B L} {P : UPos U}
     {obs : Fin (n + 1) → SearchKey U O B L} {body : SearchKey U O B L}
@@ -529,11 +614,36 @@ theorem fixture_exact_strong_blocks :
         StrongAt.decideB st P0.val ({z} : DepSupport O2) = true :=
   fun _ h => SatPlanGates.exact_strong_blocks _ _ _ h
 
+theorem fixture_strong_zero_impossible (st : ResolvedState Uz O2 2)
+    (K : DepSupport O2) :
+    ¬ StrongAt st (.zero : Pos 0) K :=
+  StrongAt.not_zero st K
+
 theorem fixture_done_shape (parent child : SearchKey Uz O1 1 1)
     (hv : validB parent (.done child) = true) :
     (SatPlanData.done child : SatPlanData Uz O1 1 1).deps = [child] ∧
       ∃ P, parent.judgment = .sat P ∧ child.judgment = .sPos P :=
   SatPlanGates.done_one_positive_dependency (parent := parent) hv
+
+theorem fixture_inconsistent_shape (parent child : SearchKey Uz O1 1 1)
+    (hv : validB parent (.inconsistent child) = true) :
+    (SatPlanData.inconsistent child : SatPlanData Uz O1 1 1).deps = [child] ∧
+      (∃ P, parent.judgment = .sat P) ∧
+      (∃ N, child.judgment = .sNeg N ∧ N.val = .shift (.zero : Pos 0)) ∧
+      child.state = parent.state ∧
+      child.coverage = parent.coverage ∧
+      rawVals child.rawSupport = rawVals parent.rawSupport ∧
+      child.depSupport = parent.depSupport := by
+  obtain ⟨hdeps, hparent, hchild, _⟩ :=
+    SatPlanGates.inconsistent_one_zero_dependency hv
+  exact ⟨hdeps, hparent, hchild, SatPlanGates.inconsistent_same_frame hv⟩
+
+theorem fixture_no_zero_batch_observation {parent obs : SearchKey Uz O1 1 1}
+    {N : UNeg Uz}
+    (hJudg : obs.judgment = .sNeg N)
+    (hN : N.val = .shift (.zero : Pos 0)) :
+    obsValidB parent obs = false :=
+  SatPlanGates.zero_observation_rejected hJudg hN
 
 theorem fixture_no_fabricate {parent obs : SearchKey Uz O1 1 1}
     (h : obsValidB parent obs = true) :

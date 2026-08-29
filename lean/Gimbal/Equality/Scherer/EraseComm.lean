@@ -612,7 +612,7 @@ decreasing_by
       let heq : _ ≍ _ := by assumption
       cases heq)
     try simp only [NonemptyBatchObs.one.sizeOf_spec, NonemptyBatchObs.cons.sizeOf_spec,
-      Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
+      Sat.inconsistent.sizeOf_spec, Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
     omega
   )
 
@@ -640,7 +640,7 @@ decreasing_by
       let heq : _ ≍ _ := by assumption
       cases heq)
     try simp only [NonemptyBatchObs.one.sizeOf_spec, NonemptyBatchObs.cons.sizeOf_spec,
-      Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
+      Sat.inconsistent.sizeOf_spec, Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
     omega
   )
 
@@ -698,6 +698,10 @@ theorem Sat.erase_rename {Old Old' New : StableCtx sig} {P : Pos sig.nBases}
       Gimbal.Equality.rename
         (StableRename.erase (StableRename.keepLeft ρ New)) (Sat.erase s) :=
   match s with
+  | .inconsistent z => by
+      simp only [Sat.rename, Sat.erase, Gimbal.Equality.rename]
+      exact congrArg Tm.abort
+        (SNegNeu.erase_rename (StableRename.keepLeft ρ New) z)
   | .done v => by
       simp only [Sat.rename, Sat.erase]
       exact SPosNeu.erase_rename (StableRename.keepLeft ρ New) v
@@ -732,7 +736,7 @@ decreasing_by
       let heq : _ ≍ _ := by assumption
       cases heq)
     try simp only [NonemptyBatchObs.one.sizeOf_spec, NonemptyBatchObs.cons.sizeOf_spec,
-      Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
+      Sat.inconsistent.sizeOf_spec, Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
     omega
   )
 
@@ -891,7 +895,7 @@ decreasing_by
       let heq : _ ≍ _ := by assumption
       cases heq)
     try simp only [NonemptyBatchObs.one.sizeOf_spec, NonemptyBatchObs.cons.sizeOf_spec,
-      Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
+      Sat.inconsistent.sizeOf_spec, Sat.done.sizeOf_spec, Sat.batch.sizeOf_spec]
     omega
   )
 end

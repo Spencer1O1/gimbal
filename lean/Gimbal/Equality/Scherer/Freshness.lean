@@ -118,6 +118,7 @@ def NonemptyBatchObs.allUses {Γ : StableCtx sig} {ps : Pending sig}
 
 def Sat.uses {Old New : StableCtx sig} {P : Pos sig.nBases}
     (m : VarMask (Old.append New)) : Sat Old New P → Bool
+  | .inconsistent z => SNegNeu.uses m z
   | .done v => SPosNeu.uses m v
   | .batch obs body =>
       NonemptyBatchObs.anyUses m obs ||
@@ -170,6 +171,7 @@ def NonemptyBatchObs.allFreshValid {Γ : StableCtx sig} {ps : Pending sig} :
 
 def Sat.freshValid {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Bool
+  | .inconsistent z => SNegNeu.freshValid z
   | .done v => SPosNeu.freshValid v
   | .batch obs body =>
       NonemptyBatchObs.allUses (newMask Old New) obs &&
@@ -229,6 +231,7 @@ theorem NonemptyBatchObs.allUses_falseMask {Γ : StableCtx sig} {ps : Pending si
 theorem Sat.uses_falseMask {Old New : StableCtx sig} {P : Pos sig.nBases} :
     ∀ (s : Sat Old New P),
       Sat.uses (VarMask.falseMask (Old.append New)) s = false
+  | .inconsistent z => SNegNeu.uses_falseMask z
   | .done v => SPosNeu.uses_falseMask v
   | .batch obs body => by
       simp only [Sat.uses, NonemptyBatchObs.anyUses_falseMask obs, Bool.false_or]
@@ -444,6 +447,14 @@ theorem raw_oldOnly_batch_freshValid_false :
     raw_oldOnly_batch.freshValid = false := by
   native_decide
 
+theorem sat_inconsistent_old_freshValid {P : Pos 0} :
+    (sat_inconsistent_old (P := P)).freshValid = true :=
+  rfl
+
+theorem sat_inconsistent_new_freshValid {P : Pos 0} :
+    (sat_inconsistent_new (P := P)).freshValid = true :=
+  rfl
+
 /--
 Outer observation uses a New function head, so `allUses` holds, but a shifted
 application argument embeds an old-only nested batch. That nested batch fails
@@ -486,6 +497,20 @@ theorem usesNew_but_nested_oldOnly_invalid_allFreshValid_false :
 
 theorem usesNew_but_nested_oldOnly_invalid_freshValid_false :
     usesNew_but_nested_oldOnly_invalid.freshValid = false := by
+  native_decide
+
+/-- Inconsistency inherits recursive validity; it cannot hide a bad nested batch. -/
+def inconsistent_nested_invalid :
+    Sat (sig := sig0)
+      (StableCtx.snoc .empty (.neg (.shift .zero)))
+      (StableCtx.snoc .empty
+        (.neg (.arr (.shift (.shift (.shift .one))) (.shift .zero))))
+      (.shift .one) :=
+  match usesNew_but_nested_oldOnly_invalid_obs with
+  | .one z => .inconsistent z
+
+theorem inconsistent_nested_invalid_freshValid_false :
+    inconsistent_nested_invalid.freshValid = false := by
   native_decide
 
 /-- Selected packing of a New-side observation. -/

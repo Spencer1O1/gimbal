@@ -6,7 +6,8 @@
   * `Inv.focusShift` / `Inv.focusPos`
   * no `SFoc`, direct saturated focus, or generic `enterSat`
   * `SInv.satShift` / `SInv.satPos`
-  * `Sat.done` (empty selection; payload in `old ++ new`) and nonempty `Sat.batch`
+  * `Sat.inconsistent` (local zero neutral), `Sat.done` (empty selection;
+    payload in `old ++ new`), and nonempty `Sat.batch`
     of `SNegNeu (old++new) (.shift Q)`
   * batch body: `SInv (old++new) .empty selected (.pos P)`
   * `SPosNeu.shift` from `SInv Γ .empty .empty (.neg N)` only
@@ -127,6 +128,9 @@ retrievable without observations).
 under promoted old context, empty new, and all selected results as pending.
 -/
 inductive Sat : StableCtx sig → StableCtx sig → Pos sig.nBases → Type where
+  | inconsistent {Old New P} :
+      SNegNeu (Old.append New) (.shift .zero) →
+      Sat Old New P
   | done {Old New P} :
       SPosNeu (Old.append New) P →
       Sat Old New P
@@ -266,10 +270,15 @@ end SInv
 
 namespace Sat
 
+def asInconsistent {Old New : StableCtx sig} {P : Pos sig.nBases} :
+    Sat Old New P → Option (SNegNeu (Old.append New) (.shift .zero))
+  | .inconsistent z => some z
+  | .done _ | .batch _ _ => none
+
 def asDone {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Option (SPosNeu (Old.append New) P)
   | .done v => some v
-  | .batch _ _ => none
+  | .inconsistent _ | .batch _ _ => none
 
 def asBatch {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P →
@@ -277,7 +286,7 @@ def asBatch {Old New : StableCtx sig} {P : Pos sig.nBases} :
         NonemptyBatchObs (Old.append New) selected ×
         SInv (Old.append New) .empty selected (.pos P))
   | .batch obs body => some ⟨_, obs, body⟩
-  | .done _ => none
+  | .inconsistent _ | .done _ => none
 
 end Sat
 
@@ -366,6 +375,18 @@ def sat_done_atom_new :
       (.atom ⟨0, Nat.zero_lt_one⟩) :=
   .done (.atom .here)
 
+/-- Local inconsistency may use an old zero neutral even when `New` is empty. -/
+def sat_inconsistent_old {P : Pos 0} :
+    Sat (sig := sig0)
+      (StableCtx.snoc .empty (.neg (.shift .zero))) .empty P :=
+  .inconsistent (.var .here)
+
+/-- Local inconsistency may also use a zero neutral from `New`. -/
+def sat_inconsistent_new {P : Pos 0} :
+    Sat (sig := sig0) .empty
+      (StableCtx.snoc .empty (.neg (.shift .zero))) P :=
+  .inconsistent (.var .here)
+
 /-- No-observation saturation entered as a positive goal. -/
 def sinv_satPos_done :
     SInv (sig := sig0) .empty .empty .empty (.pos (.shift .one)) :=
@@ -397,6 +418,9 @@ theorem sat_done_invert :
 
 theorem sat_done_atom_new_invert :
     (Sat.asDone sat_done_atom_new).isSome = true := rfl
+
+theorem sat_inconsistent_old_invert {P : Pos 0} :
+    (Sat.asInconsistent (sat_inconsistent_old (P := P))).isSome = true := rfl
 
 theorem inv_focusShift_invert :
     Inv.asFocusShift inv_focusShift = foc_up_shift := rfl

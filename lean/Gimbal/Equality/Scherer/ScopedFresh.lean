@@ -43,6 +43,7 @@ is recursively scoped-fresh, and the body is scoped-fresh at
 -/
 def ScopedFreshSat {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Bool
+  | .inconsistent z => ScopedFreshNeg z
   | .done v => ScopedFreshPos v
   | .batch obs body =>
       NonemptyBatchObs.allHits (newLevels Old New) obs &&
@@ -111,6 +112,9 @@ theorem NonemptyBatchObs.allFreshValid_iff_scopedFresh {Γ : StableCtx sig}
 theorem Sat.freshValid_iff_scopedFresh {Old New : StableCtx sig}
     {P : Pos sig.nBases} :
     ∀ (s : Sat Old New P), Sat.freshValid s = ScopedFreshSat s
+  | .inconsistent z => by
+      simpa [Sat.freshValid, ScopedFreshSat] using
+        SNegNeu.freshValid_iff_scopedFresh z
   | .done v => by
       simpa [Sat.freshValid, ScopedFreshSat] using
         SPosNeu.freshValid_iff_scopedFresh v

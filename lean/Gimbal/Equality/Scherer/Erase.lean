@@ -154,6 +154,7 @@ def batchSubstLookup {Γ : StableCtx sig} {selected : Pending sig}
 
 def Sat.erase {Old New : StableCtx sig} {P : Pos sig.nBases} :
     Sat Old New P → Tm (Old.append New).erase P.erase
+  | .inconsistent z => .abort (SNegNeu.erase z)
   | .done v => SPosNeu.erase v
   | .batch obs body =>
       subst (fun {_} x => batchSubstLookup obs x) (SInv.erase body)
@@ -225,6 +226,20 @@ def erase_sat_done :
       (StableCtx.append (.empty : StableCtx sig0) .empty).erase
       (Pos.shift (.one : Neg sig0.nBases)).erase :=
   Sat.erase sat_done
+
+def erase_sat_inconsistent_old {P : Pos 0} :
+    Tm (sig := sig0)
+      (StableCtx.snoc (.empty : StableCtx sig0) (.neg (.shift .zero))).erase
+      P.erase :=
+  Sat.erase (sat_inconsistent_old (P := P))
+
+theorem erase_sat_inconsistent_old_eq {P : Pos 0} :
+    erase_sat_inconsistent_old (P := P) =
+      .abort (SNegNeu.erase
+        (.var (.here : StableVar
+          (StableCtx.snoc (.empty : StableCtx sig0) (.neg (.shift .zero)))
+          (.neg (.shift .zero))))) :=
+  rfl
 
 def erase_batch_one :
     Tm (sig := sig0)
