@@ -63,6 +63,7 @@ import Gimbal.Equality.Scherer.PairTrace
 import Gimbal.Equality.Scherer.PairOrigin
 import Gimbal.Equality.Scherer.PairedSelected
 import Gimbal.Equality.Scherer.ConsistencyTransport
+import Gimbal.Equality.Scherer.ConsistencySpliceBoundary
 import Gimbal.Equality.Scherer.OrdinaryCutProto
 import Gimbal.Equality.Focused
 import Gimbal.Equality.Hereditary
